@@ -1,4 +1,4 @@
-# MailMind v2
+# MailMind
 
 **Intelligent Enterprise Email Co-Pilot**
 
