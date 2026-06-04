@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import emails, triage, tasks
+
+from app.routers import emails, tasks, triage
 
 app = FastAPI(title="MailMind API")
 

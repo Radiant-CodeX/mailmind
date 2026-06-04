@@ -1,5 +1,5 @@
-import re
 import logging
+import re
 from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,10 @@ class PIISanitizer:
     def __init__(self):
         # Compiled regex patterns for fallback and supplementary use
         self.email_pattern = re.compile(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+')
-        self.phone_pattern = re.compile(r'\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}')
+        self.phone_pattern = re.compile(
+            r'\+?\d{1,4}?[-.\s]?\(?\d{1,3}?\)?[-.\s]?'
+            r'\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}'
+        )
         
         # Heuristics for common names in greetings and sign-offs in emails
         self.name_patterns = [
@@ -41,9 +44,15 @@ class PIISanitizer:
                 nlp_engine = provider.create_engine()
                 self.analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
                 self.use_presidio = True
-                logger.info("Microsoft Presidio Analyzer initialized successfully with en_core_web_sm.")
+                logger.info(
+                    "Microsoft Presidio Analyzer initialized successfully "
+                    "with en_core_web_sm."
+                )
             except Exception as e:
-                logger.warning(f"Failed to initialize Microsoft Presidio Analyzer engine: {e}. Falling back to Regex.")
+                logger.warning(
+                    f"Failed to initialize Microsoft Presidio Analyzer engine: {e}. "
+                    f"Falling back to Regex."
+                )
 
     def mask_text(self, text: str) -> Tuple[str, Dict[str, str]]:
         """
@@ -77,7 +86,10 @@ class PIISanitizer:
             # Email regex
             for match in self.email_pattern.finditer(text):
                 start, end = match.span()
-                if not any(d["start"] <= start < d["end"] or start <= d["start"] < end for d in detections):
+                if not any(
+                    d["start"] <= start < d["end"] or start <= d["start"] < end
+                    for d in detections
+                ):
                     detections.append({
                         "start": start,
                         "end": end,
@@ -89,7 +101,10 @@ class PIISanitizer:
                 phone_str = match.group(0).strip()
                 if len(phone_str) > 7:
                     start, end = match.span()
-                    if not any(d["start"] <= start < d["end"] or start <= d["start"] < end for d in detections):
+                    if not any(
+                        d["start"] <= start < d["end"] or start <= d["start"] < end
+                        for d in detections
+                    ):
                         detections.append({
                             "start": start,
                             "end": end,
@@ -100,10 +115,15 @@ class PIISanitizer:
             for name_regex in self.name_patterns:
                 for match in name_regex.finditer(text):
                     name_str = match.group(1)
-                    if name_str.lower() in ["there", "all", "everyone", "team", "yesterday", "tomorrow"]:
+                    if name_str.lower() in [
+                        "there", "all", "everyone", "team", "yesterday", "tomorrow"
+                    ]:
                         continue
                     start, end = match.span(1)
-                    if not any(d["start"] <= start < d["end"] or start <= d["start"] < end for d in detections):
+                    if not any(
+                        d["start"] <= start < d["end"] or start <= d["start"] < end
+                        for d in detections
+                    ):
                         detections.append({
                             "start": start,
                             "end": end,
@@ -134,7 +154,9 @@ class PIISanitizer:
                 if not local_type:
                     continue
 
-                if local_type == "NAME" and val.lower() in ["there", "all", "everyone", "team", "yesterday", "tomorrow"]:
+                if local_type == "NAME" and val.lower() in [
+                    "there", "all", "everyone", "team", "yesterday", "tomorrow"
+                ]:
                     continue
 
                 if val in val_to_placeholder:

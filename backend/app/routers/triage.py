@@ -1,8 +1,9 @@
 from fastapi import APIRouter, HTTPException
-from app.models import TriageScore, Draft
+
+from app.models import Draft, TriageScore
 from app.routers.emails import MOCK_EMAILS
-from app.services.pii import pii_sanitizer
 from app.services.llm import analyze_email_with_llm, generate_draft_with_llm
+from app.services.pii import pii_sanitizer
 
 router = APIRouter()
 

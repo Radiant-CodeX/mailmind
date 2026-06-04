@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
+
 from app.services.db import db
+
 
 def check_calendar_conflict(target_time_iso: str, duration_minutes: int = 60) -> dict:
     """
@@ -25,7 +27,10 @@ def check_calendar_conflict(target_time_iso: str, duration_minutes: int = 60) ->
                     "event_title": event["title"],
                     "start": event["start"],
                     "end": event["end"],
-                    "explanation": f"Conflict detected with '{event['title']}' ({e_start.strftime('%H:%M')} - {e_end.strftime('%H:%M')})"
+                    "explanation": (
+                        f"Conflict detected with '{event['title']}' "
+                        f"({e_start.strftime('%H:%M')} - {e_end.strftime('%H:%M')})"
+                    )
                 }
         except Exception:
             continue

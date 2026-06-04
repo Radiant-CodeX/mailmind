@@ -1,4 +1,5 @@
-from app.models import TriageScore, Draft
+from app.models import Draft, TriageScore
+
 
 def generate_mock_triage_score(email_id: str) -> TriageScore:
     if email_id == "1":
@@ -9,7 +10,10 @@ def generate_mock_triage_score(email_id: str) -> TriageScore:
             thread_age_decay=10,
             action_type=85,
             composite_score=83.5,
-            explanation="High priority due to approaching project deadline and sender is a key stakeholder."
+            explanation=(
+                "High priority due to approaching project deadline and sender "
+                "is a key stakeholder."
+            )
         )
     elif email_id == "2":
         return TriageScore(
@@ -36,7 +40,11 @@ def generate_mock_draft(email_id: str) -> Draft:
     if email_id == "1":
         return Draft(
             email_id=email_id,
-            draft_content="Hi Sarah,\n\nThanks for the update. I will have the final presentation ready by EOD tomorrow as requested.\n\nBest,\nMailMind User",
+            draft_content=(
+                "Hi Sarah,\n\nThanks for the update. "
+                "I will have the final presentation ready by EOD tomorrow as requested.\n\n"
+                "Best,\nMailMind User"
+            ),
             commitments_detected=["Deliver final presentation by EOD tomorrow"]
         )
     return Draft(

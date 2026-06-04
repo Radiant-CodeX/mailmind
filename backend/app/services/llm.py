@@ -1,8 +1,8 @@
 import json
 import logging
-from typing import List, Optional
-from app.models import TriageScore, Draft
+
 from app.config import settings
+from app.models import Draft, TriageScore
 
 logger = logging.getLogger("mailmind.llm")
 
@@ -39,10 +39,15 @@ def analyze_email_with_llm(email_id: str, body: str, sender: str, subject: str) 
         from app.services.mock_ai import generate_mock_triage_score
         return generate_mock_triage_score(email_id)
 
-    model_name = settings.AZURE_OPENAI_DEPLOYMENT if settings.OPENAI_API_TYPE == "azure" else "gpt-4o"
+    model_name = (
+        settings.AZURE_OPENAI_DEPLOYMENT
+        if settings.OPENAI_API_TYPE == "azure"
+        else "gpt-4o"
+    )
     
     prompt = f"""
-    You are the MailMind AI email triage copilot. Analyze the following email and output a priority evaluation.
+    You are the MailMind AI email triage copilot.
+    Analyze the following email and output a priority evaluation.
     
     Sender: {sender}
     Subject: {subject}
@@ -50,11 +55,15 @@ def analyze_email_with_llm(email_id: str, body: str, sender: str, subject: str) 
     {body}
     
     Rate the email on the following five axes (each from 0 to 100):
-    1. deadline_proximity: How urgent is the deadline? (0 = no deadline, 100 = immediate attention/today)
-    2. sender_authority: Is the sender a high-authority figure or key stakeholder? (0 = unknown/mailing list, 100 = CEO/critical client)
-    3. sentiment_urgency: Does the tone suggest a need for immediate action? (0 = informational/casual, 100 = angry/highly stressed/urgent request)
+    1. deadline_proximity: How urgent is the deadline?
+       (0 = no deadline, 100 = immediate attention/today)
+    2. sender_authority: Is the sender a high-authority figure or key stakeholder?
+       (0 = unknown/mailing list, 100 = CEO/critical client)
+    3. sentiment_urgency: Does the tone suggest a need for immediate action?
+       (0 = informational/casual, 100 = angry/highly stressed/urgent request)
     4. thread_age_decay: Decay factor based on thread age (0 = brand new, 100 = very stale/archived)
-    5. action_type: Type of action needed (0 = FYI/newsletter, 100 = critical task delegation/action item)
+    5. action_type: Type of action needed
+       (0 = FYI/newsletter, 100 = critical task delegation/action item)
     
     Calculate a composite_score (float between 0 and 100) which represents the overall priority.
     Provide a concise explanation (1-2 sentences) justifying the scores.
@@ -75,7 +84,10 @@ def analyze_email_with_llm(email_id: str, body: str, sender: str, subject: str) 
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "You are a precise enterprise email triage agent. Output only JSON."},
+                {
+                    "role": "system",
+                    "content": "You are a precise enterprise email triage agent. Output only JSON."
+                },
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
@@ -107,10 +119,16 @@ def generate_draft_with_llm(email_id: str, body: str, sender: str, subject: str)
         from app.services.mock_ai import generate_mock_draft
         return generate_mock_draft(email_id)
 
-    model_name = settings.AZURE_OPENAI_DEPLOYMENT if settings.OPENAI_API_TYPE == "azure" else "gpt-4o"
+    model_name = (
+        settings.AZURE_OPENAI_DEPLOYMENT
+        if settings.OPENAI_API_TYPE == "azure"
+        else "gpt-4o"
+    )
     
     prompt = f"""
-    You are the MailMind AI email drafting assistant. Draft a response to the following email and extract any commitments/tasks you (the recipient) are making.
+    You are the MailMind AI email drafting assistant.
+    Draft a response to the following email and extract any commitments/tasks
+    you (the recipient) are making.
     
     Email Sender: {sender}
     Email Subject: {subject}
@@ -119,7 +137,8 @@ def generate_draft_with_llm(email_id: str, body: str, sender: str, subject: str)
     
     Instructions:
     1. Write a professional, polite, and context-appropriate reply matching a professional Tone DNA.
-    2. Identify and list any commitments or tasks that the recipient is agreeing to or expected to perform (e.g., "deliver presentation by tomorrow EOD"). Keep each task brief.
+    2. Identify and list any commitments or tasks that the recipient is agreeing to or
+       expected to perform (e.g., "deliver presentation by tomorrow EOD"). Keep each task brief.
     
     Your response must be a single valid JSON object with the following structure:
     {{
@@ -132,7 +151,10 @@ def generate_draft_with_llm(email_id: str, body: str, sender: str, subject: str)
         response = client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": "You are a helpful AI email co-pilot. Output only JSON."},
+                {
+                    "role": "system",
+                    "content": "You are a helpful AI email co-pilot. Output only JSON."
+                },
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},

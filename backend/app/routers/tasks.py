@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException
-from typing import List
-from datetime import datetime, timedelta
 import uuid
+from datetime import datetime, timedelta
+from typing import List
+
+from fastapi import APIRouter, HTTPException
 
 from app.models import TaskCreate, TaskResponse
-from app.services.db import db
 from app.services.calendar_service import check_calendar_conflict
+from app.services.db import db
 
 router = APIRouter()
 
