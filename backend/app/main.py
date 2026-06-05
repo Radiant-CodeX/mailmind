@@ -2,18 +2,16 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.trace import TracerProvider
 
-from app.config import FRONTEND_ORIGIN
-from routes.email_routes import router as email_router
-from routes.ai_routes import router as ai_router
-from routes.graph_routes import router as graph_router
-from routes.evaluation_routes import router as evaluation_router
 from app.api.agent_routes import router as agent_router
-
+from app.config import FRONTEND_ORIGIN
+from routes.ai_routes import router as ai_router
+from routes.email_routes import router as email_router
+from routes.evaluation_routes import router as evaluation_router
+from routes.graph_routes import router as graph_router
 
 logging.basicConfig(
     level=logging.INFO,

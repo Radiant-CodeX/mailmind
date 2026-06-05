@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import re
 import threading
@@ -54,7 +55,7 @@ class CommitmentService:
     def _get_llm_client(self) -> tuple[Any, str]:
         """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
         try:
-            from openai import OpenAI, AzureOpenAI
+            from openai import AzureOpenAI, OpenAI
             if settings.azure_openai_api_key and settings.azure_openai_endpoint:
                 return AzureOpenAI(
                     api_key=settings.azure_openai_api_key,

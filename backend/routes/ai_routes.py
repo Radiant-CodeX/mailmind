@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 
 from app.models import EmailInput
+from services.azure_openai_service import azure_draft, azure_summary
 from services.triage_service import calculate_priority
-from services.azure_openai_service import azure_summary, azure_draft
 
 router = APIRouter()
 

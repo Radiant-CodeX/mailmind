@@ -30,9 +30,6 @@ from langchain_openai import AzureChatOpenAI
 from app.graph.state import EmailAgentState
 from app.tools.email_tools import (
     ALL_TOOLS,
-    CALENDAR_TOOLS,
-    COMMITMENT_TOOLS,
-    RAG_TOOLS,
     TRIAGE_TOOLS,
     build_draft_prompt,
     check_calendar_conflict,
@@ -42,8 +39,8 @@ from app.tools.email_tools import (
     retrieve_rag_precedents,
     score_action_axis,
     score_authority_axis,
-    score_decay_axis,
     score_deadline_axis,
+    score_decay_axis,
     score_sentiment_axis,
 )
 

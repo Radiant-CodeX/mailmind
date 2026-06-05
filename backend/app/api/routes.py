@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 
 from app.config.settings import settings
@@ -9,9 +9,9 @@ from app.models.schemas import (
     CalendarEvent,
     ClassificationResult,
     CommitmentApprover,
+    CommitmentConfirmResponse,
     CommitmentExtractionRequest,
     CommitmentExtractionResponse,
-    CommitmentConfirmResponse,
     EmailPayload,
     IngestResponse,
     PrecedentItem,

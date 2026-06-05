@@ -7,17 +7,17 @@ Uses the deterministic fallback paths (no Azure OpenAI credentials needed).
 Run:  python test_pipeline.py
 """
 
-import json
 import logging
-import sys
 import os
+import sys
+
+from app.graph.pipeline import run_pipeline
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s │ %(message)s")
 
-from app.graph.pipeline import run_pipeline
 
 # ── Sample emails for testing ─────────────────────────────────────────────────
 
