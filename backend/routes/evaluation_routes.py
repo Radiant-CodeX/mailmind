@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+
 from fastapi import APIRouter
 
 from app.models import EmailInput

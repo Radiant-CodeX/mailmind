@@ -1,9 +1,10 @@
 from openai import AzureOpenAI
+
 from app.config import (
     AZURE_OPENAI_API_KEY,
-    AZURE_OPENAI_ENDPOINT,
-    AZURE_OPENAI_DEPLOYMENT_NAME,
     AZURE_OPENAI_API_VERSION,
+    AZURE_OPENAI_DEPLOYMENT_NAME,
+    AZURE_OPENAI_ENDPOINT,
 )
 
 azure_client = None

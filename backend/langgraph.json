@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "mailmind_pipeline": "./app/graph/pipeline.py:build_mailmind_graph"
+  },
+  "env": ".env"
+}

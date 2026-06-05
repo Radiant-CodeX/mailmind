@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from services.graph_service import get_graph_token, fetch_outlook_emails
+from services.graph_service import fetch_outlook_emails, get_graph_token
 
 router = APIRouter(prefix="/graph")
 

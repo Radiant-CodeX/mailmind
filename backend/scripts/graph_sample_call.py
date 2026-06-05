@@ -10,6 +10,7 @@ if ROOT not in sys.path:
 
 from app.services.graph import GraphClient  # noqa: E402
 
+
 def main():
     try:
         g = GraphClient()

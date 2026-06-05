@@ -1,6 +1,7 @@
-import requests
 import msal
-from app.config import CLIENT_ID, TENANT_ID, GRAPH_SCOPE
+import requests
+
+from app.config import CLIENT_ID, GRAPH_SCOPE, TENANT_ID
 
 
 def get_graph_token():
