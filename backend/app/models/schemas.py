@@ -95,3 +95,21 @@ class CommitmentConfirmResponse(BaseModel):
     success: bool
     task_urls: List[str]
     event_urls: List[str]
+
+class EmailInput(BaseModel):
+    """Input for triage and email processing routes."""
+    sender: EmailStr
+    subject: str
+    body: str
+
+class ApprovalInput(BaseModel):
+    """Input for approving or rejecting a draft reply."""
+    email_id: int
+    action: str                        # "approve" or "reject"
+    draft_reply: Optional[str] = None
+
+class ConflictInput(BaseModel):
+    """Input for conflict detection and precedent lookup."""
+    sender: EmailStr
+    subject: str
+    body: str

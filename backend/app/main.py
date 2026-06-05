@@ -12,6 +12,7 @@ from routes.email_routes import router as email_router
 from routes.ai_routes import router as ai_router
 from routes.graph_routes import router as graph_router
 from routes.evaluation_routes import router as evaluation_router
+from app.api.agent_routes import router as agent_router
 
 
 logging.basicConfig(
@@ -41,3 +42,4 @@ app.include_router(email_router)
 app.include_router(ai_router)
 app.include_router(graph_router)
 app.include_router(evaluation_router)
+app.include_router(agent_router)
