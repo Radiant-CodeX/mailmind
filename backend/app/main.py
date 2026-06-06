@@ -7,11 +7,17 @@ from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 
+from app.config.settings import settings
+from app.queue.queue import EmailQueue
+from app.api.routes import router
+from app.api.agent_routes import router as agent_router
+
 from app.config import FRONTEND_ORIGIN
 from routes.email_routes import router as email_router
 from routes.ai_routes import router as ai_router
 from routes.graph_routes import router as graph_router
 from routes.evaluation_routes import router as evaluation_router
+
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -51,7 +57,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(router)
+app.include_router(agent_router)
 app.include_router(email_router)
 app.include_router(ai_router)
 app.include_router(graph_router)
 app.include_router(evaluation_router)
+
