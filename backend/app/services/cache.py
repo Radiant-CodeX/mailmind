@@ -35,3 +35,10 @@ class TTLCache:
         """Remove all entries from the cache."""
         with self._lock:
             self._store.clear()
+
+
+# Global cache instances with 24-hour default TTL (86400 seconds)
+classification_cache = TTLCache(default_ttl=86400)
+triage_cache = TTLCache(default_ttl=86400)
+precedents_cache = TTLCache(default_ttl=86400)
+commitments_cache = TTLCache(default_ttl=86400)

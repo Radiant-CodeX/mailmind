@@ -50,6 +50,8 @@ class ClassificationService:
 
     def _get_llm_client(self) -> tuple[OpenAI | AzureOpenAI | None, str]:
         """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
+        if settings.use_mock_graph:
+            return None, ""
         if settings.azure_openai_api_key and settings.azure_openai_endpoint:
             return AzureOpenAI(
                 api_key=settings.azure_openai_api_key,
@@ -58,7 +60,10 @@ class ClassificationService:
             ), settings.azure_openai_chat_deployment
         elif settings.openai_api_key:
             return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
-        return None, ""
+        raise RuntimeError(
+            "Real Azure OpenAI / OpenAI credentials are not configured in settings, "
+            "but USE_MOCK_GRAPH is set to false (Real account mode)."
+        )
 
     def _fallback_classify(self, masked_text: str) -> ClassificationResult:
         """Deterministic rule-based fallback classification."""
@@ -87,6 +92,10 @@ class ClassificationService:
 
     def classify(self, masked_text: str) -> ClassificationResult:
         """Classify the masked email text using GPT-4o with a fallback to rule-based rules."""
+        if settings.use_mock_graph:
+            logger.info("Mock mode active. Bypassing LLM client and using rule-based fallback classification.")
+            return self._fallback_classify(masked_text)
+
         client, model = self._get_llm_client()
         if not client:
             logger.info("LLM client not configured. Using rule-based fallback classification.")

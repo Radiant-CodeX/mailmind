@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, List
@@ -12,6 +13,14 @@ try:
     import msal
 except Exception:  # pragma: no cover - imported at runtime when available
     msal = None
+
+
+_user_token_cache: dict[str, Any] = {
+    "access_token": None,
+    "expires_at": 0.0,
+    "refresh_token": None,
+    "user_principal_name": None,
+}
 
 
 class GraphClient:
@@ -51,7 +60,13 @@ class GraphClient:
     def _get_token(self) -> str | None:
         if self.use_mock:
             return None
+        
         now = time.time()
+        # 1. Prioritize active user session token if set and valid
+        if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
+            return _user_token_cache["access_token"]
+
+        # 2. Fall back to client credentials app token
         if self._token and now < (self._token_expires_at - 60):
             return self._token
         result = self._app.acquire_token_for_client(scopes=self.scopes)
@@ -75,7 +90,138 @@ class GraphClient:
             return None
         return resp.json()
 
+    def _get_prefix(self) -> str:
+        """Get the user prefix path for Microsoft Graph queries."""
+        if self.use_mock:
+            return "/me"
+        
+        # If user token is active, we are logged in directly as the user, so use /me
+        if _user_token_cache["access_token"]:
+            return "/me"
+        
+        # Check if UPN is explicitly configured in Settings
+        if self.settings.azure_user_upn:
+            return f"/users/{self.settings.azure_user_upn}"
+
+        if hasattr(self, "_cached_prefix"):
+            return self._cached_prefix
+            
+        upn = None
+        if self._app:
+            try:
+                users = self._request("GET", "/users?$top=1")
+                user = users.get("value", [])
+                if user:
+                    upn = user[0].get("userPrincipalName") or user[0].get("mail")
+            except Exception:
+                pass
+        
+        self._cached_prefix = f"/users/{upn}" if upn else "/me"
+        return self._cached_prefix
+
+    def initiate_user_login(self) -> dict[str, Any]:
+        """Initiate MSAL device code flow for user authentication."""
+        client_id = self.settings.azure_client_id
+        tenant_id = self.settings.azure_tenant_id or "common"
+        # Request standard delegated permissions for email, calendar, tasks and profile
+        scopes = ["User.Read", "Mail.ReadWrite", "Calendars.ReadWrite", "Tasks.ReadWrite"]
+        app = msal.PublicClientApplication(
+            client_id,
+            authority=f"https://login.microsoftonline.com/{tenant_id}"
+        )
+        flow = app.initiate_device_flow(scopes=scopes)
+        return flow
+
+    def complete_user_login(self, flow: dict[str, Any]) -> dict[str, Any]:
+        """Poll and acquire token by device flow."""
+        client_id = self.settings.azure_client_id
+        tenant_id = self.settings.azure_tenant_id or "common"
+        app = msal.PublicClientApplication(
+            client_id,
+            authority=f"https://login.microsoftonline.com/{tenant_id}"
+        )
+        result = app.acquire_token_by_device_flow(flow)
+        return result
+
     # --- Public methods (mocked when `use_mock` is True) ---
+    def get_inbox_emails(self, limit: int = 10) -> List[dict[str, Any]]:
+        """Return messages from the user's Inbox."""
+        if self.use_mock:
+            # Shift received times relative to now so mock inbox is always active and fresh
+            now = datetime.utcnow()
+            return [
+                {
+                    "email_id": "email-1",
+                    "sender": "sarah.chen@acmecorp.com",
+                    "subject": "URGENT: Production API down — clients impacted",
+                    "body": "Hi team,\n\nOur production API has been returning 500 errors for the past 30 minutes. Three enterprise clients have already called in. We need this resolved ASAP.\n\nPlease review the logs immediately and confirm status.\n\nSarah Chen\nCTO, Acme Corp",
+                    "received_at": (now - timedelta(minutes=10)).isoformat() + "Z",
+                },
+                {
+                    "email_id": "email-2",
+                    "sender": "james.wright@partnerfirm.com",
+                    "subject": "Contract review — sign by Friday EOD",
+                    "body": "Hi,\n\nPlease find attached the revised service agreement for Q3. Legal has approved from our side.\n\nWe need your signature by Friday end of day to proceed with the engagement.\n\nBest,\nJames Wright",
+                    "received_at": (now - timedelta(hours=2)).isoformat() + "Z",
+                },
+                {
+                    "email_id": "email-3",
+                    "sender": "priya.sharma@internal.com",
+                    "subject": "Q3 budget approval needed before Monday",
+                    "body": "Hi,\n\nThe Q3 engineering budget proposal is ready for your review and approval. Finance needs sign-off by Monday morning to proceed with vendor payments.\n\nDeck is attached. Happy to walk through it.\n\nPriya",
+                    "received_at": (now - timedelta(hours=4)).isoformat() + "Z",
+                },
+                {
+                    "email_id": "email-5",
+                    "sender": "support-tickets@zendesk.com",
+                    "subject": "Customer ticket #10482: Login issue on Chrome",
+                    "body": "A new support ticket has been created:\n\nCustomer: TechStart Inc\nIssue: Login page spinning indefinitely on Chrome v120\nPriority: High\n\nPlease assign and respond within 4 hours per SLA.",
+                    "received_at": (now - timedelta(hours=8)).isoformat() + "Z",
+                },
+                {
+                    "email_id": "email-4",
+                    "sender": "alex.kim@team.com",
+                    "subject": "Reminder: Weekly sync tomorrow 10am",
+                    "body": "Hi all,\n\nJust a reminder that our weekly engineering sync is tomorrow at 10am in the main conference room.\n\nAgenda: sprint review, blockers, upcoming milestones.\n\nAlex",
+                    "received_at": (now - timedelta(hours=6)).isoformat() + "Z",
+                },
+                {
+                    "email_id": "email-6",
+                    "sender": "newsletter@techdigest.io",
+                    "subject": "This week in AI: GPT updates, new models",
+                    "body": "Hello,\n\nHere is your weekly digest of AI news and updates. This week: new model releases, industry trends, and upcoming conferences.\n\nClick here to read more.",
+                    "received_at": (now - timedelta(days=1)).isoformat() + "Z",
+                },
+            ]
+
+        prefix = self._get_prefix()
+        path = f"{prefix}/messages?$top={limit}&$orderby=receivedDateTime desc"
+        data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
+        raw_msgs = data.get("value", [])
+        
+        formatted = []
+        for msg in raw_msgs:
+            sender_addr = "unknown@example.com"
+            from_obj = msg.get("from") or msg.get("sender")
+            if from_obj and "emailAddress" in from_obj:
+                sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
+            
+            body_content = ""
+            body_obj = msg.get("body")
+            if body_obj:
+                body_content = body_obj.get("content", "")
+            else:
+                body_content = msg.get("bodyPreview", "")
+                
+            formatted.append({
+                "email_id": msg.get("id"),
+                "sender": sender_addr,
+                "subject": msg.get("subject", ""),
+                "body": body_content,
+                "received_at": msg.get("receivedDateTime"),
+            })
+        return formatted
+
     def get_thread_messages(self, thread_id: str) -> List[dict[str, Any]]:
         """Return messages for a conversation/thread.
 
@@ -90,14 +236,58 @@ class GraphClient:
                     "body": "This is a mocked message body.",
                 }
             ]
-        path = f"/me/messages?$filter=conversationId eq '{thread_id}'&$orderby=receivedDateTime desc"
-        data = self._request("GET", path)
-        return data.get("value", [])
+        prefix = self._get_prefix()
+        path = f"{prefix}/messages?$filter=conversationId eq '{thread_id}'&$orderby=receivedDateTime desc"
+        data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
+        raw_msgs = data.get("value", [])
+        
+        formatted = []
+        for msg in raw_msgs:
+            sender_addr = "unknown@example.com"
+            from_obj = msg.get("from") or msg.get("sender")
+            if from_obj and "emailAddress" in from_obj:
+                sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
+            
+            body_content = ""
+            body_obj = msg.get("body")
+            if body_obj:
+                body_content = body_obj.get("content", "")
+            else:
+                body_content = msg.get("bodyPreview", "")
+                
+            formatted.append({
+                "sender": sender_addr,
+                "timestamp": msg.get("receivedDateTime"),
+                "subject": msg.get("subject", ""),
+                "body": body_content,
+            })
+        return formatted
 
     def get_calendar_events(self, start_time: datetime, end_time: datetime) -> List[dict[str, Any]]:
         """Return calendar events between two datetimes (UTC-aware ISO strings)."""
         if self.use_mock:
-            return []
+            now = datetime.utcnow()
+            return [
+                {
+                    "title": "Production Deployment Sync",
+                    "start_time": now + timedelta(hours=2),
+                    "end_time": now + timedelta(hours=3),
+                    "organizer": "sarah.chen@acmecorp.com"
+                },
+                {
+                    "title": "Acme Budget Review",
+                    "start_time": now + timedelta(days=1, hours=4),
+                    "end_time": now + timedelta(days=1, hours=5),
+                    "organizer": "priya.sharma@internal.com"
+                },
+                {
+                    "title": "Weekly Engineering Sync",
+                    "start_time": now + timedelta(days=2, hours=1),
+                    "end_time": now + timedelta(days=2, hours=2),
+                    "organizer": "alex.kim@team.com"
+                }
+            ]
+
         # Ensure timestamps are RFC3339 with timezone (use Z for UTC if naive)
         def to_rfc(dt: datetime) -> str:
             if dt.tzinfo is None:
@@ -106,49 +296,71 @@ class GraphClient:
 
         start = to_rfc(start_time)
         end = to_rfc(end_time)
-        # If running with app-only (client credentials) there is no `/me` context;
-        # discover a user mailbox and query that user's calendar instead.
-        if not self.use_mock and self._app:
-            try:
-                users = self._request("GET", "/users?$top=1")
-                user = users.get("value", [])
-                if user:
-                    upn = user[0].get("userPrincipalName") or user[0].get("mail")
-                    path = (
-                        f"/users/{upn}/calendarview?"
-                        f"startDateTime={start}&endDateTime={end}"
-                        f"&$orderby=start/dateTime"
-                    )
-                else:
-                    path = (
-                        f"/me/calendarview?"
-                        f"startDateTime={start}&endDateTime={end}"
-                        f"&$orderby=start/dateTime"
-                    )
-            except Exception:
-                path = (
-                    f"/me/calendarview?"
-                    f"startDateTime={start}&endDateTime={end}"
-                    f"&$orderby=start/dateTime"
-                )
-        else:
-            path = (
-                f"/me/calendarview?"
-                f"startDateTime={start}&endDateTime={end}"
-                f"&$orderby=start/dateTime"
-            )
+        
+        prefix = self._get_prefix()
+        path = (
+            f"{prefix}/calendarview?"
+            f"startDateTime={start}&endDateTime={end}"
+            f"&$orderby=start/dateTime"
+        )
 
         data = self._request("GET", path, headers={"Prefer": "outlook.timezone=UTC"})
-        return data.get("value", [])
+        raw_events = data.get("value", [])
+        
+        events = []
+        for item in raw_events:
+            title = item.get("subject", "Untitled event")
+            
+            # Start time parsing
+            start_val = item.get("start", {})
+            start_dt_str = start_val.get("dateTime")
+            start_dt = start_time
+            if start_dt_str:
+                try:
+                    cleaned = re.sub(r'(\.\d{6})\d+', r'\1', start_dt_str)
+                    cleaned = cleaned.replace("Z", "+00:00")
+                    start_dt = datetime.fromisoformat(cleaned)
+                except Exception:
+                    pass
+
+            # End time parsing
+            end_val = item.get("end", {})
+            end_dt_str = end_val.get("dateTime")
+            end_dt = end_time
+            if end_dt_str:
+                try:
+                    cleaned = re.sub(r'(\.\d{6})\d+', r'\1', end_dt_str)
+                    cleaned = cleaned.replace("Z", "+00:00")
+                    end_dt = datetime.fromisoformat(cleaned)
+                except Exception:
+                    pass
+
+            # Organizer parsing
+            org_val = item.get("organizer", {})
+            email_addr_val = org_val.get("emailAddress", {})
+            organizer = email_addr_val.get("address") or email_addr_val.get("name") or "unknown@example.com"
+            
+            events.append({
+                "title": title,
+                "start_time": start_dt,
+                "end_time": end_dt,
+                "organizer": organizer
+            })
+        return events
 
     def get_sender_authority(self, sender_email: str) -> dict[str, Any]:
         """Try to resolve sender to a user and provide a simple authority score."""
         if self.use_mock:
-            if sender_email.endswith("@example.com"):
+            if sender_email.endswith("@example.com") or sender_email.endswith("@acmecorp.com") or sender_email.endswith("@partnerfirm.com") or sender_email.endswith("@team.com") or sender_email.endswith("@internal.com"):
                 return {"role": "peer", "score": 0.5, "source": "fallback"}
             return {"role": "external", "score": 0.1, "source": "fallback"}
         # Try to get user by mail
         try:
+            self._get_prefix()
+            # If UPN matches the sender email exactly, it's the owner/internal
+            if self.settings.azure_user_upn and sender_email.lower() == self.settings.azure_user_upn.lower():
+                return {"role": "internal", "score": 0.8, "source": "graph-owner"}
+            
             data = self._request("GET", f"/users/{sender_email}")
             job = data.get("jobTitle") or ""
             score = 0.8 if job else 0.6
@@ -160,14 +372,15 @@ class GraphClient:
         """Create a To Do task in the user's default To Do list and return its webUrl."""
         if self.use_mock:
             return f"https://graph.microsoft.com/todo/{email_id}/{commitment[:10]}"
-        # get the default task list (pick first)
-        lists = self._request("GET", "/me/todo/lists")
+        
+        prefix = self._get_prefix()
+        lists = self._request("GET", f"{prefix}/todo/lists")
         lists_val = lists.get("value", [])
         if not lists_val:
             raise RuntimeError("no todo lists available for user")
         list_id = lists_val[0]["id"]
         payload = {"title": commitment}
-        task = self._request("POST", f"/me/todo/lists/{list_id}/tasks", json=payload)
+        task = self._request("POST", f"{prefix}/todo/lists/{list_id}/tasks", json=payload)
         return task.get("webUrl") or task.get("id")
 
     def create_calendar_event(self, email_id: str, commitment: str, deadline: datetime | None) -> str:
@@ -175,16 +388,63 @@ class GraphClient:
         if self.use_mock:
             event_id = f"event-{email_id[:8]}"
             return f"https://graph.microsoft.com/calendar/{event_id}"
+        
         start = (deadline or datetime.utcnow()).isoformat()
-        end = (deadline or datetime.utcnow()).isoformat()
+        end = (deadline or datetime.utcnow() + timedelta(hours=1)).isoformat()
         event_payload = {
             "subject": commitment,
             "start": {"dateTime": start, "timeZone": "UTC"},
             "end": {"dateTime": end, "timeZone": "UTC"},
             "body": {"contentType": "text", "content": commitment},
         }
-        event = self._request("POST", "/me/events", json=event_payload)
+        prefix = self._get_prefix()
+        event = self._request("POST", f"{prefix}/events", json=event_payload)
         return event.get("webLink") or event.get("id")
+
+    def send_reply(self, email_id: str, comment: str) -> None:
+        """Send a reply to a message via Microsoft Graph API."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Replying to email {email_id} with comment: {comment[:30]}...")
+            return
+        
+        prefix = self._get_prefix()
+        payload = {
+            "comment": comment
+        }
+        self._request("POST", f"{prefix}/messages/{email_id}/reply", json=payload)
+
+    def send_new_email(self, to: str, subject: str, body: str, cc: str | None = None, bcc: str | None = None) -> None:
+        """Send a new email via Microsoft Graph API."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Sending new email to={to}, subject={subject}, cc={cc}, bcc={bcc}")
+            return
+
+        to_list = [t.strip() for t in to.split(",") if t.strip()]
+        to_recipients = [{"emailAddress": {"address": addr}} for addr in to_list]
+
+        message = {
+            "subject": subject,
+            "body": {
+                "contentType": "Text",
+                "content": body
+            },
+            "toRecipients": to_recipients
+        }
+
+        if cc:
+            cc_list = [c.strip() for c in cc.split(",") if c.strip()]
+            message["ccRecipients"] = [{"emailAddress": {"address": addr}} for addr in cc_list]
+
+        if bcc:
+            bcc_list = [b.strip() for b in bcc.split(",") if b.strip()]
+            message["bccRecipients"] = [{"emailAddress": {"address": addr}} for addr in bcc_list]
+
+        prefix = self._get_prefix()
+        payload = {
+            "message": message,
+            "saveToSentItems": "true"
+        }
+        self._request("POST", f"{prefix}/sendMail", json=payload)
 
     def fetch_sent_email(self, email_id: str) -> dict[str, Any] | None:
         """Fetch a sent email by message id for re-indexing."""
@@ -195,7 +455,8 @@ class GraphClient:
                 "body": "This is a mock re-indexed email body with some contact info like +1234567890."
             }
         try:
-            return self._request("GET", f"/me/messages/{email_id}")
+            prefix = self._get_prefix()
+            return self._request("GET", f"{prefix}/messages/{email_id}")
         except Exception:
             return None
 
@@ -214,17 +475,7 @@ class GraphClient:
             return mock_emails
 
         # Live Graph query
-        upn = None
-        if self._app:
-            try:
-                users = self._request("GET", "/users?$top=1")
-                user = users.get("value", [])
-                if user:
-                    upn = user[0].get("userPrincipalName") or user[0].get("mail")
-            except Exception:
-                pass
-
-        prefix = f"/users/{upn}" if upn else "/me"
+        prefix = self._get_prefix()
         cutoff_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         
         try:
@@ -238,4 +489,5 @@ class GraphClient:
                 return data.get("value", [])
             except Exception:
                 return []
+
 

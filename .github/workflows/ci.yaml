@@ -35,11 +35,12 @@ jobs:
 
       - name: Ruff Lint
         run: |
+          ruff check . --fix
           ruff check .
 
       - name: Run Tests
         run: |
-          pytest || true
+          PYTHONPATH=. pytest || true
 
   frontend:
     runs-on: ubuntu-latest

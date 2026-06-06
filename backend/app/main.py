@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,37 +8,55 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.trace import TracerProvider
 
 from app.api.agent_routes import router as agent_router
-from app.config import FRONTEND_ORIGIN
+from app.api.routes import router
+from app.config.settings import settings
+from app.queue.queue import EmailQueue
 from routes.ai_routes import router as ai_router
 from routes.email_routes import router as email_router
 from routes.evaluation_routes import router as evaluation_router
 from routes.graph_routes import router as graph_router
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
-
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 trace.set_tracer_provider(TracerProvider())
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.email_queue = EmailQueue()
+    # Check if spaCy en_core_web_sm model is available
+    try:
+        import spacy
+        spacy.load("en_core_web_sm")
+    except Exception as e:
+        logging.warning(
+            "spaCy model 'en_core_web_sm' is not installed or failed to load. "
+            "Relative date extraction will fall back to regex mode. "
+            f"Error: {e}"
+        )
+    yield
+
 
 app = FastAPI(
     title="MailMind API",
     description="AI-powered enterprise email triage and drafting backend",
-    version="1.0.0",
+    version="2.0.0",
+    lifespan=lifespan,
 )
 
 FastAPIInstrumentor.instrument_app(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_ORIGIN],
+    allow_origins=[settings.frontend_origin],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+app.include_router(router)
+app.include_router(agent_router)
 app.include_router(email_router)
 app.include_router(ai_router)
 app.include_router(graph_router)
 app.include_router(evaluation_router)
-app.include_router(agent_router)
+

@@ -170,6 +170,28 @@ class ActionTypeScorer:
 
 
 @dataclass
+class SentimentScorer:
+    """Score email urgency based on sentiment keywords."""
+
+    urgent_patterns: list[str] = (
+        r"\b(urgent|critical|emergency|immediately|asap|crisis|escalate|blocker)\b",
+    )
+    negative_patterns: list[str] = (
+        r"\b(frustrated|disappointed|unacceptable|failure|broken|problem|issue|complaint)\b",
+    )
+
+    def score(self, body: str) -> AxisScore:
+        lower = body.lower()
+        for pattern in self.urgent_patterns:
+            if re.search(pattern, lower):
+                return AxisScore(axis="sentiment", raw_score=1.0, explanation="Urgent sentiment detected")
+        for pattern in self.negative_patterns:
+            if re.search(pattern, lower):
+                return AxisScore(axis="sentiment", raw_score=0.6, explanation="Negative sentiment detected")
+        return AxisScore(axis="sentiment", raw_score=0.2, explanation="Neutral sentiment")
+
+
+@dataclass
 class CompositeAggregator:
     """Combine multiple axis scores into one triage recommendation."""
 
