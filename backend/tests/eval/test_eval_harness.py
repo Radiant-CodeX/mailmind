@@ -285,5 +285,9 @@ def test_context_use():
 if __name__ == "__main__":
     report = generate_report()
     for k, v in report["criteria"].items():
-        status = "✅ PASS" if v["passed"] else "❌ FAIL"
-        print(f"{status}  {k}: {v['score']:.1%} (target {v['target']:.0%})")
+        status = "PASS" if v["passed"] else "FAIL"
+        emoji = "✅" if v["passed"] else "❌"
+        try:
+            print(f"{emoji} {status}  {k}: {v['score']:.1%} (target {v['target']:.0%})")
+        except UnicodeEncodeError:
+            print(f"[{status}]  {k}: {v['score']:.1%} (target {v['target']:.0%})")
