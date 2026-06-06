@@ -237,7 +237,7 @@ class GraphClient:
                 }
             ]
         prefix = self._get_prefix()
-        path = f"{prefix}/messages?$filter=conversationId eq '{thread_id}'&$orderby=receivedDateTime desc"
+        path = f"{prefix}/messages?$filter=conversationId eq '{thread_id}'"
         data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
         raw_msgs = data.get("value", [])
         
@@ -261,6 +261,11 @@ class GraphClient:
                 "subject": msg.get("subject", ""),
                 "body": body_content,
             })
+
+        try:
+            formatted.sort(key=lambda m: m.get("timestamp") or "", reverse=True)
+        except Exception:
+            pass
         return formatted
 
     def get_calendar_events(self, start_time: datetime, end_time: datetime) -> List[dict[str, Any]]:
