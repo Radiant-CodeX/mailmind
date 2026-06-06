@@ -37,8 +37,8 @@ def mask_pii(text: str) -> str:
     Scrub personally identifiable information from email body text before
     any LLM processing or vector indexing.
 
-    Replaces email addresses, phone numbers, and credit card numbers with
-    safe placeholder tokens: [EMAIL], [PHONE], [CARD].
+    Replaces email addresses, phone numbers, and names with
+    safe placeholder tokens using Microsoft Presidio (and Regex fallback).
 
     Args:
         text: Raw email body text.
@@ -46,10 +46,9 @@ def mask_pii(text: str) -> str:
     Returns:
         PII-masked version of the text safe for LLM consumption.
     """
-    text = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[EMAIL]", text)
-    text = re.sub(r"\b\+?\d[\d\-\s]{7,}\d\b", "[PHONE]", text)
-    text = re.sub(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b", "[CARD]", text)
-    return text
+    from app.services.pii import pii_sanitizer
+    masked, _ = pii_sanitizer.mask_text(text)
+    return masked
 
 
 # ─────────────────────────────────────────────────────────────────────────────
