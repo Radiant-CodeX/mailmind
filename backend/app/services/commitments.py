@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import uuid
@@ -67,11 +68,15 @@ class CommitmentService:
             elif settings.openai_api_key:
                 return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
-        raise RuntimeError(
-            "Real Azure OpenAI / OpenAI credentials are not configured in settings, "
-            "but USE_MOCK_GRAPH is set to false (Real account mode)."
+            logging.warning(f"Failed to initialize OpenAI client; using regex fallback: {e}")
+            return None, ""
+        # No LLM credentials configured in live mode — degrade gracefully to the
+        # rule-based regex extractor rather than failing the request.
+        logging.warning(
+            "No Azure OpenAI / OpenAI credentials configured; using regex fallback "
+            "for commitment extraction."
         )
+        return None, ""
 
     def _fallback_extract(self, masked_email_text: str) -> list[CommitmentItem]:
         """Extract candidate commitments using a local rule-based regex fallback."""

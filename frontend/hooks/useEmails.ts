@@ -2,8 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Email } from '../lib/types';
-import { fetchEmails, triageEmail } from '../lib/api';
-import { MOCK_FOLDER_EMAILS } from '../lib/mockData';
+import { fetchEmails, triageEmail, fetchSentEmails, fetchDraftEmails, fetchSpamEmails, fetchTrashEmails } from '../lib/api';
 
 interface RawEmail {
   id?: string;
@@ -46,8 +45,16 @@ export function useEmails(activeFolder: string = 'Inbox') {
       let fetched: RawEmail[] = [];
       if (activeFolder === 'Inbox' || activeFolder === 'Starred' || activeFolder === 'Important') {
         fetched = await fetchEmails(10) as RawEmail[];
+      } else if (activeFolder === 'Sent') {
+        fetched = await fetchSentEmails(10) as RawEmail[];
+      } else if (activeFolder === 'Drafts') {
+        fetched = await fetchDraftEmails(10) as RawEmail[];
+      } else if (activeFolder === 'Spam') {
+        fetched = await fetchSpamEmails(10) as RawEmail[];
+      } else if (activeFolder === 'Trash') {
+        fetched = await fetchTrashEmails(10) as RawEmail[];
       } else {
-        fetched = MOCK_FOLDER_EMAILS[activeFolder] || [];
+        fetched = [];
       }
 
       // Check if we have cached scores in localStorage to populate immediately

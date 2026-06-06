@@ -1,0 +1,581 @@
+{
+  "total_samples": 50,
+  "criteria": {
+    "1_priority_accuracy": {
+      "score": 0.22,
+      "target": 0.94,
+      "passed": false,
+      "f1_per_label": {
+        "CRITICAL": {
+          "precision": 0.75,
+          "recall": 0.3,
+          "f1": 0.429
+        },
+        "HIGH": {
+          "precision": 0.429,
+          "recall": 0.15,
+          "f1": 0.222
+        },
+        "MEDIUM": {
+          "precision": 0.625,
+          "recall": 0.25,
+          "f1": 0.357
+        }
+      },
+      "confusion_matrix": {
+        "CRITICAL": {
+          "CRITICAL": 3,
+          "MEDIUM": 1,
+          "HIGH": 3,
+          "LOW": 3
+        },
+        "HIGH": {
+          "HIGH": 3,
+          "CRITICAL": 1,
+          "LOW": 14,
+          "MEDIUM": 2
+        },
+        "MEDIUM": {
+          "LOW": 14,
+          "MEDIUM": 5,
+          "HIGH": 1
+        }
+      }
+    },
+    "2_category_accuracy": {
+      "score": 0.64,
+      "target": 0.91,
+      "passed": false,
+      "f1_per_label": {
+        "internal": {
+          "precision": 0.641,
+          "recall": 0.926,
+          "f1": 0.758
+        },
+        "sales": {
+          "precision": 0.625,
+          "recall": 0.5,
+          "f1": 0.556
+        },
+        "support": {
+          "precision": 0.667,
+          "recall": 0.154,
+          "f1": 0.25
+        }
+      }
+    },
+    "3_context_use": {
+      "score": 0.3,
+      "target": 0.92,
+      "passed": false,
+      "full_context_accuracy": 0.3,
+      "body_only_accuracy": 0.15,
+      "context_improvement": 0.15,
+      "context_use_score": 0.3
+    },
+    "4_pii_protection": {
+      "score": 1.0,
+      "target": 1.0,
+      "passed": 5,
+      "pii_protection_rate": 1.0,
+      "total": 5,
+      "results": [
+        {
+          "input": "Contact john@example.com for details",
+          "pii": "john@example.com",
+          "passed": true,
+          "masked": "Contact {{EMAIL_1}} for details"
+        },
+        {
+          "input": "Call me at +1-555-123-4567 anytime",
+          "pii": "+1-555-123-4567",
+          "passed": true,
+          "masked": "Call me at {{PHONE_1}} anytime"
+        },
+        {
+          "input": "Hi Sarah, please review this",
+          "pii": "Sarah",
+          "passed": true,
+          "masked": "Hi {{NAME_1}}, please review this"
+        },
+        {
+          "input": "From: alice@corp.com\nBody: invoice attached",
+          "pii": "alice@corp.com",
+          "passed": true,
+          "masked": "From: {{EMAIL_1}}\nBody: invoice attached"
+        },
+        {
+          "input": "CC: bob@test.org for approval",
+          "pii": "bob@test.org",
+          "passed": true,
+          "masked": "CC: {{EMAIL_1}} for approval"
+        }
+      ]
+    },
+    "5_user_control": {
+      "score": 1.0,
+      "target": 1.0,
+      "passed": true,
+      "user_control_score": 1.0,
+      "checks": [
+        {
+          "check": "no_token_rejected",
+          "passed": true
+        }
+      ],
+      "note": "Zero auto-send enforced at API layer via approval token gate"
+    }
+  },
+  "detailed_results": [
+    {
+      "subject": "URGENT: Production outage",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "CRITICAL",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": false
+    },
+    {
+      "subject": "Emergency board meeting tomorrow",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "System completely broken - losing revenue",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "HIGH",
+      "expected_category": "support",
+      "predicted_category": "sales",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Data breach detected - immediate action required",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "HIGH",
+      "expected_category": "internal",
+      "predicted_category": "support",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "CRITICAL: Contract expires in 2 hours",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "HIGH",
+      "expected_category": "sales",
+      "predicted_category": "sales",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Server down - all users affected",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "CRITICAL",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": false
+    },
+    {
+      "subject": "Outage - SLA breach imminent",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "CRITICAL",
+      "expected_category": "support",
+      "predicted_category": "sales",
+      "priority_correct": true,
+      "category_correct": false
+    },
+    {
+      "subject": "Payroll system failure - payday tomorrow",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Kubernetes cluster unresponsive",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Court filing due in 1 hour",
+      "expected_priority": "CRITICAL",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Contract review needed",
+      "expected_priority": "HIGH",
+      "predicted_priority": "HIGH",
+      "expected_category": "sales",
+      "predicted_category": "sales",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Action required: approve budget",
+      "expected_priority": "HIGH",
+      "predicted_priority": "CRITICAL",
+      "expected_category": "internal",
+      "predicted_category": "sales",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Proposal for Q4 renewal - respond by EOW",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "sales",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Board presentation prep - need slides by Thursday",
+      "expected_priority": "HIGH",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Integration broken after your last deploy",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Performance review sign-off required by Friday",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "PO approval needed - vendor payment overdue",
+      "expected_priority": "HIGH",
+      "predicted_priority": "HIGH",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Compliance report due next week",
+      "expected_priority": "HIGH",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Close this deal by Friday - $500k contract",
+      "expected_priority": "HIGH",
+      "predicted_priority": "HIGH",
+      "expected_category": "sales",
+      "predicted_category": "sales",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "VIP customer ticket escalated - 4hr SLA",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "support",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Weekly sync reminder",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Sprint planning next Monday",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Follow-up on last week's demo",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Updated leave policy document",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Your ticket has been updated",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "support",
+      "predicted_category": "support",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Monthly report reminder",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Question about feature X",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "New product launch next quarter",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "sales",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Code review request",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Maintenance window scheduled for Sunday",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "This week in AI: GPT updates, new models",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "HIGH",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "3 people viewed your profile this week",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "GitHub Actions run completed",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Your invoice is ready",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "You are registered for DevConf 2026",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Team lunch this Friday!",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Issue assigned to you: Update docs",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "MEDIUM",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": true,
+      "category_correct": true
+    },
+    {
+      "subject": "Top products of the week",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Monthly security digest",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Happy work anniversary!",
+      "expected_priority": "MEDIUM",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Upsell opportunity - expand to 500 seats",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "RFP response needed by next Friday",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "HIPAA compliance documentation required",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "AWS bill 3x higher than expected this month",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Quarterly OKR review - prepare by Thursday",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "NDA required before sharing technical specs",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "API rate limiting causing failures in production",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Technical deep-dive call - can you do tomorrow?",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "sales",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    },
+    {
+      "subject": "Budget freeze effective immediately",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "internal",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": true
+    },
+    {
+      "subject": "Feature request blocking our launch",
+      "expected_priority": "HIGH",
+      "predicted_priority": "LOW",
+      "expected_category": "support",
+      "predicted_category": "internal",
+      "priority_correct": false,
+      "category_correct": false
+    }
+  ]
+}

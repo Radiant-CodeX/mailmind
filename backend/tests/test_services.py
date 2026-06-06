@@ -1,3 +1,6 @@
+from app.config.settings import settings
+settings.use_mock_graph = True
+
 from app.models.schemas import AxisScore
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService

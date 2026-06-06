@@ -86,37 +86,96 @@ def get_emails(limit: int = 10) -> list[dict[str, Any]]:
     return client.get_inbox_emails(limit=limit)
 
 
+@router.get("/emails/sent", response_model=list[EmailPayload])
+def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch recent sent emails/messages from the Outlook Sent Items folder."""
+    client = GraphClient()
+    raw_emails = client.fetch_sent_emails(days=30)
+    
+    formatted = []
+    for msg in raw_emails[:limit]:
+        sender_addr = "unknown@example.com"
+        from_obj = msg.get("from") or msg.get("sender")
+        if from_obj and "emailAddress" in from_obj:
+            sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
+        
+        body_content = ""
+        body_obj = msg.get("body")
+        if body_obj:
+            body_content = body_obj.get("content", "")
+        else:
+            body_content = msg.get("bodyPreview", "")
+            
+        formatted.append({
+            "email_id": msg.get("id") or msg.get("email_id") or "",
+            "sender": sender_addr,
+            "subject": msg.get("subject", ""),
+            "body": body_content,
+            "received_at": msg.get("sentDateTime") or msg.get("received_at") or "",
+        })
+    return formatted
+
+
+@router.get("/emails/drafts", response_model=list[EmailPayload])
+def get_draft_emails(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch emails from the Drafts folder."""
+    client = GraphClient()
+    return client.get_draft_emails(limit=limit)
+
+
+@router.get("/emails/spam", response_model=list[EmailPayload])
+def get_spam_emails(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch emails from the Junk/Spam folder."""
+    client = GraphClient()
+    return client.get_spam_emails(limit=limit)
+
+
+@router.get("/emails/trash", response_model=list[EmailPayload])
+def get_trash_emails(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch emails from the Deleted Items folder."""
+    client = GraphClient()
+    return client.get_trash_emails(limit=limit)
+
+
 @router.post("/emails/{email_id}/reply")
 def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
     """Send a reply to the specified email via Microsoft Graph."""
     client = GraphClient()
-    client.send_reply(email_id, payload.comment)
-    return {"success": True}
+    try:
+        client.send_reply(email_id, payload.comment)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to send reply: {str(e)}")
 
 
 @router.post("/emails/compose")
 def compose_email(payload: ComposeRequest) -> dict[str, Any]:
     """Compose and send a new email via Microsoft Graph."""
     client = GraphClient()
-    client.send_new_email(
-        to=payload.to,
-        subject=payload.subject,
-        body=payload.body,
-        cc=payload.cc,
-        bcc=payload.bcc
-    )
-    return {"success": True}
+    try:
+        client.send_new_email(
+            to=payload.to,
+            subject=payload.subject,
+            body=payload.body,
+            cc=payload.cc,
+            bcc=payload.bcc
+        )
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to compose email: {str(e)}")
 
 
-
-
-# Global dictionary to temporarily store active device flows
-active_device_flows: dict[str, dict[str, Any]] = {}
 
 
 @router.post("/auth/login-initiate")
 def login_initiate() -> dict[str, Any]:
-    """Initiate MSAL device code login flow."""
+    """Initiate MSAL device code login flow.
+
+    The blocking token acquisition is completed in a background thread (see
+    `GraphClient.initiate_user_login`); polling only reads its status.
+    """
     client = GraphClient()
     if client.use_mock:
         return {
@@ -127,9 +186,7 @@ def login_initiate() -> dict[str, Any]:
         flow = client.initiate_user_login()
         if not flow or "device_code" not in flow:
             raise HTTPException(status_code=500, detail="Failed to initiate device flow")
-        
-        # Save flow in global dict keyed by device_code
-        active_device_flows[flow["device_code"]] = flow
+
         return {
             "status": "pending",
             "device_code": flow["device_code"],
@@ -137,54 +194,43 @@ def login_initiate() -> dict[str, Any]:
             "verification_uri": flow["verification_uri"],
             "message": flow["message"]
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/auth/login-poll")
 def login_poll(payload: dict[str, str]) -> dict[str, Any]:
-    """Poll MSAL to complete user authentication."""
+    """Read the status of an in-progress device-code login.
+
+    The actual token acquisition happens once in a background thread started by
+    `/auth/login-initiate`. This endpoint never calls Microsoft directly, so it
+    can be polled freely without reusing the device_code (AADSTS70000).
+    """
     device_code = payload.get("device_code")
     if not device_code:
         raise HTTPException(status_code=400, detail="Missing device_code")
-    
-    flow = active_device_flows.get(device_code)
-    if not flow:
-        raise HTTPException(status_code=404, detail="Active login session not found")
-        
-    client = GraphClient()
-    try:
-        result = client.complete_user_login(flow)
-        if not result:
-            return {"status": "pending"}
-        if "error" in result:
-            error_code = result.get("error")
-            if error_code == "authorization_pending":
-                return {"status": "pending"}
-            raise HTTPException(status_code=400, detail=result.get("error_description", error_code))
-            
-        # Success! Save token details in cache
-        import time
 
-        from app.services.graph import _user_token_cache
-        _user_token_cache["access_token"] = result.get("access_token")
-        _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
-        
-        # Find logged-in user UPN or mail
-        id_token_claims = result.get("id_token_claims", {})
-        upn = id_token_claims.get("preferred_username") or id_token_claims.get("upn")
-        _user_token_cache["user_principal_name"] = upn
-        
-        # Clean up flow
-        active_device_flows.pop(device_code, None)
+    from app.services.graph import _device_flow_status
+
+    state = _device_flow_status.get(device_code)
+    if not state:
+        return {"status": "pending", "authenticated": False}
+
+    status_val = state.get("status")
+    if status_val == "success":
+        _device_flow_status.pop(device_code, None)
         return {
             "status": "success",
-            "user_principal_name": upn
+            "authenticated": True,
+            "user_principal_name": state.get("user_principal_name"),
         }
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
+    if status_val == "error":
+        _device_flow_status.pop(device_code, None)
+        raise HTTPException(status_code=400, detail=state.get("error", "Authentication failed"))
+
+    return {"status": "pending", "authenticated": False}
 
 
 # Track mock logged-out state globally
@@ -407,7 +453,12 @@ def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | Non
     """Confirm approved commitments and create tasks/calendar events."""
     _validate_approval_token(x_approval_token)
     service = CommitmentService(GraphClient())
-    result = service.confirm(payload.email_id, payload.commitments)
+    try:
+        result = service.confirm(payload.email_id, payload.commitments)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to confirm commitments: {str(e)}")
     return CommitmentConfirmResponse(**result)
 
 
