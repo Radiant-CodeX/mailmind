@@ -19,9 +19,13 @@ interface EmailDetailProps {
   aiDraft: string | null;
   setAiDraft: (val: string) => void;
   isGeneratingDraft: boolean;
-  generateDraft: () => void;
+  generateDraft: (style?: 'standard' | 'formal' | 'indepth') => void;
   isDraftApproved: boolean;
   setIsDraftApproved: (val: boolean) => void;
+  activeStyle: 'standard' | 'formal' | 'indepth';
+  setActiveStyle: (style: 'standard' | 'formal' | 'indepth') => void;
+  isSendingDraft: boolean;
+  sendDraft: (comment: string) => void;
 
   // Commitment Gate Props
   commitments: TypeCommitment[];
@@ -50,6 +54,10 @@ export function EmailDetail({
   generateDraft,
   isDraftApproved,
   setIsDraftApproved,
+  activeStyle,
+  setActiveStyle,
+  isSendingDraft,
+  sendDraft,
 
   commitments,
   commitmentsLoading,
@@ -90,8 +98,9 @@ export function EmailDetail({
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 md:p-8 animate-fade-in" id="email-detail-loading-overlay">
-        <div className="bg-[var(--bg-base)] p-8 rounded-xl shadow-2xl border border-[var(--border)] max-w-md w-full text-center">
+      <div className="fixed inset-0 bg-black/15 z-50 flex justify-end" id="email-detail-loading-overlay">
+        <div className="absolute inset-0 cursor-default" onClick={onClose} />
+        <div className="relative bg-[var(--bg-base)] w-full max-w-3xl h-full border-l border-[var(--border)] shadow-2xl flex flex-col items-center justify-center p-8 text-center animate-slide-in-right z-50">
           <LoadingSpinner message="Performing NLP classification and calculating priority indices..." size="lg" />
         </div>
       </div>
@@ -99,13 +108,13 @@ export function EmailDetail({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 md:p-8 animate-fade-in" id="email-detail-overlay">
+    <div className="fixed inset-0 bg-black/15 z-50 flex justify-end" id="email-detail-overlay">
       {/* Click outside to close backdrop */}
       <div className="absolute inset-0 cursor-default" onClick={onClose} />
       
-      {/* Modal Content container */}
+      {/* Drawer Content container */}
       <div 
-        className="relative bg-[var(--bg-base)] w-full max-w-6xl h-full max-h-[85vh] md:max-h-[90vh] rounded-xl shadow-2xl flex flex-col overflow-hidden border border-[var(--border)] animate-in fade-in zoom-in-95 duration-200" 
+        className="relative bg-[var(--bg-base)] w-full max-w-3xl h-full border-l border-[var(--border)] shadow-2xl flex flex-col overflow-hidden animate-slide-in-right z-50" 
         onClick={(e) => e.stopPropagation()}
         id="email-detail-modal"
       >
@@ -254,6 +263,10 @@ export function EmailDetail({
                   onGenerate={generateDraft}
                   isApproved={isDraftApproved}
                   setIsApproved={setIsDraftApproved}
+                  activeStyle={activeStyle}
+                  setActiveStyle={setActiveStyle}
+                  isSending={isSendingDraft}
+                  onSend={sendDraft}
                 />
               </div>
             )}

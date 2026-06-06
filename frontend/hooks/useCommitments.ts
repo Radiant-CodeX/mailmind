@@ -34,10 +34,10 @@ export function useCommitments(emailId: string | null, emailBody: string | null)
 
       try {
         const res = await extractCommitments(emailBody!, '', emailId!);
-        // Map approved = true for already confirmed items, otherwise false
+        // Check newly extracted commitments by default to enable one-click synchronization
         const items = (res.commitments || []).map((c: any) => ({
           ...c,
-          approved: c.confirmed || false,
+          approved: true,
         }));
         setCommitments(items);
 

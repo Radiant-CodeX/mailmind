@@ -34,7 +34,7 @@ export function ConfirmButton({ onClick, disabled, loading }: ConfirmButtonProps
           >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
-          Confirm & Write to MS Todo
+          Confirm & Sync to To Do + Calendar
         </>
       )}
     </button>

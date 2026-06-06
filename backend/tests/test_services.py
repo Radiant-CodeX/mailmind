@@ -65,3 +65,38 @@ def test_pii_masking():
     masked = mask_pii(text)
     assert "@" not in masked
     assert "john" not in masked
+
+
+def test_draft_service_mock_styles():
+    from app.services.draft_service import DraftService
+    svc = DraftService()
+    
+    # 1. Standard Style
+    draft_std, _ = svc.generate_draft("Can you help me with this?", "standard", "sender@test.com", "Test Subject")
+    assert "best regards" in draft_std.lower()
+    assert "received" in draft_std.lower()
+
+    # 2. Formal Style
+    draft_formal, _ = svc.generate_draft("Can you help me with this?", "formal", "sender@test.com", "Test Subject")
+    assert "dear" in draft_formal.lower()
+    assert "sincerely" in draft_formal.lower()
+
+    # 3. In-depth Style
+    draft_indepth, _ = svc.generate_draft("Can you help me with this?", "indepth", "sender@test.com", "Test Subject")
+    assert "in-depth" in draft_indepth.lower() or "review" in draft_indepth.lower()
+    assert "action items" in draft_indepth.lower()
+
+
+def test_graph_send_reply_mock():
+    from app.services.graph import GraphClient
+    client = GraphClient()
+    client.send_reply("email-123", "This is a mock reply comment.")
+
+
+def test_graph_send_new_email_mock():
+    from app.services.graph import GraphClient
+    client = GraphClient()
+    client.send_new_email("test@example.com", "Test Subject", "Test Body", "cc@example.com", "bcc@example.com")
+
+
+

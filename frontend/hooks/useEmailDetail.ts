@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Email, ClassificationResult, TriageResult, PrecedentItem } from '../lib/types';
-import { classifyEmail, triageEmail, retrievePrecedents, generateDraftPrompt } from '../lib/api';
+import { classifyEmail, triageEmail, retrievePrecedents, generateEmailDraft, sendEmailReply } from '../lib/api';
 
 // Memory cache for email classifications and precedents to avoid duplicate API calls
 const detailCache: Record<string, { classification: ClassificationResult; precedents: PrecedentItem[] }> = {};
@@ -16,8 +16,13 @@ export function useEmailDetail(email: Email | null) {
 
   // Draft states
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
-  const [draftPrompt, setDraftPrompt] = useState<string | null>(null);
-  const [aiDraft, setAiDraft] = useState<string | null>(null);
+  const [isSendingDraft, setIsSendingDraft] = useState(false);
+  const [activeStyle, setActiveStyle] = useState<'standard' | 'formal' | 'indepth'>('standard');
+  const [aiDrafts, setAiDrafts] = useState<Record<'standard' | 'formal' | 'indepth', string | null>>({
+    standard: null,
+    formal: null,
+    indepth: null,
+  });
   const [isDraftApproved, setIsDraftApproved] = useState(false);
 
   useEffect(() => {
@@ -25,8 +30,8 @@ export function useEmailDetail(email: Email | null) {
       setClassification(null);
       setTriageResult(null);
       setPrecedents([]);
-      setDraftPrompt(null);
-      setAiDraft(null);
+      setAiDrafts({ standard: null, formal: null, indepth: null });
+      setActiveStyle('standard');
       setIsDraftApproved(false);
       setError(null);
       return;
@@ -38,8 +43,8 @@ export function useEmailDetail(email: Email | null) {
       setClassification(null);
       setTriageResult(null);
       setPrecedents([]);
-      setDraftPrompt(null);
-      setAiDraft(null);
+      setAiDrafts({ standard: null, formal: null, indepth: null });
+      setActiveStyle('standard');
       setIsDraftApproved(false);
 
       try {
@@ -94,27 +99,54 @@ export function useEmailDetail(email: Email | null) {
     loadDetail(email);
   }, [email]);
 
-  const generateDraft = async () => {
+  const generateDraft = async (styleToGen?: 'standard' | 'formal' | 'indepth') => {
     if (!email) return;
+    const style = styleToGen || activeStyle;
+
+    // If we already have the draft for this style, just switch the active tab
+    if (aiDrafts[style]) {
+      setActiveStyle(style);
+      return;
+    }
+
     setIsGeneratingDraft(true);
     setError(null);
     setIsDraftApproved(false);
     try {
-      const injectRes = await generateDraftPrompt(email.body);
-      setDraftPrompt(injectRes.prompt);
-      
-      // Since standard openai key might not be configured, generate a high-quality mock email draft from client-side if no API is available, 
-      // or use the response prompt to build a mock AI draft. Let's make it look authentic and editable:
-      const nameMatch = email.sender.split('@')[0] || 'Sender';
-      const cleanName = nameMatch.charAt(0).toUpperCase() + nameMatch.slice(1);
-      const generatedDraft = `Hi ${cleanName},\n\nThank you for reaching out.\n\nI have received your email regarding "${email.subject}". I am currently reviewing the details and will get back to you with a resolution as soon as possible.\n\nBest regards,\nMailMind Co-Pilot`;
-      
-      setAiDraft(generatedDraft);
+      const draftRes = await generateEmailDraft(email.body, style, email.sender, email.subject);
+      setAiDrafts(prev => ({
+        ...prev,
+        [style]: draftRes.draft
+      }));
+      setActiveStyle(style);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to generate response draft');
+      setError(err.message || `Failed to generate ${style} response draft`);
     } finally {
       setIsGeneratingDraft(false);
+    }
+  };
+
+  const setAiDraft = (text: string) => {
+    setAiDrafts(prev => ({
+      ...prev,
+      [activeStyle]: text
+    }));
+  };
+
+  const sendDraft = async (comment: string) => {
+    if (!email) return;
+    setIsSendingDraft(true);
+    setError(null);
+    setIsDraftApproved(false);
+    try {
+      await sendEmailReply(email.id, comment);
+      setIsDraftApproved(true);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || 'Failed to send email reply');
+    } finally {
+      setIsSendingDraft(false);
     }
   };
 
@@ -124,11 +156,16 @@ export function useEmailDetail(email: Email | null) {
     classification,
     triageResult,
     precedents,
-    aiDraft,
+    aiDraft: aiDrafts[activeStyle],
     setAiDraft,
     isGeneratingDraft,
     generateDraft,
     isDraftApproved,
     setIsDraftApproved,
+    activeStyle,
+    setActiveStyle,
+    aiDrafts,
+    isSendingDraft,
+    sendDraft,
   };
 }

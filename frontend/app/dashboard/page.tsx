@@ -8,6 +8,7 @@ import { EmailList } from '../../components/inbox/EmailList';
 import { EmailDetail } from '../../components/detail/EmailDetail';
 import { CalendarView } from '../../components/calendar/CalendarView';
 import { RAGSettingsView } from '../../components/rag/RAGSettingsView';
+import { ComposeWindow } from '../../components/inbox/ComposeWindow';
 
 import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
@@ -25,6 +26,7 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isMockMode, setIsMockMode] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
 
   // Load auth status on mount
   useEffect(() => {
@@ -83,6 +85,10 @@ export default function Home() {
     generateDraft,
     isDraftApproved,
     setIsDraftApproved,
+    activeStyle,
+    setActiveStyle,
+    isSendingDraft,
+    sendDraft,
   } = useEmailDetail(selectedEmail);
 
   const {
@@ -144,6 +150,7 @@ export default function Home() {
         userEmail={userEmail}
         onLoginClick={() => {}}
         onLogoutClick={handleLogout}
+        onComposeClick={() => setIsComposeOpen(true)}
       />
 
       {/* Main Workspace Frame */}
@@ -184,6 +191,10 @@ export default function Home() {
                   generateDraft={generateDraft}
                   isDraftApproved={isDraftApproved}
                   setIsDraftApproved={setIsDraftApproved}
+                  activeStyle={activeStyle}
+                  setActiveStyle={setActiveStyle}
+                  isSendingDraft={isSendingDraft}
+                  sendDraft={sendDraft}
                   
                   // Commitments Props passed down inline
                   commitments={commitments}
@@ -214,6 +225,15 @@ export default function Home() {
           {activeTab === 'RAG Settings' && <RAGSettingsView />}
         </div>
       </div>
+
+      {isComposeOpen && (
+        <ComposeWindow
+          onClose={() => {
+            setIsComposeOpen(false);
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

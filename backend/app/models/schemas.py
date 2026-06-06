@@ -99,3 +99,38 @@ class CommitmentConfirmResponse(BaseModel):
     success: bool
     task_urls: List[str]
     event_urls: List[str]
+
+
+class DraftRequest(BaseModel):
+    """Payload for generating a draft response with style options."""
+
+    email_text: str
+    style: str  # "standard" | "formal" | "indepth"
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+
+
+class DraftResponse(BaseModel):
+    """Response payload containing generated draft email and citations."""
+
+    draft: str
+    precedent_citations: List[dict]
+
+
+class ReplyRequest(BaseModel):
+    """Payload to send an email reply with a comment."""
+
+    comment: str
+
+
+class ComposeRequest(BaseModel):
+    """Payload to send a new email."""
+
+    to: str
+    subject: str
+    body: str
+    cc: Optional[str] = None
+    bcc: Optional[str] = None
+
+
+

@@ -9,6 +9,7 @@ interface SidebarProps {
   userEmail: string | null;
   onLoginClick: () => void;
   onLogoutClick: () => void;
+  onComposeClick?: () => void;
 }
 
 export function Sidebar({
@@ -20,6 +21,7 @@ export function Sidebar({
   userEmail,
   onLoginClick,
   onLogoutClick,
+  onComposeClick,
 }: SidebarProps) {
   const [isMoreExpanded, setIsMoreExpanded] = React.useState(false);
 
@@ -135,6 +137,25 @@ export function Sidebar({
             </div>
           )}
         </div>
+
+        {/* Compose Button */}
+        {authenticated && (
+          <div className="p-3">
+            <button
+              onClick={onComposeClick}
+              className={`w-full flex items-center justify-center gap-2 bg-[var(--accent-primary)] hover:opacity-90 text-[var(--bg-surface)] font-bold rounded-lg transition-all cursor-pointer shadow-sm hover:shadow active:scale-95 duration-200 ${
+                isCollapsed ? 'p-2.5' : 'px-4 py-3 text-sm'
+              }`}
+              title="Compose Email"
+              id="sidebar-compose-btn"
+            >
+              <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              {!isCollapsed && <span className="animate-fade-in">Compose</span>}
+            </button>
+          </div>
+        )}
 
         {/* Navigation items */}
         <nav className="p-3 space-y-1.5 max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">

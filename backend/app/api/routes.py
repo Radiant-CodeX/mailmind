@@ -19,10 +19,15 @@ from app.models.schemas import (
     PrecedentItem,
     RAGQuery,
     TriageResult,
+    DraftRequest,
+    DraftResponse,
+    ReplyRequest,
+    ComposeRequest,
 )
 from app.queue.queue import QueueMessage
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
+from app.services.draft_service import DraftService
 from app.services.graph import GraphClient
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
 from app.services.tools import CalendarFetcher, ThreadFetcher
@@ -77,6 +82,30 @@ def get_emails(limit: int = 10) -> list[dict[str, Any]]:
     """Fetch recent emails/messages from the Outlook Inbox."""
     client = GraphClient()
     return client.get_inbox_emails(limit=limit)
+
+
+@router.post("/emails/{email_id}/reply")
+def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
+    """Send a reply to the specified email via Microsoft Graph."""
+    client = GraphClient()
+    client.send_reply(email_id, payload.comment)
+    return {"success": True}
+
+
+@router.post("/emails/compose")
+def compose_email(payload: ComposeRequest) -> dict[str, Any]:
+    """Compose and send a new email via Microsoft Graph."""
+    client = GraphClient()
+    client.send_new_email(
+        to=payload.to,
+        subject=payload.subject,
+        body=payload.body,
+        cc=payload.cc,
+        bcc=payload.bcc
+    )
+    return {"success": True}
+
+
 
 
 # Global dictionary to temporarily store active device flows
@@ -156,7 +185,7 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
 
 
 # Track mock logged-out state globally
-_mock_logged_out = False
+_mock_logged_out = True
 
 
 @router.post("/auth/login-mock")
@@ -333,6 +362,29 @@ def rag_inject(query: RAGQuery) -> dict[str, Any]:
     result = PrecedentInjector.inject(masked, precedents)
     precedents_cache.set(key, result)
     return result
+
+
+@router.post("/rag/draft", response_model=DraftResponse)
+def generate_draft(payload: DraftRequest) -> DraftResponse:
+    """Generate an email response draft using a selected style (standard, formal, or indepth) and context precedents."""
+    from app.services.cache import precedents_cache
+    import hashlib
+    key = f"draft:{payload.style}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    cached = precedents_cache.get(key)
+    if cached is not None:
+        return cached
+
+    service = DraftService()
+    draft, citations = service.generate_draft(
+        email_text=payload.email_text,
+        style=payload.style,
+        sender=payload.sender,
+        subject=payload.subject
+    )
+    result = DraftResponse(draft=draft, precedent_citations=citations)
+    precedents_cache.set(key, result)
+    return result
+
 
 
 @router.post("/commitments/extract", response_model=CommitmentExtractionResponse)

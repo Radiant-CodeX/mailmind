@@ -3,14 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { checkAuthStatus, loginInitiate, loginPoll, loginMock } from '../lib/api';
-import Dashboard from './dashboard/page';
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<'idle' | 'mock' | 'live'>('idle');
   const [authStatus, setAuthStatus] = useState<string>('checking');
-  const [authenticated, setAuthenticated] = useState(false);
   const [deviceFlow, setDeviceFlow] = useState<{
     userCode: string;
     verificationUri: string;
@@ -24,13 +22,8 @@ export default function LoginPage() {
     async function init() {
       try {
         const data = await checkAuthStatus();
-        if (data.authenticated) {
-          setAuthenticated(true);
-          setAuthStatus('authenticated');
-        } else {
-          setMode(data.status === 'mock_unauthenticated' ? 'mock' : 'live');
-          setAuthStatus('ready');
-        }
+        setMode((data.status === 'mock' || data.status === 'mock_unauthenticated') ? 'mock' : 'live');
+        setAuthStatus('ready');
       } catch (err) {
         console.error('Failed to query status', err);
         setMode('live');
@@ -45,8 +38,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await loginMock();
-      setAuthenticated(true);
-      setAuthStatus('authenticated');
+      router.push('/dashboard');
     } catch (err: any) {
       setError(err.message || 'Mock login failed');
       setLoading(false);
@@ -84,8 +76,7 @@ export default function LoginPage() {
         const data = await loginPoll(deviceCode);
         if (data.status === 'success') {
           clearInterval(interval);
-          setAuthenticated(true);
-          setAuthStatus('authenticated');
+          router.push('/dashboard');
         } else if (data.status === 'pending') {
           // keep polling
         } else {
@@ -117,17 +108,13 @@ export default function LoginPage() {
 
   if (authStatus === 'checking') {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary">
+      <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary" id="login-checking">
         <div className="text-center">
           <div className="w-8 h-8 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mx-auto mb-4"></div>
           <p className="text-xs text-[var(--text-muted)] font-medium">Checking authorization status...</p>
         </div>
       </div>
     );
-  }
-
-  if (authenticated) {
-    return <Dashboard />;
   }
 
   return (

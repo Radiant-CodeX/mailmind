@@ -67,6 +67,22 @@ export async function generateDraftPrompt(text: string) {
   return res.json();
 }
 
+export async function generateEmailDraft(text: string, style: string, sender?: string, subject?: string) {
+  const res = await fetch(`${BASE}/api/rag/draft`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email_text: text,
+      style: style,
+      sender: sender,
+      subject: subject,
+    }),
+  });
+  if (!res.ok) throw new Error('Email draft generation failed');
+  return res.json();
+}
+
+
 export async function fetchCalendar(days = 3) {
   const res = await fetch(`${BASE}/api/calendar?days=${days}`);
   if (!res.ok) throw new Error('Calendar fetch failed');
@@ -91,6 +107,28 @@ export async function fetchEmails(limit = 10) {
   if (!res.ok) throw new Error('Emails fetch failed');
   return res.json();
 }
+
+export async function sendEmailReply(emailId: string, comment: string) {
+  const res = await fetch(`${BASE}/api/emails/${emailId}/reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ comment }),
+  });
+  if (!res.ok) throw new Error('Failed to send email reply');
+  return res.json();
+}
+
+export async function composeEmail(payload: { to: string; subject: string; body: string; cc?: string; bcc?: string }) {
+  const res = await fetch(`${BASE}/api/emails/compose`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to send email');
+  return res.json();
+}
+
+
 
 export async function loginInitiate() {
   const res = await fetch(`${BASE}/api/auth/login-initiate`, { method: 'POST' });

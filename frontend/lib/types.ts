@@ -26,7 +26,7 @@ export interface Email {
   subject: string;
   body: string;
   received_at: string;
-  triage?: ClassificationResult;
+  triage?: TriageResult;
   composite_score?: number;
   isStarred?: boolean;
 }

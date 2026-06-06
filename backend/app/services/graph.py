@@ -400,6 +400,51 @@ class GraphClient:
         event = self._request("POST", f"{prefix}/events", json=event_payload)
         return event.get("webLink") or event.get("id")
 
+    def send_reply(self, email_id: str, comment: str) -> None:
+        """Send a reply to a message via Microsoft Graph API."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Replying to email {email_id} with comment: {comment[:30]}...")
+            return
+        
+        prefix = self._get_prefix()
+        payload = {
+            "comment": comment
+        }
+        self._request("POST", f"{prefix}/messages/{email_id}/reply", json=payload)
+
+    def send_new_email(self, to: str, subject: str, body: str, cc: str | None = None, bcc: str | None = None) -> None:
+        """Send a new email via Microsoft Graph API."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Sending new email to={to}, subject={subject}, cc={cc}, bcc={bcc}")
+            return
+
+        to_list = [t.strip() for t in to.split(",") if t.strip()]
+        to_recipients = [{"emailAddress": {"address": addr}} for addr in to_list]
+
+        message = {
+            "subject": subject,
+            "body": {
+                "contentType": "Text",
+                "content": body
+            },
+            "toRecipients": to_recipients
+        }
+
+        if cc:
+            cc_list = [c.strip() for c in cc.split(",") if c.strip()]
+            message["ccRecipients"] = [{"emailAddress": {"address": addr}} for addr in cc_list]
+
+        if bcc:
+            bcc_list = [b.strip() for b in bcc.split(",") if b.strip()]
+            message["bccRecipients"] = [{"emailAddress": {"address": addr}} for addr in bcc_list]
+
+        prefix = self._get_prefix()
+        payload = {
+            "message": message,
+            "saveToSentItems": "true"
+        }
+        self._request("POST", f"{prefix}/sendMail", json=payload)
+
     def fetch_sent_email(self, email_id: str) -> dict[str, Any] | None:
         """Fetch a sent email by message id for re-indexing."""
         if self.use_mock:
