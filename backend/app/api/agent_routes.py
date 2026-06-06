@@ -148,6 +148,20 @@ def process_email(request: AgentProcessRequest) -> AgentProcessResponse:
             detail=f"Pipeline error: {str(e)}",
         )
 
+    # De-anonymize response values
+    mapping = result.get("mask_mapping")
+    if mapping:
+        from app.services.pii import pii_sanitizer
+        if result.get("triage_reasoning"):
+            result["triage_reasoning"] = pii_sanitizer.restore_text(result["triage_reasoning"], mapping)
+        if result.get("draft_reply"):
+            result["draft_reply"] = pii_sanitizer.restore_text(result["draft_reply"], mapping)
+        for commitment in result.get("commitments", []):
+            if commitment.get("commitment"):
+                commitment["commitment"] = pii_sanitizer.restore_text(commitment["commitment"], mapping)
+            if commitment.get("conflict_detail"):
+                commitment["conflict_detail"] = pii_sanitizer.restore_text(commitment["conflict_detail"], mapping)
+
     return AgentProcessResponse(
         email_id=result["email_id"],
         masked_body=result.get("masked_body"),
@@ -262,6 +276,12 @@ def triage_only(request: TriageOnlyRequest) -> dict[str, Any]:
 
     state.update(ingest_node(state))
     state.update(triage_node(state))
+
+    mapping = state.get("mask_mapping")
+    if mapping:
+        from app.services.pii import pii_sanitizer
+        if state.get("triage_reasoning"):
+            state["triage_reasoning"] = pii_sanitizer.restore_text(state["triage_reasoning"], mapping)
 
     return {
         "email_id": state["email_id"],

@@ -35,7 +35,6 @@ from app.tools.email_tools import (
     check_calendar_conflict,
     compute_composite_score,
     extract_commitments_from_text,
-    mask_pii,
     retrieve_rag_precedents,
     score_action_axis,
     score_authority_axis,
@@ -121,14 +120,16 @@ def ingest_node(state: EmailAgentState) -> dict[str, Any]:
     This is a deterministic node — no LLM call needed. PII masking is always
     rule-based for security (we never send raw PII to an LLM).
 
-    State updates: masked_body, current_step
+    State updates: masked_body, mask_mapping, current_step
     """
     logger.info(f"[INGEST] Processing email_id={state['email_id']}")
 
-    masked = mask_pii.invoke({"text": state["body"]})
+    from app.services.pii import pii_sanitizer
+    masked, mapping = pii_sanitizer.mask_text(state["body"])
 
     return {
         "masked_body": masked,
+        "mask_mapping": mapping,
         "current_step": "ingest",
         "errors": [],
         "axes": [],

@@ -52,6 +52,7 @@ class EmailAgentState(TypedDict):
 
     # ── Triage Agent outputs ─────────────────────────────────────────────────
     masked_body: Optional[str]                # PII-scrubbed body
+    mask_mapping: Optional[dict[str, str]]    # Mapping to restore PII
     axes: list[AxisScore]                     # Five individual axis scores
     composite_score: float                    # 0–100 weighted aggregate
     priority: Optional[Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]]
