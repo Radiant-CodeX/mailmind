@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from datetime import datetime
 from typing import List, Literal, Optional
 
@@ -100,7 +101,6 @@ class CommitmentConfirmResponse(BaseModel):
     task_urls: List[str]
     event_urls: List[str]
 
-
 class DraftRequest(BaseModel):
     """Payload for generating a draft response with style options."""
 
@@ -133,4 +133,21 @@ class ComposeRequest(BaseModel):
     bcc: Optional[str] = None
 
 
+class EmailInput(BaseModel):
+    """Input for triage and email processing routes."""
+    sender: EmailStr
+    subject: str
+    body: str
+
+class ApprovalInput(BaseModel):
+    """Input for approving or rejecting a draft reply."""
+    email_id: int
+    action: str                        # "approve" or "reject"
+    draft_reply: Optional[str] = None
+
+class ConflictInput(BaseModel):
+    """Input for conflict detection and precedent lookup."""
+    sender: EmailStr
+    subject: str
+    body: str
 

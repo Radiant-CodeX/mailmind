@@ -1,12 +1,11 @@
 from __future__ import annotations
+
+import time
 from datetime import datetime, timedelta
 from typing import Any, List
 import time
-import re
 
 from app.config.settings import settings
-
-import httpx
 
 try:
     import msal

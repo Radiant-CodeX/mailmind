@@ -1,10 +1,11 @@
 import logging
+
 from fastapi import APIRouter
 from opentelemetry import trace
 
-from app.models import EmailInput, ApprovalInput, ConflictInput
-from services.triage_service import calculate_priority
+from app.models import ApprovalInput, ConflictInput, EmailInput
 from services.conflict_service import detect_conflict_and_precedent
+from services.triage_service import calculate_priority
 
 router = APIRouter()
 tracer = trace.get_tracer(__name__)

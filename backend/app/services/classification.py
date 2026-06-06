@@ -1,10 +1,12 @@
 from __future__ import annotations
+
 import json
 import logging
-from openai import OpenAI, AzureOpenAI
 
-from app.models.schemas import ClassificationResult
+from openai import AzureOpenAI, OpenAI
+
 from app.config.settings import settings
+from app.models.schemas import ClassificationResult
 
 logger = logging.getLogger(__name__)
 

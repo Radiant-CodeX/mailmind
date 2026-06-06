@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import json
 import re
 import threading
@@ -56,7 +57,7 @@ class CommitmentService:
         if settings.use_mock_graph:
             return None, ""
         try:
-            from openai import OpenAI, AzureOpenAI
+            from openai import AzureOpenAI, OpenAI
             if settings.azure_openai_api_key and settings.azure_openai_endpoint:
                 return AzureOpenAI(
                     api_key=settings.azure_openai_api_key,

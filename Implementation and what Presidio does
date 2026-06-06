@@ -1,0 +1,17 @@
+Our implementation of Microsoft Presidio functions as a hybrid security and PII (Personally Identifiable Information) sanitization layer designed to protect sensitive information in emails before sending them to the LLM.
+
+Here is exactly what it does:
+
+1. Hybrid Detection Mechanism
+To ensure high accuracy, it combines Natural Language Processing (NLP) with Regex fallbacks:
+
+NLP Named Entity Recognition (NER): It uses Microsoft Presidio's AnalyzerEngine backed by the lightweight spaCy en_core_web_sm model to contextually detect Names (PERSON), Email Addresses (EMAIL_ADDRESS), and Phone Numbers (PHONE_NUMBER).
+Regex Supplementation: It runs secondary regex passes to catch any formatting variations (like complex phone formats) that might have slipped below the NER model's confidence threshold.
+Greeting/Sign-off Heuristics: It uses specialized regex rules to identify name patterns typically found in email salutations (e.g., "Hi [Name]") and closures (e.g., "Best, [Name]"), while filtering out false positives like "Hi everyone" or "Dear team".
+2. Dual-Mode Fail-Safe
+Presidio Mode: If the required packages and spaCy models are present, it uses the full NLP engine.
+Regex Fallback Mode: If the spaCy engine fails to load or package dependencies are missing, the sanitizer automatically falls back to regex-only matching, logging a warning but continuing to sanitize safely without interrupting the application.
+3. Bidirectional Masking & Restoration
+Masking (mask_text): Replaces detected sensitive data with structured placeholders (e.g., {{NAME_1}}, {{EMAIL_1}}, {{PHONE_1}}). It replaces slices from the end of the text backward to avoid character offset displacement.
+Mapping: Generates a key-value dictionary mapping the placeholders back to the original values.
+Restoration (restore_text): Re-injects the original data into the final processed text by swapping the placeholders back out using the generated mapping (useful when presenting final drafts to the user)
