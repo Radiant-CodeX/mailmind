@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, List
-import time
+
+import httpx
 
 from app.config.settings import settings
 
@@ -354,7 +356,7 @@ class GraphClient:
             return {"role": "external", "score": 0.1, "source": "fallback"}
         # Try to get user by mail
         try:
-            prefix = self._get_prefix()
+            self._get_prefix()
             # If UPN matches the sender email exactly, it's the owner/internal
             if self.settings.azure_user_upn and sender_email.lower() == self.settings.azure_user_upn.lower():
                 return {"role": "internal", "score": 0.8, "source": "graph-owner"}

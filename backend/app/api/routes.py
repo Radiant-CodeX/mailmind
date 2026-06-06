@@ -14,15 +14,15 @@ from app.models.schemas import (
     CommitmentConfirmResponse,
     CommitmentExtractionRequest,
     CommitmentExtractionResponse,
+    ComposeRequest,
+    DraftRequest,
+    DraftResponse,
     EmailPayload,
     IngestResponse,
     PrecedentItem,
     RAGQuery,
-    TriageResult,
-    DraftRequest,
-    DraftResponse,
     ReplyRequest,
-    ComposeRequest,
+    TriageResult,
 )
 from app.queue.queue import QueueMessage
 from app.services.classification import ClassificationService
@@ -30,15 +30,15 @@ from app.services.commitments import CommitmentService
 from app.services.draft_service import DraftService
 from app.services.graph import GraphClient
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
-from app.services.tools import CalendarFetcher, ThreadFetcher
 from app.services.scorers import (
-    DeadlineScorer,
-    SentimentScorer,
-    SenderAuthorityScorer,
-    ThreadAgeDecayScorer,
     ActionTypeScorer,
     CompositeAggregator,
+    DeadlineScorer,
+    SenderAuthorityScorer,
+    SentimentScorer,
+    ThreadAgeDecayScorer,
 )
+from app.services.tools import CalendarFetcher, ThreadFetcher
 
 router = APIRouter(prefix="/api")
 
@@ -162,8 +162,9 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
             raise HTTPException(status_code=400, detail=result.get("error_description", error_code))
             
         # Success! Save token details in cache
-        from app.services.graph import _user_token_cache
         import time
+
+        from app.services.graph import _user_token_cache
         _user_token_cache["access_token"] = result.get("access_token")
         _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
         
@@ -301,8 +302,9 @@ def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rat
 @router.post("/classify", response_model=ClassificationResult)
 def classify_text(payload: RAGQuery) -> ClassificationResult:
     """Classify email text to assign priority, category, and confidence."""
-    from app.services.cache import classification_cache
     import hashlib
+
+    from app.services.cache import classification_cache
     key = f"classify:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = classification_cache.get(key)
     if cached is not None:
@@ -332,8 +334,9 @@ def fetch_calendar(days: int = 3) -> list[CalendarEvent]:
 @router.post("/rag/retrieve", response_model=list[PrecedentItem])
 def rag_retrieve(query: RAGQuery) -> list[PrecedentItem]:
     """Retrieve precedent emails similar to the provided email text."""
-    from app.services.cache import precedents_cache
     import hashlib
+
+    from app.services.cache import precedents_cache
     key = f"retrieve:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
@@ -349,8 +352,9 @@ def rag_retrieve(query: RAGQuery) -> list[PrecedentItem]:
 @router.post("/rag/inject")
 def rag_inject(query: RAGQuery) -> dict[str, Any]:
     """Create a prompt that injects precedent email context for response drafting."""
-    from app.services.cache import precedents_cache
     import hashlib
+
+    from app.services.cache import precedents_cache
     key = f"inject:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
@@ -367,8 +371,9 @@ def rag_inject(query: RAGQuery) -> dict[str, Any]:
 @router.post("/rag/draft", response_model=DraftResponse)
 def generate_draft(payload: DraftRequest) -> DraftResponse:
     """Generate an email response draft using a selected style (standard, formal, or indepth) and context precedents."""
-    from app.services.cache import precedents_cache
     import hashlib
+
+    from app.services.cache import precedents_cache
     key = f"draft:{payload.style}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:

@@ -1,5 +1,5 @@
-import os
 from dotenv import load_dotenv
+
 from app.config.settings import settings
 
 load_dotenv()

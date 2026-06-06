@@ -96,8 +96,9 @@ class CommitmentService:
 
     def extract(self, masked_email_text: str, thread_summary: str, email_id: str | None = None) -> list[CommitmentItem]:
         """Extract candidate commitments from masked email text using GPT-4o with fallback."""
-        from app.services.cache import commitments_cache
         import hashlib
+
+        from app.services.cache import commitments_cache
 
         # Determine cache key
         if email_id:

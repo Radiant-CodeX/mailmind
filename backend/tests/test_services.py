@@ -1,10 +1,8 @@
-import pytest
-from datetime import datetime, timezone
+from app.models.schemas import AxisScore
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
-from app.services.scorers import DeadlineScorer, SentimentScorer, CompositeAggregator, ActionTypeScorer, ThreadAgeDecayScorer
 from app.services.graph import GraphClient
-from app.models.schemas import AxisScore
+from app.services.scorers import CompositeAggregator, DeadlineScorer, SentimentScorer
 
 
 def test_classification_fallback_critical():

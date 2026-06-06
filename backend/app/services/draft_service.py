@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import logging
-from typing import Any, Iterable
-from openai import OpenAI, AzureOpenAI
+from typing import Any
+
+from openai import AzureOpenAI, OpenAI
 
 from app.config.settings import settings
-from app.models.schemas import PrecedentItem
-from app.services.rag import RetrievalService, RAGIndexFactory, mask_pii
+from app.services.rag import RAGIndexFactory, RetrievalService, mask_pii
 
 logger = logging.getLogger(__name__)
 
