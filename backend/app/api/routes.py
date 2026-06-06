@@ -120,22 +120,28 @@ def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
 def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
     """Send a reply to the specified email via Microsoft Graph."""
     client = GraphClient()
-    client.send_reply(email_id, payload.comment)
-    return {"success": True}
+    try:
+        client.send_reply(email_id, payload.comment)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to send reply: {str(e)}")
 
 
 @router.post("/emails/compose")
 def compose_email(payload: ComposeRequest) -> dict[str, Any]:
     """Compose and send a new email via Microsoft Graph."""
     client = GraphClient()
-    client.send_new_email(
-        to=payload.to,
-        subject=payload.subject,
-        body=payload.body,
-        cc=payload.cc,
-        bcc=payload.bcc
-    )
-    return {"success": True}
+    try:
+        client.send_new_email(
+            to=payload.to,
+            subject=payload.subject,
+            body=payload.body,
+            cc=payload.cc,
+            bcc=payload.bcc
+        )
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to compose email: {str(e)}")
 
 
 
@@ -191,6 +197,13 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
             error_code = result.get("error")
             if error_code == "authorization_pending":
                 return {"status": "pending"}
+            if "already been used" in result.get("error_description", "").lower():
+                from app.services.graph import _user_token_cache
+                if _user_token_cache["access_token"]:
+                    return {
+                        "status": "success",
+                        "user_principal_name": _user_token_cache.get("user_principal_name")
+                    }
             raise HTTPException(status_code=400, detail=result.get("error_description", error_code))
             
         # Success! Save token details in cache

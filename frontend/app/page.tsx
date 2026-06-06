@@ -17,6 +17,7 @@ export default function LoginPage() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const pollingIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     async function init() {
@@ -31,6 +32,11 @@ export default function LoginPage() {
       }
     }
     init();
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
   }, []);
 
   const handleMockLogin = async () => {
@@ -73,29 +79,33 @@ export default function LoginPage() {
   };
 
   const startPolling = (deviceCode: string) => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
     const interval = setInterval(async () => {
       try {
         const data = await loginPoll(deviceCode);
         if (data.status === 'success') {
-          clearInterval(interval);
+          if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
           router.push('/dashboard');
         } else if (data.status === 'pending') {
           // keep polling
         } else {
-          clearInterval(interval);
+          if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
           setLoading(false);
           setDeviceFlow(null);
           setError('Authentication flow expired or cancelled.');
         }
       } catch (err) {
         console.error('Poll error', err);
-        clearInterval(interval);
+        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
         setLoading(false);
         setDeviceFlow(null);
         const errMsg = err instanceof Error ? err.message : 'Connection lost during polling.';
         setError(errMsg);
       }
     }, 4000);
+    pollingIntervalRef.current = interval;
   };
 
   const handleCopyCode = async () => {
