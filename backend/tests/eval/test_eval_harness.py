@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 DATASET_PATH = ROOT / "golden_dataset.json"
@@ -238,6 +238,9 @@ def generate_report() -> dict:
 # ── Pytest tests ──────────────────────────────────────────────────────────────
 
 def test_priority_accuracy():
+    from app.config.settings import settings
+    if settings.use_mock_graph:
+        pytest.skip("Skipping model accuracy evaluation in Mock Mode")
     dataset = load_dataset()
     result = run_classification(dataset)
     score = result["priority_accuracy"]
@@ -246,6 +249,9 @@ def test_priority_accuracy():
 
 
 def test_category_accuracy():
+    from app.config.settings import settings
+    if settings.use_mock_graph:
+        pytest.skip("Skipping model category evaluation in Mock Mode")
     dataset = load_dataset()
     result = run_classification(dataset)
     score = result["category_accuracy"]
@@ -266,6 +272,9 @@ def test_user_control():
 
 
 def test_context_use():
+    from app.config.settings import settings
+    if settings.use_mock_graph:
+        pytest.skip("Skipping model context use evaluation in Mock Mode")
     dataset = load_dataset()
     result = run_context_use(dataset)
     score = result["context_use_score"]

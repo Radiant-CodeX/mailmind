@@ -48,9 +48,13 @@ jobs:
           python -m spacy download en_core_web_sm
       - name: Copy expanded golden dataset
         run: |
-          # Use the 50-item dataset if present, else use existing
           if [ -f golden_dataset_50.json ]; then
             cp golden_dataset_50.json golden_dataset.json
+          fi
+          # Verify the dataset file exists
+          if [ ! -f golden_dataset.json ]; then
+            echo "Error: golden_dataset.json not found"
+            exit 1
           fi
       - name: Generate eval report
         run: |
