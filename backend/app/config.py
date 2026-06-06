@@ -1,30 +1,16 @@
 import os
-from typing import Optional
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
+load_dotenv()
 
-class Settings(BaseSettings):
-    # API configuration
-    API_TITLE: str = "MailMind API"
-    
-    # LLM Settings
-    OPENAI_API_KEY: Optional[str] = None
-    OPENAI_API_TYPE: str = "openai" # "openai" or "azure"
-    OPENAI_API_VERSION: str = "2024-02-15-preview"
-    AZURE_OPENAI_ENDPOINT: Optional[str] = None
-    AZURE_OPENAI_DEPLOYMENT: Optional[str] = None # e.g. "gpt-4o"
-    
-    # Microsoft Graph Settings (for future live sync)
-    MS_GRAPH_CLIENT_ID: Optional[str] = None
-    MS_GRAPH_CLIENT_SECRET: Optional[str] = None
-    MS_GRAPH_TENANT_ID: Optional[str] = None
+AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
+AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
 
-    # Load from environment variables and .env file
-    model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
-        env_file_encoding="utf-8",
-        extra="ignore"
-    )
+TENANT_ID = os.getenv("TENANT_ID", "common")
+CLIENT_ID = os.getenv("CLIENT_ID")
+GRAPH_SCOPE = ["User.Read", "Mail.Read"]
 
-settings = Settings()
+FRONTEND_ORIGIN = "http://localhost:3000"
