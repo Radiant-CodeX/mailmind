@@ -54,9 +54,11 @@ def _get_llm(temperature: float = 0.1) -> AzureChatOpenAI | None:
     Return an AzureChatOpenAI instance configured from environment variables.
     Returns None if Azure credentials are not present (triggers fallback paths).
     """
-    api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-    deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o")
+    from app.config import settings as _settings
+    api_key = _settings.azure_openai_api_key
+    endpoint = _settings.azure_openai_base_endpoint  # strips deployment path / query params
+    deployment = _settings.azure_openai_chat_deployment
+    api_version = _settings.azure_openai_api_version
 
     if not api_key or not endpoint:
         logger.warning("Azure OpenAI credentials not set — using deterministic fallbacks")
@@ -66,7 +68,7 @@ def _get_llm(temperature: float = 0.1) -> AzureChatOpenAI | None:
         azure_endpoint=endpoint,
         azure_deployment=deployment,
         api_key=api_key,
-        api_version="2024-02-01",
+        api_version=api_version,
         temperature=temperature,
     )
 

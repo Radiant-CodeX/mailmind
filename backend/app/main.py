@@ -22,6 +22,8 @@ except Exception:
 from app.api.agent_routes import router as agent_router
 from app.api.routes import router
 from app.config.settings import settings
+from app.middleware import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.observability import init_observability
 from app.queue.queue import EmailQueue
 from routes.ai_routes import router as ai_router
 from routes.email_routes import router as email_router
@@ -88,18 +90,31 @@ app = FastAPI(
 
 FastAPIInstrumentor.instrument_app(app)
 
+# Structured logging + global exception handlers + optional Sentry.
+init_observability(app)
+
+# ── Security & rate-limit middleware ──────────────────────────────────────────
+# NOTE: middleware runs in reverse registration order, so the security headers
+# wrap the rate-limiter which wraps the app.
+app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Build an explicit allow-list of origins (no wildcards alongside credentials).
+_allowed_origins = list(dict.fromkeys(filter(None, [
+    settings.frontend_origin,
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+])))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        settings.frontend_origin,
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*", "Content-Type", "Authorization", "Accept"],
+    # Explicit header list — the CORS spec forbids "*" when credentials are allowed.
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token"],
 )
 
 app.include_router(router)

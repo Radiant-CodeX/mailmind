@@ -22,13 +22,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          python -m spacy download en_core_web_sm
       - name: Ruff Lint
         run: |
-          ruff check . --fix
           ruff check .
-      - name: Run unit tests
+      - name: Run unit + integration tests
+        env:
+          USE_MOCK_GRAPH: "true"
         run: |
-          PYTHONPATH=. pytest tests/test_services.py -v --tb=short || true
+          PYTHONPATH=. pytest tests/test_services.py tests/test_integration.py -v --tb=short
 
   eval:
     runs-on: ubuntu-latest
@@ -82,5 +84,7 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Unit tests
+        run: npm test
       - name: Build
         run: npm run build

@@ -1,0 +1,34 @@
+# Production override — live Microsoft Graph + Azure OpenAI.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Secrets are read from the host environment / a root .env file (NEVER commit it).
+# Required vars: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
+#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT,
+#   APPROVAL_TOKEN, FRONTEND_ORIGIN, NEXT_PUBLIC_API_URL
+
+services:
+  backend:
+    restart: unless-stopped
+    environment:
+      - USE_MOCK_GRAPH=false
+      - APP_ENV=production
+      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
+      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
+      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
+      - AZURE_USER_UPN=${AZURE_USER_UPN:-}
+      - GRAPH_SCOPES=https://graph.microsoft.com/.default
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_CHAT_DEPLOYMENT=${AZURE_OPENAI_CHAT_DEPLOYMENT}
+      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      - APPROVAL_TOKEN=${APPROVAL_TOKEN}
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - OTEL_EXPORTER_JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+
+  frontend:
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+      - NEXT_PUBLIC_SENTRY_DSN=${NEXT_PUBLIC_SENTRY_DSN:-}

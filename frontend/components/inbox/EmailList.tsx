@@ -1,6 +1,8 @@
 import React from 'react';
 import { Email } from '../../lib/types';
 import { EmailListItem } from './EmailListItem';
+import { SortMenu } from './SortMenu';
+import { SortKey } from '../../hooks/useEmails';
 
 interface EmailListProps {
   emails: Email[];
@@ -8,11 +10,15 @@ interface EmailListProps {
   onSelectEmail: (id: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  sortKey?: SortKey;
+  onSortChange?: (key: SortKey) => void;
   loading?: boolean;
   onRefresh?: () => void;
   isFullWidth?: boolean;
   activeFolder?: string;
   onToggleStar: (id: string) => void;
+  onTrashEmail?: (id: string) => void;
+  onRestoreEmail?: (id: string) => void;
 }
 
 export function EmailList({
@@ -21,11 +27,15 @@ export function EmailList({
   onSelectEmail,
   searchQuery,
   onSearchChange,
+  sortKey = 'normal',
+  onSortChange,
   loading = false,
   onRefresh,
   isFullWidth = false,
   activeFolder = 'Inbox',
   onToggleStar,
+  onTrashEmail,
+  onRestoreEmail,
 }: EmailListProps) {
   return (
     <div 
@@ -40,6 +50,7 @@ export function EmailList({
           {activeFolder}
         </h2>
         <div className="flex items-center gap-2">
+          {onSortChange && <SortMenu value={sortKey} onChange={onSortChange} />}
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -116,6 +127,8 @@ export function EmailList({
               isSelected={email.id === selectedEmailId}
               onClick={() => onSelectEmail(email.id)}
               onToggleStar={onToggleStar}
+              onTrash={activeFolder !== 'Trash' ? onTrashEmail : undefined}
+              onRestore={activeFolder === 'Trash' ? onRestoreEmail : undefined}
               isFullWidth={isFullWidth}
             />
           ))

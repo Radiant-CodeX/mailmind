@@ -2,13 +2,20 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { checkAuthStatus, loginInitiate, loginPoll, loginMock } from '../lib/api';
+import { checkAuthStatus, loginInitiate, loginPoll, loginMock, quickLogin } from '../lib/api';
+import {
+  getRememberedLogin,
+  clearRememberedLogin,
+  initialsFor,
+  RememberedLogin,
+} from '../lib/session';
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<'idle' | 'mock' | 'live'>('idle');
   const [authStatus, setAuthStatus] = useState<string>('checking');
+  const [remembered, setRemembered] = useState<RememberedLogin | null>(null);
   const [deviceFlow, setDeviceFlow] = useState<{
     userCode: string;
     verificationUri: string;
@@ -23,11 +30,18 @@ export default function LoginPage() {
     async function init() {
       try {
         const data = await checkAuthStatus();
+        // Quick resume: a live/mock session is already active — go straight in.
+        if (data.authenticated) {
+          router.replace('/dashboard');
+          return;
+        }
         setMode((data.status === 'mock' || data.status === 'mock_unauthenticated') ? 'mock' : 'live');
+        setRemembered(getRememberedLogin());
         setAuthStatus('ready');
       } catch (err) {
         console.error('Failed to query status', err);
         setMode('live');
+        setRemembered(getRememberedLogin());
         setAuthStatus('ready');
       }
     }
@@ -37,7 +51,7 @@ export default function LoginPage() {
         clearInterval(pollingIntervalRef.current);
       }
     };
-  }, []);
+  }, [router]);
 
   const handleMockLogin = async () => {
     setLoading(true);
@@ -50,6 +64,27 @@ export default function LoginPage() {
       setError(errorMessage);
       setLoading(false);
     }
+  };
+
+  // One-tap login using the remembered account — goes straight into MailMind
+  // with no device code / password prompt.
+  const handleQuickLogin = async () => {
+    if (!remembered) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await quickLogin(remembered.email);
+      router.push('/dashboard');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Quick login failed';
+      setError(msg);
+      setLoading(false);
+    }
+  };
+
+  const handleForgetAccount = () => {
+    clearRememberedLogin();
+    setRemembered(null);
   };
 
   const handleInitiateLogin = async () => {
@@ -155,9 +190,55 @@ export default function LoginPage() {
 
         {!deviceFlow ? (
           <div className="space-y-4">
-            <p className="text-xs text-[var(--text-muted)] text-center leading-relaxed mb-6">
-              Welcome back. Sign in to analyze, score, and draft calendar-aware actions on your Outlook inbox.
-            </p>
+            {/* Quick Login — one-tap continue with the last-used account */}
+            {remembered && (
+              <div className="mb-5 animate-fade-in">
+                <button
+                  onClick={handleQuickLogin}
+                  disabled={loading}
+                  className="w-full flex items-center gap-3 p-3 bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]/70 border border-[var(--border)] hover:border-[var(--accent-primary)]/40 rounded-xl transition-all cursor-pointer disabled:opacity-50 active:scale-[0.98] text-left group"
+                  id="btn-quick-login"
+                >
+                  <div className="w-10 h-10 rounded-full bg-[var(--accent-primary)] flex items-center justify-center text-[var(--bg-surface)] font-extrabold text-sm shrink-0 shadow">
+                    {initialsFor(remembered.email)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
+                      Quick Login
+                    </p>
+                    <p className="text-sm font-bold text-[var(--text-primary)] truncate" title={remembered.email}>
+                      {remembered.email}
+                    </p>
+                  </div>
+                  {loading ? (
+                    <div className="w-4 h-4 border-2 border-[var(--accent-primary)] border-t-transparent animate-spin rounded-full shrink-0" />
+                  ) : (
+                    <svg className="w-5 h-5 text-[var(--text-muted)] group-hover:text-[var(--accent-primary)] transition-colors shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={handleForgetAccount}
+                  className="mt-2 w-full text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                  id="btn-forget-account"
+                >
+                  Use a different account
+                </button>
+
+                <div className="flex items-center gap-3 my-5">
+                  <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">or</span>
+                  <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                </div>
+              </div>
+            )}
+
+            {!remembered && (
+              <p className="text-xs text-[var(--text-muted)] text-center leading-relaxed mb-6">
+                Welcome back. Sign in to analyze, score, and draft calendar-aware actions on your Outlook inbox.
+              </p>
+            )}
 
             {mode === 'mock' ? (
               <div className="space-y-3">

@@ -153,6 +153,30 @@ export async function sendEmailReply(emailId: string, comment: string) {
   return res.json();
 }
 
+export async function restoreEmailFromTrash(emailId: string) {
+  const res = await fetch(`${BASE}/api/emails/${emailId}/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error('Failed to restore email from trash');
+  return res.json();
+}
+
+export async function fetchEvaluation() {
+  const res = await fetch(`${BASE}/api/evaluate`);
+  if (!res.ok) throw new Error('Evaluation fetch failed');
+  return res.json();
+}
+
+export async function moveEmailToTrash(emailId: string) {
+  const res = await fetch(`${BASE}/api/emails/${emailId}/trash`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error('Failed to move email to trash');
+  return res.json();
+}
+
 export async function composeEmail(payload: { to: string; subject: string; body: string; cc?: string; bcc?: string }) {
   const res = await fetch(`${BASE}/api/emails/compose`, {
     method: 'POST',
@@ -213,5 +237,24 @@ export async function logoutUser() {
 export async function loginMock() {
   const res = await fetch(`${BASE}/api/auth/login-mock`, { method: 'POST' });
   if (!res.ok) throw new Error('Mock login failed');
+  return res.json();
+}
+
+export async function quickLogin(email: string) {
+  const res = await fetch(`${BASE}/api/auth/quick-login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) {
+    let message = 'Quick login failed';
+    try {
+      const data = await res.json();
+      if (data?.detail) message = data.detail;
+    } catch {
+      // keep default
+    }
+    throw new Error(message);
+  }
   return res.json();
 }
