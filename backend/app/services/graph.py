@@ -20,7 +20,21 @@ _user_token_cache: dict[str, Any] = {
     "expires_at": 0.0,
     "refresh_token": None,
     "user_principal_name": None,
+    "tenant_id": None,
 }
+
+# Microsoft's well-known tenant id for personal (consumer) Microsoft accounts.
+# Personal accounts use the To Do *live* web app; work/school accounts use the
+# *office* web app. Linking to the wrong one shows an empty/forced-login page.
+_PERSONAL_MSA_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad"
+
+# Tracks the status of in-progress device-code logins keyed by device_code.
+# Populated by the background completion thread started in `initiate_user_login`
+# and read by the `/auth/login-poll` endpoint. Values look like:
+#   {"status": "pending"}
+#   {"status": "success", "user_principal_name": "..."}
+#   {"status": "error", "error": "..."}
+_device_flow_status: dict[str, dict[str, Any]] = {}
 
 
 class GraphClient:
@@ -63,10 +77,30 @@ class GraphClient:
         
         now = time.time()
         # 1. Prioritize active user session token if set and valid
-        if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
-            return _user_token_cache["access_token"]
+        if _user_token_cache["access_token"]:
+            if now < (_user_token_cache["expires_at"] - 60):
+                return _user_token_cache["access_token"]
+            else:
+                # Active user session expired! Clear cache and raise 401
+                _user_token_cache["access_token"] = None
+                _user_token_cache["expires_at"] = 0.0
+                _user_token_cache["user_principal_name"] = None
+                from fastapi import HTTPException
+                raise HTTPException(
+                    status_code=401,
+                    detail="Active user session has expired. Please log in again."
+                )
 
-        # 2. Fall back to client credentials app token
+        # 2. If no active user session, check if we have daemon config (azure_user_upn)
+        # If not, user is not authenticated at all.
+        if not self.settings.azure_user_upn:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=401,
+                detail="Authentication required. Please log in first."
+            )
+
+        # 3. Fall back to client credentials app token for daemon mode
         if self._token and now < (self._token_expires_at - 60):
             return self._token
         result = self._app.acquire_token_for_client(scopes=self.scopes)
@@ -86,7 +120,8 @@ class GraphClient:
         with httpx.Client(timeout=30.0) as client:
             resp = client.request(method, url, headers=headers, **kwargs)
         resp.raise_for_status()
-        if resp.status_code == 204:
+        # 202 (Accepted, e.g. sendMail) and 204 (No Content) return empty bodies.
+        if resp.status_code in (202, 204) or not resp.content:
             return None
         return resp.json()
 
@@ -120,28 +155,51 @@ class GraphClient:
         return self._cached_prefix
 
     def initiate_user_login(self) -> dict[str, Any]:
-        """Initiate MSAL device code flow for user authentication."""
+        """Initiate MSAL device code flow and complete it in a background thread.
+
+        `acquire_token_by_device_flow` is a *blocking* call that polls Microsoft
+        until the user authenticates. It must be invoked exactly once per flow —
+        calling it again reuses the device_code and triggers AADSTS70000. So we
+        run it once in a background thread and let `/auth/login-poll` simply read
+        the resulting status from `_device_flow_status`.
+        """
+        import threading
+        import time as _time
+
         client_id = self.settings.azure_client_id
         tenant_id = self.settings.azure_tenant_id or "common"
         # Request standard delegated permissions for email, calendar, tasks and profile
-        scopes = ["User.Read", "Mail.ReadWrite", "Calendars.ReadWrite", "Tasks.ReadWrite"]
+        scopes = ["User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Tasks.ReadWrite"]
         app = msal.PublicClientApplication(
             client_id,
             authority=f"https://login.microsoftonline.com/{tenant_id}"
         )
         flow = app.initiate_device_flow(scopes=scopes)
-        return flow
+        if not flow or "device_code" not in flow:
+            return flow
 
-    def complete_user_login(self, flow: dict[str, Any]) -> dict[str, Any]:
-        """Poll and acquire token by device flow."""
-        client_id = self.settings.azure_client_id
-        tenant_id = self.settings.azure_tenant_id or "common"
-        app = msal.PublicClientApplication(
-            client_id,
-            authority=f"https://login.microsoftonline.com/{tenant_id}"
-        )
-        result = app.acquire_token_by_device_flow(flow)
-        return result
+        device_code = flow["device_code"]
+        _device_flow_status[device_code] = {"status": "pending"}
+
+        def _complete() -> None:
+            try:
+                result = app.acquire_token_by_device_flow(flow)
+                if not result or "access_token" not in result:
+                    error = (result or {}).get("error_description") or "Authentication failed"
+                    _device_flow_status[device_code] = {"status": "error", "error": error}
+                    return
+                id_token_claims = result.get("id_token_claims", {})
+                upn = id_token_claims.get("preferred_username") or id_token_claims.get("upn")
+                _user_token_cache["access_token"] = result.get("access_token")
+                _user_token_cache["expires_at"] = _time.time() + int(result.get("expires_in", 3600))
+                _user_token_cache["user_principal_name"] = upn
+                _user_token_cache["tenant_id"] = id_token_claims.get("tid")
+                _device_flow_status[device_code] = {"status": "success", "user_principal_name": upn}
+            except Exception as e:  # pragma: no cover - background thread safety
+                _device_flow_status[device_code] = {"status": "error", "error": str(e)}
+
+        threading.Thread(target=_complete, daemon=True).start()
+        return flow
 
     # --- Public methods (mocked when `use_mock` is True) ---
     def get_inbox_emails(self, limit: int = 10) -> List[dict[str, Any]]:
@@ -221,6 +279,51 @@ class GraphClient:
                 "received_at": msg.get("receivedDateTime"),
             })
         return formatted
+
+    def _format_messages(self, raw_msgs: list, date_field: str = "receivedDateTime") -> list:
+        formatted = []
+        for msg in raw_msgs:
+            from_obj = msg.get("from") or msg.get("sender")
+            sender_addr = "unknown@example.com"
+            if from_obj and "emailAddress" in from_obj:
+                sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
+            body_obj = msg.get("body")
+            body_content = body_obj.get("content", "") if body_obj else msg.get("bodyPreview", "")
+            formatted.append({
+                "email_id": msg.get("id"),
+                "sender": sender_addr,
+                "subject": msg.get("subject", ""),
+                "body": body_content,
+                "received_at": msg.get(date_field) or msg.get("receivedDateTime") or "",
+            })
+        return formatted
+
+    def get_draft_emails(self, limit: int = 10) -> List[dict[str, Any]]:
+        """Return messages from the user's Drafts folder."""
+        if self.use_mock:
+            return []
+        prefix = self._get_prefix()
+        path = f"{prefix}/mailFolders/drafts/messages?$top={limit}&$orderby=lastModifiedDateTime desc"
+        data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
+        return self._format_messages(data.get("value", []), date_field="lastModifiedDateTime")
+
+    def get_spam_emails(self, limit: int = 10) -> List[dict[str, Any]]:
+        """Return messages from the user's Junk Email (spam) folder."""
+        if self.use_mock:
+            return []
+        prefix = self._get_prefix()
+        path = f"{prefix}/mailFolders/junkemail/messages?$top={limit}&$orderby=receivedDateTime desc"
+        data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
+        return self._format_messages(data.get("value", []))
+
+    def get_trash_emails(self, limit: int = 10) -> List[dict[str, Any]]:
+        """Return messages from the user's Deleted Items folder."""
+        if self.use_mock:
+            return []
+        prefix = self._get_prefix()
+        path = f"{prefix}/mailFolders/deleteditems/messages?$top={limit}&$orderby=receivedDateTime desc"
+        data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
+        return self._format_messages(data.get("value", []))
 
     def get_thread_messages(self, thread_id: str) -> List[dict[str, Any]]:
         """Return messages for a conversation/thread.
@@ -377,10 +480,16 @@ class GraphClient:
             return {"role": "external", "score": 0.1, "source": "graph-fallback"}
 
     def create_todo(self, email_id: str, commitment: str) -> str:
-        """Create a To Do task in the user's default To Do list and return its webUrl."""
+        """Create a To Do task in the user's default To Do list.
+
+        Microsoft Graph does NOT return a per-task `webUrl` for To Do tasks
+        (unlike calendar events), so we return the To Do web app URL. This opens
+        Microsoft To Do where the newly created task is visible rather than
+        navigating to a bare task id.
+        """
         if self.use_mock:
-            return f"https://graph.microsoft.com/todo/{email_id}/{commitment[:10]}"
-        
+            return self._todo_web_url()
+
         prefix = self._get_prefix()
         lists = self._request("GET", f"{prefix}/todo/lists")
         lists_val = lists.get("value", [])
@@ -388,8 +497,19 @@ class GraphClient:
             raise RuntimeError("no todo lists available for user")
         list_id = lists_val[0]["id"]
         payload = {"title": commitment}
-        task = self._request("POST", f"{prefix}/todo/lists/{list_id}/tasks", json=payload)
-        return task.get("webUrl") or task.get("id")
+        self._request("POST", f"{prefix}/todo/lists/{list_id}/tasks", json=payload)
+        return self._todo_web_url()
+
+    def _todo_web_url(self) -> str:
+        """Return the correct Microsoft To Do web app URL for the signed-in account.
+
+        Personal (consumer) accounts use to-do.live.com; work/school accounts use
+        to-do.office.com. Opening the wrong one lands the user on a login/empty page
+        where their task is not visible.
+        """
+        if _user_token_cache.get("tenant_id") == _PERSONAL_MSA_TENANT_ID:
+            return "https://to-do.live.com/tasks/"
+        return "https://to-do.office.com/tasks/"
 
     def create_calendar_event(self, email_id: str, commitment: str, deadline: datetime | None) -> str:
         """Create a calendar event and return its webLink."""
@@ -397,8 +517,10 @@ class GraphClient:
             event_id = f"event-{email_id[:8]}"
             return f"https://graph.microsoft.com/calendar/{event_id}"
         
-        start = (deadline or datetime.utcnow()).isoformat()
-        end = (deadline or datetime.utcnow() + timedelta(hours=1)).isoformat()
+        start_dt = deadline or datetime.utcnow()
+        end_dt = start_dt + timedelta(hours=1)
+        start = start_dt.isoformat()
+        end = end_dt.isoformat()
         event_payload = {
             "subject": commitment,
             "start": {"dateTime": start, "timeZone": "UTC"},

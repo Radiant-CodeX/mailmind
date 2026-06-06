@@ -45,7 +45,16 @@ export async function confirmCommitments(emailId: string, commitments: Commitmen
     },
     body: JSON.stringify({ email_id: emailId, commitments }),
   });
-  if (!res.ok) throw new Error('Confirmation failed');
+  if (!res.ok) {
+    let message = 'Confirmation failed';
+    try {
+      const errData = await res.json();
+      if (errData && errData.detail) message = errData.detail;
+    } catch {
+      // keep default message
+    }
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -116,6 +125,24 @@ export async function fetchSentEmails(limit = 10) {
   return res.json();
 }
 
+export async function fetchDraftEmails(limit = 10) {
+  const res = await fetch(`${BASE}/api/emails/drafts?limit=${limit}`);
+  if (!res.ok) throw new Error('Drafts fetch failed');
+  return res.json();
+}
+
+export async function fetchSpamEmails(limit = 10) {
+  const res = await fetch(`${BASE}/api/emails/spam?limit=${limit}`);
+  if (!res.ok) throw new Error('Spam fetch failed');
+  return res.json();
+}
+
+export async function fetchTrashEmails(limit = 10) {
+  const res = await fetch(`${BASE}/api/emails/trash?limit=${limit}`);
+  if (!res.ok) throw new Error('Trash fetch failed');
+  return res.json();
+}
+
 export async function sendEmailReply(emailId: string, comment: string) {
   const res = await fetch(`${BASE}/api/emails/${emailId}/reply`, {
     method: 'POST',
@@ -145,24 +172,30 @@ export async function loginInitiate() {
 }
 
 export async function loginPoll(deviceCode: string) {
-  const res = await fetch(`${BASE}/api/auth/login-poll`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device_code: deviceCode }),
-  });
-  if (!res.ok) {
-    let errorMessage = 'Polling request failed';
-    try {
-      const errData = await res.json();
-      if (errData && errData.detail) {
-        errorMessage = errData.detail;
+  try {
+    const res = await fetch(`${BASE}/api/auth/login-poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_code: deviceCode }),
+    });
+
+    if (!res.ok) {
+      let errorMessage = 'Polling request failed';
+      try {
+        const errData = await res.json();
+        if (errData && errData.detail) {
+          errorMessage = errData.detail;
+        }
+      } catch {
+        // fallback to default message
       }
-    } catch {
-      // fallback
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
+
+    return res.json();
+  } catch (err) {
+    throw err;
   }
-  return res.json();
 }
 
 export async function checkAuthStatus() {

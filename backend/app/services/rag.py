@@ -38,12 +38,11 @@ class EmbeddingProvider:
                 ), settings.azure_openai_embedding_deployment
             elif settings.openai_api_key:
                 return OpenAI(api_key=settings.openai_api_key), "text-embedding-ada-002"
-        except Exception as e:
-            raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
-        raise RuntimeError(
-            "Real Azure OpenAI / OpenAI credentials are not configured in settings, "
-            "but USE_MOCK_GRAPH is set to false (Real account mode)."
-        )
+        except Exception:
+            return None, ""
+        # No LLM credentials in live mode — return None so callers fall back to
+        # the deterministic local embedding instead of raising a 500.
+        return None, ""
 
     def embed(self, text: str) -> list[float]:
         if settings.use_mock_graph:

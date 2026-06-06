@@ -60,10 +60,9 @@ class ClassificationService:
             ), settings.azure_openai_chat_deployment
         elif settings.openai_api_key:
             return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
-        raise RuntimeError(
-            "Real Azure OpenAI / OpenAI credentials are not configured in settings, "
-            "but USE_MOCK_GRAPH is set to false (Real account mode)."
-        )
+        # No LLM credentials in live mode — return None so callers fall back to
+        # the rule-based classifier instead of raising a 500.
+        return None, ""
 
     def _fallback_classify(self, masked_text: str) -> ClassificationResult:
         """Deterministic rule-based fallback classification."""

@@ -28,6 +28,13 @@ from routes.email_routes import router as email_router
 from routes.evaluation_routes import router as evaluation_router
 from routes.graph_routes import router as graph_router
 
+# API Bridge: Translate frontend /api/* calls to internal routes
+try:
+    from api_bridge import router as api_bridge_router
+except ImportError:
+    logging.warning("api_bridge.py not found; /api/* routes will not be available")
+    api_bridge_router = None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # ── OBS-03: Jaeger exporter ────────────────────────────────────────────────────
@@ -83,10 +90,16 @@ FastAPIInstrumentor.instrument_app(app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
+    allow_origins=[
+        settings.frontend_origin,
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*", "Content-Type", "Authorization", "Accept"],
 )
 
 app.include_router(router)
@@ -95,6 +108,10 @@ app.include_router(email_router)
 app.include_router(ai_router)
 app.include_router(graph_router)
 app.include_router(evaluation_router)
+
+# Include API Bridge for frontend /api/* routes
+if api_bridge_router:
+    app.include_router(api_bridge_router)
 
 
 # ── OBS-01/02: Helper for custom spans ────────────────────────────────────────
