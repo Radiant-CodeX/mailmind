@@ -92,7 +92,8 @@ export default function LoginPage() {
         clearInterval(interval);
         setLoading(false);
         setDeviceFlow(null);
-        setError('Connection lost during polling.');
+        const errMsg = err instanceof Error ? err.message : 'Connection lost during polling.';
+        setError(errMsg);
       }
     }, 4000);
   };

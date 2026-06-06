@@ -144,7 +144,18 @@ export async function loginPoll(deviceCode: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ device_code: deviceCode }),
   });
-  if (!res.ok) throw new Error('Polling request failed');
+  if (!res.ok) {
+    let errorMessage = 'Polling request failed';
+    try {
+      const errData = await res.json();
+      if (errData && errData.detail) {
+        errorMessage = errData.detail;
+      }
+    } catch {
+      // fallback
+    }
+    throw new Error(errorMessage);
+  }
   return res.json();
 }
 
