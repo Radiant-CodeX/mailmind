@@ -25,6 +25,7 @@ from app.models.schemas import (
     TriageResult,
 )
 from app.queue.queue import QueueMessage
+from app.services.alert_scheduler import alert_queue
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
 from app.services.draft_service import DraftService
@@ -38,6 +39,7 @@ from app.services.scorers import (
     SentimentScorer,
     ThreadAgeDecayScorer,
 )
+from app.services.tone_dna import ToneDNAService
 from app.services.tools import CalendarFetcher, ThreadFetcher
 
 router = APIRouter(prefix="/api")
@@ -487,3 +489,46 @@ def triage_email(payload: EmailPayload) -> TriageResult:
     result = aggregator.aggregate(axes)
     triage_cache.set(key, result)
     return result
+
+# ── Tone DNA routes ───────────────────────────────────────────────────────────
+
+
+@router.post("/tone-dna/build")
+def build_tone_dna() -> dict:
+    """DNA-01: Trigger Tone DNA ingestion from sent mail."""
+    svc = ToneDNAService(GraphClient())
+    profile = svc.ingest_and_build()
+    return {
+        "status": "built",
+        "sample_size": profile.get("sample_size", 0),
+        "formality_score": profile["features"]["formality_score"],
+        "generated_at": profile["generated_at"],
+    }
+
+@router.get("/tone-dna/profile")
+def get_tone_dna_profile() -> dict:
+    """Return current Tone DNA profile (or 404 if not yet built)."""
+    from fastapi import HTTPException
+
+    from app.services.tone_dna import load_profile
+    profile = load_profile()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Tone DNA profile not built yet. POST /api/tone-dna/build first.")
+    return profile
+
+
+# ── Alert queue route ─────────────────────────────────────────────────────────
+
+
+@router.get("/alerts")
+def get_alerts() -> list:
+    """CMT-06/07: Return queued T-24h and chase draft alerts."""
+    return alert_queue
+
+@router.post("/alerts/{idx}/resolve")
+def resolve_alert(idx: int) -> dict:
+    if idx >= len(alert_queue):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Alert not found")
+    alert_queue[idx]["resolved"] = True
+    return {"status": "resolved"}

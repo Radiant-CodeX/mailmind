@@ -1,3 +1,6 @@
+## docker-compose.yml  (replace existing file)
+## OBS-03: Adds Jaeger; OBS-04: Adds Prometheus
+
 version: '3.8'
 
 services:
@@ -9,8 +12,12 @@ services:
       - USE_MOCK_GRAPH=true
       - APPROVAL_TOKEN=secret-approval-token
       - FRONTEND_ORIGIN=http://localhost:3000
+      - OTEL_EXPORTER_JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+      - PROMETHEUS_PORT=9090
     volumes:
       - ./backend/data:/app/data
+    depends_on:
+      - jaeger
 
   frontend:
     build: ./frontend
@@ -20,3 +27,19 @@ services:
       - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
       - backend
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    ports:
+      - "16686:16686" # Jaeger UI  →  http://localhost:16686
+      - "14268:14268" # HTTP collector (traces from backend)
+      - "6831:6831/udp" # UDP agent
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml

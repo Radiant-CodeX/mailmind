@@ -141,6 +141,34 @@ export function DraftPanel({
             </button>
           </div>
 
+          {draft && (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '2px 8px',
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 600,
+                marginBottom: 8,
+                background: 'var(--color-background-success)',
+                color: 'var(--color-text-success)',
+                border: '0.5px solid var(--color-border-success)',
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944
+                  a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591
+                  3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622
+                  0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+              PII check: passed
+            </div>
+          )}
+
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}

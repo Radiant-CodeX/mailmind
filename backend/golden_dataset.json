@@ -1,7 +1,352 @@
 [
-  {"sender": "cto@company.com", "subject": "URGENT: Production outage", "body": "Our production database is down. Clients are seeing errors. Fix immediately.", "expected_priority": "Critical"},
-  {"sender": "client@acme.com", "subject": "Contract review needed", "body": "Please review and sign the attached contract by Friday.", "expected_priority": "High"},
-  {"sender": "colleague@company.com", "subject": "Weekly sync reminder", "body": "Just a reminder our weekly sync is tomorrow at 10am.", "expected_priority": "Normal"},
-  {"sender": "newsletter@service.com", "subject": "Your monthly digest", "body": "Here are this month's top articles and updates.", "expected_priority": "Normal"},
-  {"sender": "manager@company.com", "subject": "Action required: approve budget", "body": "Please approve the Q3 budget proposal ASAP.", "expected_priority": "High"}
+  {
+    "sender": "cto@company.com",
+    "subject": "URGENT: Production outage",
+    "body": "Our production database is down. Clients are seeing 500 errors. Fix immediately.",
+    "expected_priority": "Critical",
+    "expected_category": "support"
+  },
+  {
+    "sender": "ceo@company.com",
+    "subject": "Emergency board meeting tomorrow",
+    "body": "We have a crisis. Need all hands on deck by 8am tomorrow. This is critical.",
+    "expected_priority": "Critical",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@enterprise.com",
+    "subject": "System completely broken - losing revenue",
+    "body": "Your system has been down for 2 hours. We are losing $10k/hour. Fix this NOW or we cancel the contract.",
+    "expected_priority": "Critical",
+    "expected_category": "support"
+  },
+  {
+    "sender": "security@company.com",
+    "subject": "Data breach detected - immediate action required",
+    "body": "We have detected unauthorized access to customer data. This requires immediate escalation and response.",
+    "expected_priority": "Critical",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "vp@partner.com",
+    "subject": "CRITICAL: Contract expires in 2 hours",
+    "body": "The master service agreement expires at 5pm today. Sign and return immediately or deal is void.",
+    "expected_priority": "Critical",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "manager@company.com",
+    "subject": "Server down - all users affected",
+    "body": "Our auth server is returning 503 for all users. Engineering please respond ASAP.",
+    "expected_priority": "Critical",
+    "expected_category": "support"
+  },
+  {
+    "sender": "client@bigcorp.com",
+    "subject": "Outage - SLA breach imminent",
+    "body": "We are at 59 minutes of downtime. Our SLA allows 60 minutes. You are about to breach contract.",
+    "expected_priority": "Critical",
+    "expected_category": "support"
+  },
+  {
+    "sender": "cfo@company.com",
+    "subject": "Payroll system failure - payday tomorrow",
+    "body": "The payroll system has failed and payday is tomorrow. This needs immediate resolution.",
+    "expected_priority": "Critical",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "ops@company.com",
+    "subject": "Kubernetes cluster unresponsive",
+    "body": "All pods in prod namespace are in CrashLoopBackOff. Service is completely unavailable.",
+    "expected_priority": "Critical",
+    "expected_category": "support"
+  },
+  {
+    "sender": "legal@company.com",
+    "subject": "Court filing due in 1 hour",
+    "body": "We need the signed affidavit in the next 60 minutes or we miss the court deadline.",
+    "expected_priority": "Critical",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@acme.com",
+    "subject": "Contract review needed",
+    "body": "Please review and sign the attached contract by Friday.",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "manager@company.com",
+    "subject": "Action required: approve budget",
+    "body": "Please approve the Q3 budget proposal ASAP before the deadline Monday.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "sales@partner.com",
+    "subject": "Proposal for Q4 renewal - respond by EOW",
+    "body": "Attached is our renewal proposal for Q4. We need a decision by end of week to proceed.",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "director@company.com",
+    "subject": "Board presentation prep - need slides by Thursday",
+    "body": "The board meeting is Friday. I need your section of the deck by Thursday noon.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@startup.com",
+    "subject": "Integration broken after your last deploy",
+    "body": "Your API changes broke our integration. We need a hotfix or rollback. Please prioritize.",
+    "expected_priority": "High",
+    "expected_category": "support"
+  },
+  {
+    "sender": "hr@company.com",
+    "subject": "Performance review sign-off required by Friday",
+    "body": "Please complete and sign off on your team's performance reviews by end of Friday.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "procurement@bigco.com",
+    "subject": "PO approval needed - vendor payment overdue",
+    "body": "The vendor has flagged overdue payment. Please approve PO #4521 today.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@fintech.com",
+    "subject": "Compliance report due next week",
+    "body": "We require your compliance documentation by next Tuesday for our regulatory audit.",
+    "expected_priority": "High",
+    "expected_category": "support"
+  },
+  {
+    "sender": "vp.sales@company.com",
+    "subject": "Close this deal by Friday - $500k contract",
+    "body": "I need you to follow up with Acme today. This is a $500k deal and we close Friday.",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "support-escalation@zendesk.com",
+    "subject": "VIP customer ticket escalated - 4hr SLA",
+    "body": "Ticket #9922 from our platinum customer is now in escalation. SLA is 4 hours.",
+    "expected_priority": "High",
+    "expected_category": "support"
+  },
+  {
+    "sender": "colleague@company.com",
+    "subject": "Weekly sync reminder",
+    "body": "Just a reminder our weekly sync is tomorrow at 10am.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "team@company.com",
+    "subject": "Sprint planning next Monday",
+    "body": "Sprint planning is scheduled for Monday at 2pm. Please prepare your items.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@medium.com",
+    "subject": "Follow-up on last week's demo",
+    "body": "Thanks for the demo last week. We are evaluating the product and will get back to you.",
+    "expected_priority": "Normal",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "hr@company.com",
+    "subject": "Updated leave policy document",
+    "body": "Please find attached the updated leave policy. Read and acknowledge by end of month.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "support@vendor.com",
+    "subject": "Your ticket has been updated",
+    "body": "Your support ticket #1234 has been updated. The team is working on your issue.",
+    "expected_priority": "Normal",
+    "expected_category": "support"
+  },
+  {
+    "sender": "manager@company.com",
+    "subject": "Monthly report reminder",
+    "body": "Please submit your monthly activity report by the last day of the month.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@retail.com",
+    "subject": "Question about feature X",
+    "body": "Hi, can you clarify how feature X works? We had some confusion during onboarding.",
+    "expected_priority": "Normal",
+    "expected_category": "support"
+  },
+  {
+    "sender": "sales@partner.com",
+    "subject": "New product launch next quarter",
+    "body": "We are launching a new product next quarter and wanted to discuss partnership opportunities.",
+    "expected_priority": "Normal",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "dev@company.com",
+    "subject": "Code review request",
+    "body": "Hi, could you review my PR when you get a chance? No rush, just want a second pair of eyes.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "ops@company.com",
+    "subject": "Maintenance window scheduled for Sunday",
+    "body": "We will be performing routine maintenance Sunday 2-4am. Minimal disruption expected.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "newsletter@techdigest.io",
+    "subject": "This week in AI: GPT updates, new models",
+    "body": "Here is your weekly digest of AI news and updates. No action required.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "noreply@linkedin.com",
+    "subject": "3 people viewed your profile this week",
+    "body": "See who is looking at your profile. Connect with new people in your industry.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "updates@github.com",
+    "subject": "GitHub Actions run completed",
+    "body": "Your workflow run for branch feature/xyz completed successfully. All checks passed.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "billing@saas.com",
+    "subject": "Your invoice is ready",
+    "body": "Your monthly invoice for $199 is now available. Payment will be processed automatically.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "events@conference.com",
+    "subject": "You are registered for DevConf 2026",
+    "body": "Thank you for registering. Your confirmation number is #DC2026-4521.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "team@company.com",
+    "subject": "Team lunch this Friday!",
+    "body": "We are doing a team lunch this Friday at noon. Hope to see everyone there!",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "noreply@jira.com",
+    "subject": "Issue assigned to you: Update docs",
+    "body": "DOCS-123 has been assigned to you: Update API documentation for v2 endpoints.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "newsletter@producthunt.com",
+    "subject": "Top products of the week",
+    "body": "Check out the top-rated products launched this week on Product Hunt.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "security@company.com",
+    "subject": "Monthly security digest",
+    "body": "Here is your monthly security summary. No critical vulnerabilities were found this month.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "hr@company.com",
+    "subject": "Happy work anniversary!",
+    "body": "Congratulations on your 3-year work anniversary with us! Thank you for your contributions.",
+    "expected_priority": "Normal",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "vp@bigclient.com",
+    "subject": "Upsell opportunity - expand to 500 seats",
+    "body": "We are happy with the product and want to discuss expanding to 500 seats across all teams.",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "director@prospect.com",
+    "subject": "RFP response needed by next Friday",
+    "body": "We are evaluating vendors and need your RFP response by next Friday to be considered.",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "client@healthcare.com",
+    "subject": "HIPAA compliance documentation required",
+    "body": "Our compliance team needs your HIPAA BAA and security documentation before we can proceed.",
+    "expected_priority": "High",
+    "expected_category": "support"
+  },
+  {
+    "sender": "ops@company.com",
+    "subject": "AWS bill 3x higher than expected this month",
+    "body": "Our AWS costs are $45k this month vs $15k last month. Need to investigate and act.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "manager@company.com",
+    "subject": "Quarterly OKR review - prepare by Thursday",
+    "body": "Our quarterly OKR review is Friday. Please have your team results ready by Thursday.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "legal@partner.com",
+    "subject": "NDA required before sharing technical specs",
+    "body": "Please sign the attached NDA. Once received we can share the full technical specification.",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "client@logistics.com",
+    "subject": "API rate limiting causing failures in production",
+    "body": "We are hitting rate limits on your API which is causing failures in our production pipeline.",
+    "expected_priority": "High",
+    "expected_category": "support"
+  },
+  {
+    "sender": "cto@startup.com",
+    "subject": "Technical deep-dive call - can you do tomorrow?",
+    "body": "Our engineering team wants a deep-dive on your API architecture. Can we schedule tomorrow?",
+    "expected_priority": "High",
+    "expected_category": "sales"
+  },
+  {
+    "sender": "finance@company.com",
+    "subject": "Budget freeze effective immediately",
+    "body": "All discretionary spending is frozen effective today. Please hold any pending approvals.",
+    "expected_priority": "High",
+    "expected_category": "internal"
+  },
+  {
+    "sender": "client@media.com",
+    "subject": "Feature request blocking our launch",
+    "body": "We cannot launch without the bulk export feature. This is blocking us. What is the ETA?",
+    "expected_priority": "High",
+    "expected_category": "support"
+  }
 ]
