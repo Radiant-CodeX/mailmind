@@ -1,26 +1,104 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Default is dark monochrome */
+  --bg-base: hsl(0, 0%, 2%);
+  --bg-surface: hsl(0, 0%, 6%);
+  --bg-elevated: hsl(0, 0%, 10%);
+  --accent-primary: hsl(0, 0%, 100%); /* White */
+  --accent-success: hsl(142, 70%, 45%);
+  --accent-warning: hsl(38, 92%, 50%);
+  --accent-critical: hsl(0, 84%, 60%);
+  --text-primary: hsl(0, 0%, 98%);
+  --text-muted: hsl(0, 0%, 60%);
+  --border: hsl(0, 0%, 14%);
+  --border-subtle: hsl(0, 0%, 8%);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+.theme-light {
+  --bg-base: hsl(0, 0%, 98%);
+  --bg-surface: hsl(0, 0%, 100%);
+  --bg-elevated: hsl(0, 0%, 94%);
+  --accent-primary: hsl(0, 0%, 0%); /* Black */
+  --accent-success: hsl(142, 60%, 40%);
+  --accent-warning: hsl(38, 90%, 45%);
+  --accent-critical: hsl(0, 80%, 50%);
+  --text-primary: hsl(0, 0%, 2%);
+  --text-muted: hsl(0, 0%, 45%);
+  --border: hsl(0, 0%, 88%);
+  --border-subtle: hsl(0, 0%, 94%);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.theme-dark {
+  --bg-base: hsl(0, 0%, 2%);
+  --bg-surface: hsl(0, 0%, 6%);
+  --bg-elevated: hsl(0, 0%, 10%);
+  --accent-primary: hsl(0, 0%, 100%); /* White */
+  --accent-success: hsl(142, 70%, 45%);
+  --accent-warning: hsl(38, 92%, 50%);
+  --accent-critical: hsl(0, 84%, 60%);
+  --text-primary: hsl(0, 0%, 98%);
+  --text-muted: hsl(0, 0%, 60%);
+  --border: hsl(0, 0%, 14%);
+  --border-subtle: hsl(0, 0%, 8%);
+}
+
+@theme {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-success: var(--accent-success);
+  --color-accent-warning: var(--accent-warning);
+  --color-accent-critical: var(--accent-critical);
+  --color-text-primary: var(--text-primary);
+  --color-text-muted: var(--text-muted);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+
+  --font-sans: var(--font-geist-sans), Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Custom premium scrollbars */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-primary);
+}
+
+/* Keyframes and custom animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

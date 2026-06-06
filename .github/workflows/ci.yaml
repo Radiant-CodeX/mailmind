@@ -39,7 +39,7 @@ jobs:
 
       - name: Run Tests
         run: |
-          pytest || true
+          pytest
 
   frontend:
     runs-on: ubuntu-latest

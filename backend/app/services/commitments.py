@@ -53,19 +53,24 @@ class CommitmentService:
 
     def _get_llm_client(self) -> tuple[Any, str]:
         """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
+        if settings.use_mock_graph:
+            return None, ""
         try:
             from openai import OpenAI, AzureOpenAI
             if settings.azure_openai_api_key and settings.azure_openai_endpoint:
                 return AzureOpenAI(
                     api_key=settings.azure_openai_api_key,
-                    api_version="2024-02-01",
+                    api_version=settings.azure_openai_api_version,
                     azure_endpoint=settings.azure_openai_endpoint
                 ), settings.azure_openai_chat_deployment
             elif settings.openai_api_key:
                 return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
-        except Exception:
-            pass
-        return None, ""
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
+        raise RuntimeError(
+            "Real Azure OpenAI / OpenAI credentials are not configured in settings, "
+            "but USE_MOCK_GRAPH is set to false (Real account mode)."
+        )
 
     def _fallback_extract(self, masked_email_text: str) -> list[CommitmentItem]:
         """Extract candidate commitments using a local rule-based regex fallback."""
@@ -88,8 +93,30 @@ class CommitmentService:
                 )
         return commitments
 
-    def extract(self, masked_email_text: str, thread_summary: str) -> list[CommitmentItem]:
+    def extract(self, masked_email_text: str, thread_summary: str, email_id: str | None = None) -> list[CommitmentItem]:
         """Extract candidate commitments from masked email text using GPT-4o with fallback."""
+        from app.services.cache import commitments_cache
+        import hashlib
+
+        # Determine cache key
+        if email_id:
+            key = f"id:{email_id}"
+        else:
+            key = f"hash:{hashlib.sha256(masked_email_text.strip().lower().encode('utf-8')).hexdigest()}"
+
+        cached = commitments_cache.get(key)
+        if cached is not None:
+            return cached
+
+        # Calculate if not cached:
+        result = self._extract_uncached(masked_email_text, thread_summary)
+        commitments_cache.set(key, result)
+        return result
+
+    def _extract_uncached(self, masked_email_text: str, thread_summary: str) -> list[CommitmentItem]:
+        if settings.use_mock_graph:
+            return self._fallback_extract(masked_email_text)
+
         client, model = self._get_llm_client()
         if not client:
             return self._fallback_extract(masked_email_text)
@@ -164,7 +191,8 @@ class CommitmentService:
                             id=str(uuid.uuid4()),
                             commitment=commitment_text,
                             deadline=deadline_dt,
-                            confidence=confidence
+                            confidence=confidence,
+                            confirmed=False
                         )
                     )
             return results
@@ -185,13 +213,44 @@ class CommitmentService:
             return None
 
     def confirm(self, email_id: str, commitments: list[CommitmentItem]) -> dict[str, Any]:
-        """Create tracking artifacts for approved commitments."""
+        """Create tracking artifacts for approved commitments, reusing existing cached events/tasks."""
+        from app.services.cache import commitments_cache
+        key = f"id:{email_id}"
+        cached_list = commitments_cache.get(key)
+
         task_urls: list[str] = []
         event_urls: list[str] = []
+
         for commitment in commitments:
             if commitment.approved:
-                task_urls.append(self.graph_client.create_todo(email_id, commitment.commitment))
-                event_urls.append(self.graph_client.create_calendar_event(email_id, commitment.commitment, commitment.deadline))
+                # Check if it was already confirmed in our cache
+                already_done = False
+                if cached_list:
+                    matched = next((item for item in cached_list if item.id == commitment.id), None)
+                    if matched and getattr(matched, "confirmed", False):
+                        task_urls.append(matched.task_url or "")
+                        event_urls.append(matched.event_url or "")
+                        already_done = True
+
+                if not already_done:
+                    t_url = self.graph_client.create_todo(email_id, commitment.commitment)
+                    e_url = self.graph_client.create_calendar_event(email_id, commitment.commitment, commitment.deadline)
+                    task_urls.append(t_url)
+                    event_urls.append(e_url)
+
+                    # Update the item in our cached list
+                    if cached_list:
+                        matched = next((item for item in cached_list if item.id == commitment.id), None)
+                        if matched:
+                            matched.approved = True
+                            matched.confirmed = True
+                            matched.task_url = t_url
+                            matched.event_url = e_url
+
+        # Save updated list back to cache
+        if cached_list:
+            commitments_cache.set(key, cached_list)
+
         self._audit(email_id, commitments)
         self._schedule_reindex(email_id)
         return {"success": True, "task_urls": task_urls, "event_urls": event_urls}

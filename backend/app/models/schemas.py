@@ -73,6 +73,9 @@ class CommitmentItem(BaseModel):
     deadline: Optional[datetime]
     confidence: float
     approved: Optional[bool] = None
+    confirmed: Optional[bool] = False
+    task_url: Optional[str] = None
+    event_url: Optional[str] = None
 
 
 class CommitmentExtractionRequest(BaseModel):
@@ -80,6 +83,7 @@ class CommitmentExtractionRequest(BaseModel):
 
     masked_email_text: str
     thread_summary: Optional[str] = None
+    email_id: Optional[str] = None
 
 
 class CommitmentExtractionResponse(BaseModel):

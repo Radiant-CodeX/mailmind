@@ -25,6 +25,8 @@ class EmbeddingProvider:
 
     def _get_llm_client(self) -> tuple[Any, str]:
         """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
+        if settings.use_mock_graph:
+            return None, ""
         try:
             from openai import OpenAI, AzureOpenAI
             if settings.azure_openai_api_key and settings.azure_openai_endpoint:
@@ -35,11 +37,21 @@ class EmbeddingProvider:
                 ), settings.azure_openai_embedding_deployment
             elif settings.openai_api_key:
                 return OpenAI(api_key=settings.openai_api_key), "text-embedding-ada-002"
-        except Exception:
-            pass
-        return None, ""
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize OpenAI client: {e}")
+        raise RuntimeError(
+            "Real Azure OpenAI / OpenAI credentials are not configured in settings, "
+            "but USE_MOCK_GRAPH is set to false (Real account mode)."
+        )
 
     def embed(self, text: str) -> list[float]:
+        if settings.use_mock_graph:
+            normalized = text.lower().strip()
+            vector = [0.0] * 64
+            for idx, char in enumerate(normalized[:64]):
+                vector[idx] = (ord(char) % 32) / 31.0
+            return vector
+
         client, model = self._get_llm_client()
         if client:
             try:

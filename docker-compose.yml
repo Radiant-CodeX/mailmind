@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - USE_MOCK_GRAPH=true
+      - APPROVAL_TOKEN=secret-approval-token
+      - FRONTEND_ORIGIN=http://localhost:3000
+    volumes:
+      - ./backend/data:/app/data
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend

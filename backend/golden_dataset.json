@@ -1,0 +1,7 @@
+[
+  {"sender": "cto@company.com", "subject": "URGENT: Production outage", "body": "Our production database is down. Clients are seeing errors. Fix immediately.", "expected_priority": "Critical"},
+  {"sender": "client@acme.com", "subject": "Contract review needed", "body": "Please review and sign the attached contract by Friday.", "expected_priority": "High"},
+  {"sender": "colleague@company.com", "subject": "Weekly sync reminder", "body": "Just a reminder our weekly sync is tomorrow at 10am.", "expected_priority": "Normal"},
+  {"sender": "newsletter@service.com", "subject": "Your monthly digest", "body": "Here are this month's top articles and updates.", "expected_priority": "Normal"},
+  {"sender": "manager@company.com", "subject": "Action required: approve budget", "body": "Please approve the Q3 budget proposal ASAP.", "expected_priority": "High"}
+]

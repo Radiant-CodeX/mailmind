@@ -1,4 +1,6 @@
+import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, status
@@ -16,13 +18,22 @@ from app.models.schemas import (
     IngestResponse,
     PrecedentItem,
     RAGQuery,
+    TriageResult,
 )
 from app.queue.queue import QueueMessage
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
 from app.services.graph import GraphClient
-from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService
+from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
 from app.services.tools import CalendarFetcher, ThreadFetcher
+from app.services.scorers import (
+    DeadlineScorer,
+    SentimentScorer,
+    SenderAuthorityScorer,
+    ThreadAgeDecayScorer,
+    ActionTypeScorer,
+    CompositeAggregator,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -45,6 +56,11 @@ def _rate_limit(request: Request) -> None:
 
 def _validate_approval_token(token: str | None) -> None:
     """Ensure the approval token matches the configured secret."""
+    if not settings.use_mock_graph and settings.approval_token == "secret-approval-token":
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Default approval token cannot be used in Live Mode. Please configure APPROVAL_TOKEN in settings."
+        )
     if token != settings.approval_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid approval token")
 
@@ -54,6 +70,153 @@ def health(request: Request) -> dict[str, Any]:
     """Health check endpoint reporting current queue depth."""
     queue = request.app.state.email_queue
     return {"status": "ok", "queue_size": queue.size()}
+
+
+@router.get("/emails", response_model=list[EmailPayload])
+def get_emails(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch recent emails/messages from the Outlook Inbox."""
+    client = GraphClient()
+    return client.get_inbox_emails(limit=limit)
+
+
+# Global dictionary to temporarily store active device flows
+active_device_flows: dict[str, dict[str, Any]] = {}
+
+
+@router.post("/auth/login-initiate")
+def login_initiate() -> dict[str, Any]:
+    """Initiate MSAL device code login flow."""
+    client = GraphClient()
+    if client.use_mock:
+        return {
+            "status": "mock",
+            "message": "App is running in MOCK mode. Login not required."
+        }
+    try:
+        flow = client.initiate_user_login()
+        if not flow or "device_code" not in flow:
+            raise HTTPException(status_code=500, detail="Failed to initiate device flow")
+        
+        # Save flow in global dict keyed by device_code
+        active_device_flows[flow["device_code"]] = flow
+        return {
+            "status": "pending",
+            "device_code": flow["device_code"],
+            "user_code": flow["user_code"],
+            "verification_uri": flow["verification_uri"],
+            "message": flow["message"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/auth/login-poll")
+def login_poll(payload: dict[str, str]) -> dict[str, Any]:
+    """Poll MSAL to complete user authentication."""
+    device_code = payload.get("device_code")
+    if not device_code:
+        raise HTTPException(status_code=400, detail="Missing device_code")
+    
+    flow = active_device_flows.get(device_code)
+    if not flow:
+        raise HTTPException(status_code=404, detail="Active login session not found")
+        
+    client = GraphClient()
+    try:
+        result = client.complete_user_login(flow)
+        if not result:
+            return {"status": "pending"}
+        if "error" in result:
+            error_code = result.get("error")
+            if error_code == "authorization_pending":
+                return {"status": "pending"}
+            raise HTTPException(status_code=400, detail=result.get("error_description", error_code))
+            
+        # Success! Save token details in cache
+        from app.services.graph import _user_token_cache
+        import time
+        _user_token_cache["access_token"] = result.get("access_token")
+        _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
+        
+        # Find logged-in user UPN or mail
+        id_token_claims = result.get("id_token_claims", {})
+        upn = id_token_claims.get("preferred_username") or id_token_claims.get("upn")
+        _user_token_cache["user_principal_name"] = upn
+        
+        # Clean up flow
+        active_device_flows.pop(device_code, None)
+        return {
+            "status": "success",
+            "user_principal_name": upn
+        }
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Track mock logged-out state globally
+_mock_logged_out = False
+
+
+@router.post("/auth/login-mock")
+def login_mock() -> dict[str, Any]:
+    """Log in dynamically in mock/demo mode."""
+    global _mock_logged_out
+    _mock_logged_out = False
+    return {
+        "status": "mock",
+        "authenticated": True,
+        "user_principal_name": "mock.user@example.com"
+    }
+
+
+@router.get("/auth/status")
+def auth_status() -> dict[str, Any]:
+    """Check the current login status and user principal name."""
+    from app.services.graph import _user_token_cache
+    client = GraphClient()
+    
+    global _mock_logged_out
+    if client.use_mock:
+        if _mock_logged_out:
+            return {
+                "status": "mock_unauthenticated",
+                "authenticated": False,
+                "user_principal_name": None
+            }
+        return {
+            "status": "mock",
+            "authenticated": True,
+            "user_principal_name": "mock.user@example.com"
+        }
+        
+    import time
+    now = time.time()
+    if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
+        return {
+            "status": "authenticated",
+            "authenticated": True,
+            "user_principal_name": _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com"
+        }
+    return {
+        "status": "unauthenticated",
+        "authenticated": False,
+        "user_principal_name": None
+    }
+
+
+@router.post("/auth/logout")
+def auth_logout() -> dict[str, Any]:
+    """Log out the current user session by clearing token cache."""
+    global _mock_logged_out
+    _mock_logged_out = True
+    
+    from app.services.graph import _user_token_cache
+    _user_token_cache["access_token"] = None
+    _user_token_cache["expires_at"] = 0.0
+    _user_token_cache["user_principal_name"] = None
+    return {"status": "logged_out"}
 
 
 @router.get("/webhook", response_class=PlainTextResponse)
@@ -109,8 +272,18 @@ def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rat
 @router.post("/classify", response_model=ClassificationResult)
 def classify_text(payload: RAGQuery) -> ClassificationResult:
     """Classify email text to assign priority, category, and confidence."""
+    from app.services.cache import classification_cache
+    import hashlib
+    key = f"classify:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    cached = classification_cache.get(key)
+    if cached is not None:
+        return cached
+
     classifier = ClassificationService()
-    return classifier.classify(payload.email_text)
+    masked = mask_pii(payload.email_text)
+    result = classifier.classify(masked)
+    classification_cache.set(key, result)
+    return result
 
 
 @router.get("/thread/{thread_id}")
@@ -130,24 +303,43 @@ def fetch_calendar(days: int = 3) -> list[CalendarEvent]:
 @router.post("/rag/retrieve", response_model=list[PrecedentItem])
 def rag_retrieve(query: RAGQuery) -> list[PrecedentItem]:
     """Retrieve precedent emails similar to the provided email text."""
+    from app.services.cache import precedents_cache
+    import hashlib
+    key = f"retrieve:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    cached = precedents_cache.get(key)
+    if cached is not None:
+        return cached
+
     index = RAGIndexFactory()()
-    results = RetrievalService(index).retrieve(query.email_text)
+    masked = mask_pii(query.email_text)
+    results = RetrievalService(index).retrieve(masked)
+    precedents_cache.set(key, results)
     return results
 
 
 @router.post("/rag/inject")
 def rag_inject(query: RAGQuery) -> dict[str, Any]:
     """Create a prompt that injects precedent email context for response drafting."""
+    from app.services.cache import precedents_cache
+    import hashlib
+    key = f"inject:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    cached = precedents_cache.get(key)
+    if cached is not None:
+        return cached
+
     index = RAGIndexFactory()()
-    precedents = RetrievalService(index).retrieve(query.email_text)
-    return PrecedentInjector.inject(query.email_text, precedents)
+    masked = mask_pii(query.email_text)
+    precedents = RetrievalService(index).retrieve(masked)
+    result = PrecedentInjector.inject(masked, precedents)
+    precedents_cache.set(key, result)
+    return result
 
 
 @router.post("/commitments/extract", response_model=CommitmentExtractionResponse)
 def extract_commitments(payload: CommitmentExtractionRequest) -> CommitmentExtractionResponse:
     """Extract commitment candidates from masked email text."""
     service = CommitmentService(GraphClient())
-    commitments = service.extract(payload.masked_email_text, payload.thread_summary or "")
+    commitments = service.extract(payload.masked_email_text, payload.thread_summary or "", payload.email_id)
     return CommitmentExtractionResponse(commitments=commitments)
 
 
@@ -158,3 +350,83 @@ def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | Non
     service = CommitmentService(GraphClient())
     result = service.confirm(payload.email_id, payload.commitments)
     return CommitmentConfirmResponse(**result)
+
+
+@router.get("/evaluate")
+def evaluate_model():
+    """Evaluate model performance against a golden dataset."""
+    dataset_path = Path("golden_dataset.json")
+    if not dataset_path.exists():
+        dataset_path = Path("backend/golden_dataset.json")
+        if not dataset_path.exists():
+            return {"error": "golden_dataset.json not found"}
+
+    with open(dataset_path, "r", encoding="utf-8") as file:
+        dataset = json.load(file)
+
+    results = []
+    correct = 0
+    classifier = ClassificationService()
+
+    for item in dataset:
+        email_text = f"Subject: {item['subject']}\nSender: {item['sender']}\nBody: {item['body']}"
+        prediction = classifier.classify(email_text)
+        
+        # Map output to dataset priority labels
+        pred_priority = prediction.priority
+        if pred_priority == "CRITICAL":
+            predicted = "Critical"
+        elif pred_priority == "HIGH":
+            predicted = "High"
+        else:
+            predicted = "Normal"
+
+        expected = item["expected_priority"]
+        is_correct = expected == predicted
+        if is_correct:
+            correct += 1
+
+        results.append({
+            "subject": item["subject"],
+            "expected": expected,
+            "predicted": predicted,
+            "is_correct": is_correct,
+        })
+
+    accuracy = round((correct / len(dataset)) * 100, 2)
+    return {
+        "accuracy": accuracy,
+        "total_samples": len(dataset),
+        "correct_predictions": correct,
+        "results": results,
+    }
+
+
+@router.post("/triage", response_model=TriageResult)
+def triage_email(payload: EmailPayload) -> TriageResult:
+    """Calculate the five-axis triage score for an email."""
+    from app.services.cache import triage_cache
+    key = f"id:{payload.email_id}"
+    cached = triage_cache.get(key)
+    if cached is not None:
+        return cached
+
+    deadline_scorer = DeadlineScorer()
+    authority_scorer = SenderAuthorityScorer(GraphClient())
+    sentiment_scorer = SentimentScorer()
+    decay_scorer = ThreadAgeDecayScorer()
+    action_scorer = ActionTypeScorer()
+    aggregator = CompositeAggregator()
+
+    body = payload.body
+    # Calculate each axis score
+    deadline_score = deadline_scorer.score(body, payload.received_at)
+    authority_score = authority_scorer.score(str(payload.sender))
+    sentiment_score = sentiment_scorer.score(body)
+    decay_score = decay_scorer.score(payload.received_at)
+    action_score = action_scorer.score(body)
+
+    axes = [deadline_score, authority_score, sentiment_score, decay_score, action_score]
+    result = aggregator.aggregate(axes)
+    triage_cache.set(key, result)
+    return result
