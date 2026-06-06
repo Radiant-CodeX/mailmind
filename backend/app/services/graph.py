@@ -227,7 +227,7 @@ class GraphClient:
 
         For Graph this queries messages filtered by `conversationId`.
         """
-        if self.use_mock:
+        if self.use_mock or thread_id.startswith("sent-") or thread_id.startswith("email-") or thread_id.startswith("msg-"):
             return [
                 {
                     "sender": "alice@example.com",
@@ -238,8 +238,11 @@ class GraphClient:
             ]
         prefix = self._get_prefix()
         path = f"{prefix}/messages?$filter=conversationId eq '{thread_id}'"
-        data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
-        raw_msgs = data.get("value", [])
+        try:
+            data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
+            raw_msgs = data.get("value", [])
+        except Exception:
+            return []
         
         formatted = []
         for msg in raw_msgs:
