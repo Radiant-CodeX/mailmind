@@ -2,65 +2,85 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
-      - develop
-      - "feature/**"
-
+    branches: [main, develop, "feature/**"]
   pull_request:
-    branches:
-      - develop
-      - main
+    branches: [develop, main]
 
 jobs:
   backend:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: backend
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install ruff pytest
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
       - name: Ruff Lint
         run: |
           ruff check . --fix
           ruff check .
-
-      - name: Run Tests
+      - name: Run unit tests
         run: |
-          PYTHONPATH=. pytest || true
+          PYTHONPATH=. pytest tests/test_services.py -v --tb=short || true
+
+  eval:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      USE_MOCK_GRAPH: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m spacy download en_core_web_sm
+      - name: Copy expanded golden dataset
+        run: |
+          if [ -f golden_dataset_50.json ]; then
+            cp golden_dataset_50.json golden_dataset.json
+          fi
+          # Verify the dataset file exists
+          if [ ! -f golden_dataset.json ]; then
+            echo "Error: golden_dataset.json not found"
+            exit 1
+          fi
+      - name: Generate eval report
+        run: |
+          PYTHONPATH=. python tests/eval/test_eval_harness.py
+      - name: Run eval pytest
+        run: |
+          PYTHONPATH=. pytest tests/eval/test_eval_harness.py -v --tb=short
+      - name: Upload eval report
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: backend/tests/eval/eval_report.json
 
   frontend:
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: frontend
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
       - name: Install dependencies
         run: npm ci
-
       - name: Lint
         run: npm run lint
-
       - name: Build
         run: npm run build

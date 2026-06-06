@@ -56,6 +56,10 @@
   --color-border: var(--border);
   --color-border-subtle: var(--border-subtle);
 
+  --color-background-success: color-mix(in srgb, var(--accent-success) 10%, transparent);
+  --color-text-success: var(--accent-success);
+  --color-border-success: color-mix(in srgb, var(--accent-success) 20%, transparent);
+
   --font-sans: var(--font-geist-sans), Inter, system-ui, -apple-system, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }

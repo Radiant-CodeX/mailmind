@@ -205,9 +205,31 @@ class RetrievalService:
         self.index = index
         self.embedder = embedder or EmbeddingProvider()
 
-    def retrieve(self, email_text: str) -> list[dict[str, Any]]:
+    def retrieve(self, email_text: str) -> list[Any]:
         vector = self.embedder.embed(mask_pii(email_text))
-        return self.index.search(vector, top_k=3, threshold=settings.rag_similarity_threshold)
+        results = self.index.search(vector, top_k=3, threshold=settings.rag_similarity_threshold)
+
+        # RAG-06: Flag if any precedent matches known escalation patterns
+        ESCALATION_KEYWORDS = [
+            "escalat", "outage", "breach", "critical", "incident",
+            "down", "failure", "emergency", "lawsuit",
+        ]
+        for item in results:
+            snippet = (item.snippet if hasattr(item, "snippet") else "").lower()
+            if any(kw in snippet for kw in ESCALATION_KEYWORDS):
+                # Attach incident flag to the item for frontend display
+                if hasattr(item, "__dict__"):
+                    item.__dict__["incident_flag"] = True
+                    # Try to extract a date from the snippet for "Similar to incident on X"
+                    import re as _re
+                    date_match = _re.search(
+                        r"\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*"
+                        r"|\d{4}-\d{2}-\d{2})\b",
+                        item.snippet,
+                        _re.I,
+                    )
+                    item.__dict__["incident_date"] = date_match.group(0) if date_match else None
+        return results
 
     def index_sent_emails(self, graph_client: Any, days: int = 180) -> int:
         """Fetch sent emails from Graph, mask PII, generate embeddings in batches of 50, and index them."""

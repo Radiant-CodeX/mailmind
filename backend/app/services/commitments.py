@@ -249,6 +249,25 @@ class CommitmentService:
                             matched.task_url = t_url
                             matched.event_url = e_url
 
+                    # CMT-06: Schedule T-24h proactive alert
+                    from app.services.alert_scheduler import AlertScheduler, alert_queue
+                    from app.services.draft_service import DraftService
+                    scheduler = AlertScheduler(DraftService(), alert_queue)
+                    if commitment.approved and commitment.deadline:
+                        dl = commitment.deadline
+                        if isinstance(dl, str):
+                            try:
+                                dl = datetime.fromisoformat(dl.replace("Z", "+00:00"))
+                            except ValueError:
+                                dl = None
+                        if dl:
+                            scheduler.schedule_commitment_alert(
+                                email_id=email_id,
+                                commitment_text=commitment.commitment,
+                                deadline=dl,
+                                original_email_body=commitment.commitment,
+                            )
+
         # Save updated list back to cache
         if cached_list:
             commitments_cache.set(key, cached_list)
@@ -284,8 +303,23 @@ class CommitmentService:
         )
         index.trim(settings.index_max_size)
 
-    def _audit(self, email_id: str, commitments: list[CommitmentItem]) -> None:
-        """Log commitment approval decisions for operational visibility."""
-        for commitment in commitments:
-            status = "approved" if commitment.approved else "skipped"
-            print(f"[AUDIT] {email_id} {commitment.id} {status} {commitment.commitment}")
+    def _audit(self, email_id: str, commitments: list) -> None:
+        """API-09: Persist audit log to data/audit.log"""
+        import json as _json
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        log_path = Path("data/audit.log")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        for c in commitments:
+            entry = {
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                "email_id": email_id,
+                "commitment_id": c.id,
+                "action": "approved" if c.approved else "skipped",
+                "commitment": c.commitment,
+                "confidence": c.confidence,
+            }
+            with open(log_path, "a") as f:
+                f.write(_json.dumps(entry) + "\n")
