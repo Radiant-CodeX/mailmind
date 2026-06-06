@@ -81,8 +81,9 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
       setTimeout(() => {
         onClose();
       }, 1500);
-    } catch (err: any) {
-      setError(err.message || 'Failed to send email. Please try again.');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to send email. Please try again.';
+      setError(errorMessage);
     } finally {
       setIsSending(false);
     }

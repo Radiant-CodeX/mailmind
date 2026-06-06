@@ -31,7 +31,7 @@ export function CommitmentItem({ item, onToggle, conflict }: CommitmentItemProps
         text: formatted,
         isUrgent: dlDate <= today,
       };
-    } catch (e) {
+    } catch {
       return null;
     }
   };

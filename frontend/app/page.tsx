@@ -39,8 +39,9 @@ export default function LoginPage() {
     try {
       await loginMock();
       router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Mock login failed');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Mock login failed';
+      setError(errorMessage);
       setLoading(false);
     }
   };
@@ -63,9 +64,10 @@ export default function LoginPage() {
       });
 
       startPolling(data.device_code);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Failed to initiate login flow');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to initiate login flow';
+      setError(errorMessage);
       setLoading(false);
     }
   };

@@ -7,7 +7,6 @@ import { ThreadView } from './ThreadView';
 import { CommitmentGate } from '../commitments/CommitmentGate';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { ErrorBanner } from '../shared/ErrorBanner';
-import { EmptyState } from '../shared/EmptyState';
 
 interface EmailDetailProps {
   email: Email | null;
@@ -71,16 +70,8 @@ export function EmailDetail({
   checkConflict,
   onClose,
 }: EmailDetailProps) {
-  const [isTriageExpanded, setIsTriageExpanded] = useState(false);
   const [isDraftExpanded, setIsDraftExpanded] = useState(false);
   const [isCommitmentsExpanded, setIsCommitmentsExpanded] = useState(false);
-
-  // Escape key close listener & auto collapse/expand options when email changes
-  React.useEffect(() => {
-    setIsTriageExpanded(false);
-    setIsDraftExpanded(false);
-    setIsCommitmentsExpanded(false);
-  }, [email?.id]);
 
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

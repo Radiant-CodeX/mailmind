@@ -27,14 +27,16 @@ export function useEmailDetail(email: Email | null) {
 
   useEffect(() => {
     if (!email) {
-      setClassification(null);
-      setTriageResult(null);
-      setPrecedents([]);
-      setAiDrafts({ standard: null, formal: null, indepth: null });
-      setActiveStyle('standard');
-      setIsDraftApproved(false);
-      setError(null);
-      return;
+      const resetTimer = setTimeout(() => {
+        setClassification(null);
+        setTriageResult(null);
+        setPrecedents([]);
+        setAiDrafts({ standard: null, formal: null, indepth: null });
+        setActiveStyle('standard');
+        setIsDraftApproved(false);
+        setError(null);
+      }, 0);
+      return () => clearTimeout(resetTimer);
     }
 
     async function loadDetail(currEmail: Email) {
@@ -58,25 +60,26 @@ export function useEmailDetail(email: Email | null) {
         }
 
         // 2. Fetch missing items (reusing triage if available in list item)
-        const promises: Promise<any>[] = [
-          classifyEmail(currEmail.body),
-          retrievePrecedents(currEmail.body),
-        ];
-
+        const classPromise = classifyEmail(currEmail.body);
+        const precPromise = retrievePrecedents(currEmail.body);
+        
         const needsTriageFetch = !currEmail.triage;
-        if (needsTriageFetch) {
-          promises.push(
-            triageEmail({
+        const triagePromise = needsTriageFetch
+          ? triageEmail({
               email_id: currEmail.id,
               sender: currEmail.sender,
               subject: currEmail.subject,
               body: currEmail.body,
               received_at: currEmail.received_at,
             })
-          );
-        }
+          : Promise.resolve(null);
 
-        const [classRes, precRes, fetchedTriageRes] = await Promise.all(promises);
+        const [classRes, precRes, fetchedTriageRes] = await Promise.all([
+          classPromise,
+          precPromise,
+          triagePromise,
+        ]);
+        
         const triageRes = needsTriageFetch ? fetchedTriageRes : currEmail.triage;
 
         // Save to cache
@@ -88,15 +91,19 @@ export function useEmailDetail(email: Email | null) {
         setClassification(classRes);
         setPrecedents(precRes);
         setTriageResult(triageRes || null);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error(err);
-        setError(err.message || 'Failed to load email triage analysis');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load email triage analysis';
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
-    loadDetail(email);
+    const loadTimer = setTimeout(() => {
+      loadDetail(email);
+    }, 0);
+    return () => clearTimeout(loadTimer);
   }, [email]);
 
   const generateDraft = async (styleToGen?: 'standard' | 'formal' | 'indepth') => {
@@ -119,9 +126,10 @@ export function useEmailDetail(email: Email | null) {
         [style]: draftRes.draft
       }));
       setActiveStyle(style);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || `Failed to generate ${style} response draft`);
+      const errMsg = err instanceof Error ? err.message : `Failed to generate ${style} response draft`;
+      setError(errMsg);
     } finally {
       setIsGeneratingDraft(false);
     }
@@ -142,9 +150,10 @@ export function useEmailDetail(email: Email | null) {
     try {
       await sendEmailReply(email.id, comment);
       setIsDraftApproved(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Failed to send email reply');
+      const errMsg = err instanceof Error ? err.message : 'Failed to send email reply';
+      setError(errMsg);
     } finally {
       setIsSendingDraft(false);
     }

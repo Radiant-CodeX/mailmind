@@ -20,7 +20,7 @@ export function CalendarView({ events, loading, error, onRefresh }: CalendarView
         hour: '2-digit',
         minute: '2-digit',
       });
-    } catch (e) {
+    } catch {
       return '';
     }
   };
@@ -32,7 +32,7 @@ export function CalendarView({ events, loading, error, onRefresh }: CalendarView
         month: 'short',
         day: 'numeric',
       });
-    } catch (e) {
+    } catch {
       return '';
     }
   };

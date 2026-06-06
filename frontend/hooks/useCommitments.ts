@@ -16,12 +16,14 @@ export function useCommitments(emailId: string | null, emailBody: string | null)
 
   useEffect(() => {
     if (!emailId || !emailBody) {
-      setCommitments([]);
-      setError(null);
-      setConfirmed(false);
-      setTaskUrls([]);
-      setEventUrls([]);
-      return;
+      const resetTimer = setTimeout(() => {
+        setCommitments([]);
+        setError(null);
+        setConfirmed(false);
+        setTaskUrls([]);
+        setEventUrls([]);
+      }, 0);
+      return () => clearTimeout(resetTimer);
     }
 
     async function loadCommitments() {
@@ -35,29 +37,33 @@ export function useCommitments(emailId: string | null, emailBody: string | null)
       try {
         const res = await extractCommitments(emailBody!, '', emailId!);
         // Check newly extracted commitments by default to enable one-click synchronization
-        const items = (res.commitments || []).map((c: any) => ({
+        const items = (res.commitments || []).map((c: CommitmentItem) => ({
           ...c,
           approved: true,
         }));
         setCommitments(items);
 
         // Pre-populate URLs if any tasks were already confirmed
-        const confirmedTasks = items.filter((c: any) => c.confirmed && c.task_url).map((c: any) => c.task_url);
-        const confirmedEvents = items.filter((c: any) => c.confirmed && c.event_url).map((c: any) => c.event_url);
+        const confirmedTasks = items.filter((c: CommitmentItem) => c.confirmed && c.task_url).map((c: CommitmentItem) => c.task_url as string);
+        const confirmedEvents = items.filter((c: CommitmentItem) => c.confirmed && c.event_url).map((c: CommitmentItem) => c.event_url as string);
         if (confirmedTasks.length > 0 || confirmedEvents.length > 0) {
           setConfirmed(true);
           setTaskUrls(confirmedTasks);
           setEventUrls(confirmedEvents);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error(err);
-        setError(err.message || 'Failed to extract commitments');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to extract commitments';
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
     }
 
-    loadCommitments();
+    const loadTimer = setTimeout(() => {
+      loadCommitments();
+    }, 0);
+    return () => clearTimeout(loadTimer);
   }, [emailId, emailBody]);
 
   const toggleCommitment = (id: string) => {
@@ -99,9 +105,10 @@ export function useCommitments(emailId: string | null, emailBody: string | null)
       } else {
         throw new Error('Server returned unsuccessful commitment confirmation');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Failed to confirm commitments');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to confirm commitments';
+      setError(errorMessage);
     } finally {
       setConfirming(false);
     }

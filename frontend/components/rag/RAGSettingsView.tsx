@@ -4,33 +4,44 @@ import React, { useState, useEffect } from 'react';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 
 export function RAGSettingsView() {
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.78);
-  const [maxIndexSize, setMaxIndexSize] = useState(1000);
-  const [useChroma, setUseChroma] = useState(true);
+  const [similarityThreshold, setSimilarityThreshold] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('rag_similarity_threshold');
+      if (saved !== null) return parseFloat(saved);
+    }
+    return 0.78;
+  });
+  const [maxIndexSize, setMaxIndexSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('rag_max_index_size');
+      if (saved !== null) return parseInt(saved);
+    }
+    return 1000;
+  });
+  const [useChroma, setUseChroma] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('rag_use_chroma');
+      if (saved !== null) return saved === 'true';
+    }
+    return true;
+  });
   const [indexing, setIndexing] = useState(false);
   const [indexStats, setIndexStats] = useState({
     indexedEmails: 54,
-    lastIndexed: new Date(Date.now() - 4 * 3600000).toLocaleString(),
+    lastIndexed: '',
     storageUsed: '14.2 MB',
   });
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Load settings from localStorage on mount to prevent reset when tab is switched
+  // Load timestamp on mount to prevent purity/hydration issues
   useEffect(() => {
-    const savedThreshold = localStorage.getItem('rag_similarity_threshold');
-    if (savedThreshold !== null) {
-      setSimilarityThreshold(parseFloat(savedThreshold));
-    }
-
-    const savedMaxIndexSize = localStorage.getItem('rag_max_index_size');
-    if (savedMaxIndexSize !== null) {
-      setMaxIndexSize(parseInt(savedMaxIndexSize));
-    }
-
-    const savedUseChroma = localStorage.getItem('rag_use_chroma');
-    if (savedUseChroma !== null) {
-      setUseChroma(savedUseChroma === 'true');
-    }
+    const timer = setTimeout(() => {
+      setIndexStats((prev) => ({
+        ...prev,
+        lastIndexed: new Date(Date.now() - 4 * 3600000).toLocaleString(),
+      }));
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   const updateSimilarityThreshold = (val: number) => {

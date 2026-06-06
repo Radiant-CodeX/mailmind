@@ -179,6 +179,7 @@ export default function Home() {
               {/* Panel B: Email Detailed View (renders side-by-side only if an email is selected) */}
               {selectedEmailId && (
                 <EmailDetail
+                  key={selectedEmailId}
                   email={selectedEmail}
                   loading={detailLoading}
                   error={detailError}

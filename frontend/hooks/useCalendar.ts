@@ -15,16 +15,20 @@ export function useCalendar() {
     try {
       const res = await fetchCalendar(7); // Fetch 7 days of calendar events
       setEvents(res || []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || 'Failed to load calendar events');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load calendar events';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadCalendar();
+    const timer = setTimeout(() => {
+      loadCalendar();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadCalendar]);
 
   const checkConflict = useCallback((deadlineStr: string | null): CalendarEvent | null => {
@@ -48,7 +52,7 @@ export function useCalendar() {
           return event;
         }
       }
-    } catch (e) {
+    } catch {
       // Ignored
     }
     return null;

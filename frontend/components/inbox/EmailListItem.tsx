@@ -21,11 +21,21 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, isFull
 
   const priority = email.triage?.priority || getPriority(email.composite_score || 0);
 
+  const [now, setNow] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setNow(Date.now());
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Format time (e.g. 10:14 AM or Yesterday)
   const formatTime = (isoString: string) => {
     try {
       const date = new Date(isoString);
-      const diffMs = Date.now() - date.getTime();
+      const currentNow = now || date.getTime();
+      const diffMs = currentNow - date.getTime();
       const diffMins = Math.floor(diffMs / 60000);
       
       if (diffMins < 60) {
@@ -38,7 +48,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, isFull
       }
 
       return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    } catch (e) {
+    } catch {
       return '';
     }
   };

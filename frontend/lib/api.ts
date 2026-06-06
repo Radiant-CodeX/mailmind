@@ -1,3 +1,5 @@
+import { CommitmentItem } from './types';
+
 export const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export async function classifyEmail(text: string) {
@@ -34,7 +36,7 @@ export async function extractCommitments(maskedText: string, threadSummary = '',
   return res.json();
 }
 
-export async function confirmCommitments(emailId: string, commitments: any[]) {
+export async function confirmCommitments(emailId: string, commitments: CommitmentItem[]) {
   const res = await fetch(`${BASE}/api/commitments/confirm`, {
     method: 'POST',
     headers: {
@@ -89,7 +91,7 @@ export async function fetchCalendar(days = 3) {
   return res.json();
 }
 
-export async function ingestEmail(payload: any) {
+export async function ingestEmail(payload: Record<string, unknown>) {
   const res = await fetch(`${BASE}/api/ingest`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

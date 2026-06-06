@@ -5,6 +5,17 @@ import { Email } from '../lib/types';
 import { fetchEmails, triageEmail } from '../lib/api';
 import { MOCK_FOLDER_EMAILS } from '../lib/mockData';
 
+interface RawEmail {
+  id?: string;
+  email_id?: string;
+  sender: string;
+  subject: string;
+  body: string;
+  received_at: string;
+  composite_score?: number;
+  triage?: Email['triage'];
+}
+
 export function useEmails(activeFolder: string = 'Inbox') {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(false);
@@ -17,7 +28,11 @@ export function useEmails(activeFolder: string = 'Inbox') {
     const cached = localStorage.getItem(`mailmind_emails_${activeFolder}`);
     if (cached) {
       try {
-        setEmails(JSON.parse(cached));
+        const parsed = JSON.parse(cached);
+        const timer = setTimeout(() => {
+          setEmails(parsed);
+        }, 0);
+        return () => clearTimeout(timer);
       } catch (e) {
         console.warn('Failed to parse cached emails', e);
       }
@@ -28,9 +43,9 @@ export function useEmails(activeFolder: string = 'Inbox') {
     setLoading(true);
     setError(null);
     try {
-      let fetched: any[] = [];
+      let fetched: RawEmail[] = [];
       if (activeFolder === 'Inbox' || activeFolder === 'Starred' || activeFolder === 'Important') {
-        fetched = await fetchEmails(10);
+        fetched = await fetchEmails(10) as RawEmail[];
       } else {
         fetched = MOCK_FOLDER_EMAILS[activeFolder] || [];
       }
@@ -45,8 +60,8 @@ export function useEmails(activeFolder: string = 'Inbox') {
         } catch {}
       }
 
-      const mapped: Email[] = fetched.map((e: any) => {
-        const id = e.email_id || e.id;
+      const mapped: Email[] = fetched.map((e: RawEmail) => {
+        const id = e.email_id || e.id || '';
         const cached = cachedMap.get(id);
         return {
           id,
@@ -99,16 +114,20 @@ export function useEmails(activeFolder: string = 'Inbox') {
           }
         });
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to sync emails from backend', err);
-      setError(err.message || 'Failed to sync emails');
+      const errMsg = err instanceof Error ? err.message : 'Failed to sync emails';
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
   }, [activeFolder]);
 
   useEffect(() => {
-    loadEmails();
+    const timer = setTimeout(() => {
+      loadEmails();
+    }, 0);
+    return () => clearTimeout(timer);
   }, [loadEmails]);
 
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
