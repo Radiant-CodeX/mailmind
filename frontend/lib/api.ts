@@ -110,6 +110,12 @@ export async function fetchEmails(limit = 10) {
   return res.json();
 }
 
+export async function fetchSentEmails(limit = 10) {
+  const res = await fetch(`${BASE}/api/emails/sent?limit=${limit}`);
+  if (!res.ok) throw new Error('Sent emails fetch failed');
+  return res.json();
+}
+
 export async function sendEmailReply(emailId: string, comment: string) {
   const res = await fetch(`${BASE}/api/emails/${emailId}/reply`, {
     method: 'POST',

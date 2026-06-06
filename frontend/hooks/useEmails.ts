@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Email } from '../lib/types';
-import { fetchEmails, triageEmail } from '../lib/api';
+import { fetchEmails, triageEmail, fetchSentEmails } from '../lib/api';
 import { MOCK_FOLDER_EMAILS } from '../lib/mockData';
 
 interface RawEmail {
@@ -46,6 +46,8 @@ export function useEmails(activeFolder: string = 'Inbox') {
       let fetched: RawEmail[] = [];
       if (activeFolder === 'Inbox' || activeFolder === 'Starred' || activeFolder === 'Important') {
         fetched = await fetchEmails(10) as RawEmail[];
+      } else if (activeFolder === 'Sent') {
+        fetched = await fetchSentEmails(10) as RawEmail[];
       } else {
         fetched = MOCK_FOLDER_EMAILS[activeFolder] || [];
       }

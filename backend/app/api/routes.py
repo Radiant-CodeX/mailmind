@@ -86,6 +86,36 @@ def get_emails(limit: int = 10) -> list[dict[str, Any]]:
     return client.get_inbox_emails(limit=limit)
 
 
+@router.get("/emails/sent", response_model=list[EmailPayload])
+def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
+    """Fetch recent sent emails/messages from the Outlook Sent Items folder."""
+    client = GraphClient()
+    raw_emails = client.fetch_sent_emails(days=30)
+    
+    formatted = []
+    for msg in raw_emails[:limit]:
+        sender_addr = "unknown@example.com"
+        from_obj = msg.get("from") or msg.get("sender")
+        if from_obj and "emailAddress" in from_obj:
+            sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
+        
+        body_content = ""
+        body_obj = msg.get("body")
+        if body_obj:
+            body_content = body_obj.get("content", "")
+        else:
+            body_content = msg.get("bodyPreview", "")
+            
+        formatted.append({
+            "email_id": msg.get("id") or msg.get("email_id") or "",
+            "sender": sender_addr,
+            "subject": msg.get("subject", ""),
+            "body": body_content,
+            "received_at": msg.get("sentDateTime") or msg.get("received_at") or "",
+        })
+    return formatted
+
+
 @router.post("/emails/{email_id}/reply")
 def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
     """Send a reply to the specified email via Microsoft Graph."""
