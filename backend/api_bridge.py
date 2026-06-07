@@ -22,9 +22,9 @@ This bridge translates between them and provides mock fallbacks.
 """
 import logging
 import os
-from fastapi import APIRouter, HTTPException, Request
+
 import requests
-import json
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -323,7 +323,7 @@ async def send_email_reply(email_id: str, request: Request):
             )
             if resp.status_code == 200:
                 return resp.json()
-        except:
+        except Exception:
             pass
 
         logger.info(f"Send reply to {email_id}")
@@ -345,8 +345,7 @@ async def send_email_reply(email_id: str, request: Request):
 async def extract_commitments(request: Request):
     """Extract tasks and events from email."""
     try:
-        body = await request.json()
-        masked_text = body.get("maskedText", "")
+        await request.json()
 
         # Mock commitments
         return {
@@ -494,8 +493,7 @@ async def rag_status():
 async def rag_search(request: Request):
     """Search RAG knowledge base."""
     try:
-        body = await request.json()
-        query = body.get("query", "")
+        await request.json()
 
         return {
             "results": [
