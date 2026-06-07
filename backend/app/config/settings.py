@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -34,11 +35,29 @@ class Settings:
     use_mock_graph: bool = _bool_env("USE_MOCK_GRAPH", True)
 
     # OpenAI / Azure OpenAI Configuration
+    # Store the raw env value; use azure_openai_base_endpoint for SDK calls.
     azure_openai_endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
     azure_openai_api_key: str = os.getenv("AZURE_OPENAI_API_KEY", "")
+    azure_openai_api_version: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
     azure_openai_chat_deployment: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o")
     azure_openai_embedding_deployment: str = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+
+    @property
+    def azure_openai_base_endpoint(self) -> str:
+        """Return only scheme+host from the endpoint, stripping any deployment path or query params.
+
+        The Azure OpenAI SDK requires a base URL like
+          https://<resource>.openai.azure.com/
+        but users sometimes paste the full chat-completions path instead.
+        """
+        url = self.azure_openai_endpoint
+        if not url:
+            return ""
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return url  # not parseable, return as-is
+        return f"{parsed.scheme}://{parsed.netloc}/"
 
 
 settings = Settings()

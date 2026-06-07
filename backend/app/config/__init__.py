@@ -11,7 +11,7 @@ __all__ = ["settings"]
 AZURE_OPENAI_API_KEY = settings.azure_openai_api_key
 AZURE_OPENAI_ENDPOINT = settings.azure_openai_endpoint
 AZURE_OPENAI_DEPLOYMENT_NAME = settings.azure_openai_chat_deployment
-AZURE_OPENAI_API_VERSION = "2024-12-01-preview"
+AZURE_OPENAI_API_VERSION = settings.azure_openai_api_version
 
 TENANT_ID = settings.azure_tenant_id or "common"
 CLIENT_ID = settings.azure_client_id

@@ -65,6 +65,7 @@ OPENAI_API_KEY=your_openai_key
 Follow these quick commands to spin up the service in your shell:
 
 ```powershell
+Primary step : pip install -r requirements.txt
 # 1. Navigate to the backend folder
 cd mailmind-v2/backend
 

@@ -74,9 +74,35 @@ def _validate_approval_token(token: str | None) -> None:
 
 @router.get("/health")
 def health(request: Request) -> dict[str, Any]:
-    """Health check endpoint reporting current queue depth."""
+    """Liveness probe — process is up and serving."""
     queue = request.app.state.email_queue
-    return {"status": "ok", "queue_size": queue.size()}
+    return {
+        "status": "ok",
+        "version": "2.0.0",
+        "queue_size": queue.size(),
+        "mode": "mock" if settings.use_mock_graph else "live",
+    }
+
+
+@router.get("/ready")
+def ready() -> dict[str, Any]:
+    """Readiness probe — reports whether external dependencies are configured.
+
+    Returns 200 with per-dependency booleans. In live mode, missing Graph or
+    OpenAI configuration is surfaced so orchestrators can gate traffic.
+    """
+    graph_ready = settings.use_mock_graph or bool(
+        settings.azure_client_id and settings.azure_tenant_id
+    )
+    llm_ready = bool(settings.azure_openai_api_key and settings.azure_openai_base_endpoint) or bool(
+        settings.openai_api_key
+    )
+    checks = {
+        "graph": graph_ready,
+        "llm": llm_ready,
+    }
+    overall = all(checks.values()) if not settings.use_mock_graph else True
+    return {"ready": overall, "checks": checks, "mode": "mock" if settings.use_mock_graph else "live"}
 
 
 @router.get("/emails", response_model=list[EmailPayload])
@@ -99,13 +125,16 @@ def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
         if from_obj and "emailAddress" in from_obj:
             sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
         
-        body_content = ""
+        # Body may be a Graph dict ({"content": ...}) in live mode or a plain
+        # string in mock mode — handle both.
         body_obj = msg.get("body")
-        if body_obj:
+        if isinstance(body_obj, dict):
             body_content = body_obj.get("content", "")
+        elif isinstance(body_obj, str):
+            body_content = body_obj
         else:
             body_content = msg.get("bodyPreview", "")
-            
+
         formatted.append({
             "email_id": msg.get("id") or msg.get("email_id") or "",
             "sender": sender_addr,
@@ -146,6 +175,28 @@ def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to send reply: {str(e)}")
+
+
+@router.post("/emails/{email_id}/restore")
+def restore_email_from_trash(email_id: str) -> dict[str, Any]:
+    """Restore the specified email from Trash back to Inbox."""
+    client = GraphClient()
+    try:
+        client.restore_from_trash(email_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to restore email: {str(e)}")
+
+
+@router.post("/emails/{email_id}/trash")
+def move_email_to_trash(email_id: str) -> dict[str, Any]:
+    """Move the specified email to the Deleted Items (Trash) folder."""
+    client = GraphClient()
+    try:
+        client.move_to_trash(email_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to move email to trash: {str(e)}")
 
 
 @router.post("/emails/compose")
@@ -249,6 +300,40 @@ def login_mock() -> dict[str, Any]:
     }
 
 
+@router.post("/auth/quick-login")
+def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
+    """One-tap login for a remembered account — no device code / password.
+
+    - Mock mode: activates the demo session instantly.
+    - Live mode: targets the remembered mailbox and activates an app-only
+      (client-credentials) session, so the user lands directly in the app.
+    """
+    email = (payload or {}).get("email")
+    global _mock_logged_out
+    client = GraphClient()
+
+    if client.use_mock:
+        _mock_logged_out = False
+        return {
+            "status": "mock",
+            "authenticated": True,
+            "user_principal_name": email or "mock.user@example.com",
+        }
+
+    # Live mode: resume the delegated session silently via the persisted refresh
+    # token. This is a USER (delegated) token — it works with personal accounts
+    # and is not subject to the app-only Conditional Access block (AADSTS53003).
+    try:
+        info = client.quick_login(email)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {
+        "status": "authenticated",
+        "authenticated": True,
+        "user_principal_name": info.get("user_principal_name") or email,
+    }
+
+
 @router.get("/auth/status")
 def auth_status() -> dict[str, Any]:
     """Check the current login status and user principal name."""
@@ -289,7 +374,7 @@ def auth_logout() -> dict[str, Any]:
     """Log out the current user session by clearing token cache."""
     global _mock_logged_out
     _mock_logged_out = True
-    
+
     from app.services.graph import _user_token_cache
     _user_token_cache["access_token"] = None
     _user_token_cache["expires_at"] = 0.0

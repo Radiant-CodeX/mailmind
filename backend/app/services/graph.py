@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -13,6 +14,69 @@ try:
     import msal
 except Exception:  # pragma: no cover - imported at runtime when available
     msal = None
+
+
+# Delegated scopes requested for the signed-in user (email, calendar, tasks, profile).
+_DELEGATED_SCOPES = ["User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Tasks.ReadWrite"]
+
+# Persistent MSAL token cache. Holds the refresh token from the delegated login
+# so Quick Login can acquire fresh access tokens silently (no code/password).
+_MSAL_CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "msal_cache.bin")
+
+
+def _load_token_cache() -> "msal.SerializableTokenCache":
+    cache = msal.SerializableTokenCache()
+    try:
+        if os.path.exists(_MSAL_CACHE_PATH):
+            with open(_MSAL_CACHE_PATH, "r", encoding="utf-8") as fh:
+                cache.deserialize(fh.read())
+    except Exception:  # pragma: no cover - corrupt cache is non-fatal
+        pass
+    return cache
+
+
+def _save_token_cache(cache: "msal.SerializableTokenCache") -> None:
+    try:
+        if cache.has_state_changed:
+            os.makedirs(os.path.dirname(_MSAL_CACHE_PATH), exist_ok=True)
+            with open(_MSAL_CACHE_PATH, "w", encoding="utf-8") as fh:
+                fh.write(cache.serialize())
+    except Exception:  # pragma: no cover - disk issues shouldn't break auth
+        pass
+
+
+def _build_public_client():
+    """Build an MSAL PublicClientApplication backed by the persistent cache."""
+    cache = _load_token_cache()
+    tenant_id = settings.azure_tenant_id or "common"
+    app = msal.PublicClientApplication(
+        settings.azure_client_id,
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        token_cache=cache,
+    )
+    return app, cache
+
+
+def _silent_acquire(username: str | None = None) -> dict[str, Any] | None:
+    """Silently acquire a delegated access token from the persisted refresh token.
+
+    Returns the MSAL result dict on success, or None if no usable account /
+    refresh token is available (caller should fall back to interactive login).
+    """
+    if msal is None:
+        return None
+    app, cache = _build_public_client()
+    accounts = app.get_accounts(username=username) if username else app.get_accounts()
+    if not accounts:
+        return None
+    result = app.acquire_token_silent(_DELEGATED_SCOPES, account=accounts[0])
+    _save_token_cache(cache)
+    if not result or "access_token" not in result:
+        return None
+    _user_token_cache["access_token"] = result["access_token"]
+    _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
+    _user_token_cache["user_principal_name"] = accounts[0].get("username")
+    return result
 
 
 _user_token_cache: dict[str, Any] = {
@@ -80,16 +144,20 @@ class GraphClient:
         if _user_token_cache["access_token"]:
             if now < (_user_token_cache["expires_at"] - 60):
                 return _user_token_cache["access_token"]
-            else:
-                # Active user session expired! Clear cache and raise 401
-                _user_token_cache["access_token"] = None
-                _user_token_cache["expires_at"] = 0.0
-                _user_token_cache["user_principal_name"] = None
-                from fastapi import HTTPException
-                raise HTTPException(
-                    status_code=401,
-                    detail="Active user session has expired. Please log in again."
-                )
+            # Access token expired — try a silent refresh from the persisted
+            # refresh token before giving up (keeps the session alive for days).
+            refreshed = _silent_acquire(_user_token_cache.get("user_principal_name"))
+            if refreshed and refreshed.get("access_token"):
+                return refreshed["access_token"]
+            # No valid refresh token — clear the session and require re-login.
+            _user_token_cache["access_token"] = None
+            _user_token_cache["expires_at"] = 0.0
+            _user_token_cache["user_principal_name"] = None
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=401,
+                detail="Active user session has expired. Please log in again."
+            )
 
         # 2. If no active user session, check if we have daemon config (azure_user_upn)
         # If not, user is not authenticated at all.
@@ -166,15 +234,9 @@ class GraphClient:
         import threading
         import time as _time
 
-        client_id = self.settings.azure_client_id
-        tenant_id = self.settings.azure_tenant_id or "common"
-        # Request standard delegated permissions for email, calendar, tasks and profile
-        scopes = ["User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Tasks.ReadWrite"]
-        app = msal.PublicClientApplication(
-            client_id,
-            authority=f"https://login.microsoftonline.com/{tenant_id}"
-        )
-        flow = app.initiate_device_flow(scopes=scopes)
+        # Cache-backed client so the refresh token is persisted for Quick Login.
+        app, cache = _build_public_client()
+        flow = app.initiate_device_flow(scopes=_DELEGATED_SCOPES)
         if not flow or "device_code" not in flow:
             return flow
 
@@ -194,12 +256,28 @@ class GraphClient:
                 _user_token_cache["expires_at"] = _time.time() + int(result.get("expires_in", 3600))
                 _user_token_cache["user_principal_name"] = upn
                 _user_token_cache["tenant_id"] = id_token_claims.get("tid")
+                # Persist the refresh token so Quick Login can resume silently.
+                _save_token_cache(cache)
                 _device_flow_status[device_code] = {"status": "success", "user_principal_name": upn}
             except Exception as e:  # pragma: no cover - background thread safety
                 _device_flow_status[device_code] = {"status": "error", "error": str(e)}
 
         threading.Thread(target=_complete, daemon=True).start()
         return flow
+
+    def quick_login(self, email: str | None = None) -> dict[str, Any]:
+        """Resume a delegated session silently for Quick Login (no code/password).
+
+        Uses the refresh token persisted from a previous Microsoft sign-in. Raises
+        a clear error if no remembered session exists or the refresh token has
+        expired, so the caller can fall back to interactive sign-in.
+        """
+        result = _silent_acquire(email)
+        if not result or "access_token" not in result:
+            raise RuntimeError(
+                "No active Microsoft session to resume. Please use 'Sign In with Microsoft' first."
+            )
+        return {"user_principal_name": _user_token_cache.get("user_principal_name") or email}
 
     # --- Public methods (mocked when `use_mock` is True) ---
     def get_inbox_emails(self, limit: int = 10) -> List[dict[str, Any]]:
@@ -253,7 +331,9 @@ class GraphClient:
             ]
 
         prefix = self._get_prefix()
-        path = f"{prefix}/messages?$top={limit}&$orderby=receivedDateTime desc"
+        # Scope strictly to the Inbox folder so Sent/Drafts/Junk/Deleted items
+        # don't leak into the inbox listing.
+        path = f"{prefix}/mailFolders/inbox/messages?$top={limit}&$orderby=receivedDateTime desc"
         data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
         raw_msgs = data.get("value", [])
         
@@ -542,6 +622,34 @@ class GraphClient:
             "comment": comment
         }
         self._request("POST", f"{prefix}/messages/{email_id}/reply", json=payload)
+
+    def restore_from_trash(self, email_id: str) -> None:
+        """Move a message from Deleted Items back to the Inbox."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Restoring email {email_id} from Deleted Items to Inbox")
+            return
+
+        prefix = self._get_prefix()
+        self._request(
+            "POST",
+            f"{prefix}/messages/{email_id}/move",
+            json={"destinationId": "inbox"},
+        )
+
+    def move_to_trash(self, email_id: str) -> None:
+        """Move a message to the Deleted Items (Trash) folder via Microsoft Graph."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Moving email {email_id} to Deleted Items")
+            return
+
+        prefix = self._get_prefix()
+        # Graph 'move' relocates the message to the well-known deleteditems folder,
+        # keeping it out of the Inbox while preserving it under Trash.
+        self._request(
+            "POST",
+            f"{prefix}/messages/{email_id}/move",
+            json={"destinationId": "deleteditems"},
+        )
 
     def send_new_email(self, to: str, subject: str, body: str, cc: str | None = None, bcc: str | None = None) -> None:
         """Send a new email via Microsoft Graph API."""

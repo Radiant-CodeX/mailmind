@@ -111,6 +111,10 @@ reports/
 *.crt
 *.pfx
 
+# MSAL persistent token cache (holds refresh tokens — never commit)
+msal_cache.bin
+**/msal_cache.bin
+
 # ==========================================
 # Azure
 # ==========================================

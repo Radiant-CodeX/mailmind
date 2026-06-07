@@ -9,12 +9,15 @@ import { EmailDetail } from '../../components/detail/EmailDetail';
 import { CalendarView } from '../../components/calendar/CalendarView';
 import { RAGSettingsView } from '../../components/rag/RAGSettingsView';
 import { ComposeWindow } from '../../components/inbox/ComposeWindow';
+import { TrashToast } from '../../components/shared/TrashToast';
+import { EvaluationView } from '../../components/evaluation/EvaluationView';
 
 import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
 import { checkAuthStatus, logoutUser } from '../../lib/api';
+import { rememberLogin } from '../../lib/session';
 
 export default function Home() {
   const router = useRouter();
@@ -57,9 +60,8 @@ export default function Home() {
     setIsSidebarCollapsed((prev) => !prev);
   };
 
-  const activeFolder = ['Inbox', 'Drafts', 'Sent', 'Spam', 'Trash', 'Starred', 'Important'].includes(activeTab)
-    ? activeTab
-    : 'Inbox';
+  const MAIL_TABS = ['Inbox', 'Drafts', 'Sent', 'Spam', 'Trash', 'Starred', 'Important'];
+  const activeFolder = MAIL_TABS.includes(activeTab) ? activeTab : 'Inbox';
 
   const {
     emails,
@@ -68,9 +70,16 @@ export default function Home() {
     setSelectedEmailId,
     searchQuery,
     setSearchQuery,
+    sortKey,
+    setSortKey,
     loading,
     refresh,
     toggleStar,
+    trashEmail,
+    undoTrash,
+    dismissTrashToast,
+    pendingTrash,
+    restoreEmail,
   } = useEmails(activeFolder);
 
   const {
@@ -124,6 +133,11 @@ export default function Home() {
 
   const handleLogout = async () => {
     try {
+      // Remember this account for one-tap Quick Login (valid for 1 week).
+      // Saved only on sign-out, so the card appears only after logging out.
+      if (userEmail) {
+        rememberLogin(isMockMode ? 'mock' : 'live', userEmail);
+      }
       await logoutUser();
       setAuthenticated(false);
       setUserEmail(null);
@@ -160,7 +174,7 @@ export default function Home() {
 
         {/* Dynamic View rendering depending on activeTab */}
         <div className="flex-1 flex overflow-hidden">
-          {['Inbox', 'Drafts', 'Sent', 'Spam', 'Trash', 'Starred', 'Important'].includes(activeTab) && (
+          {MAIL_TABS.includes(activeTab) && (
             <>
               {/* Panel A: Prioritized Inbox (Full width if no mail is selected) */}
               <EmailList
@@ -169,11 +183,15 @@ export default function Home() {
                 onSelectEmail={setSelectedEmailId}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
+                sortKey={sortKey}
+                onSortChange={setSortKey}
                 loading={loading}
                 onRefresh={refresh}
                 isFullWidth={true}
                 activeFolder={activeFolder}
                 onToggleStar={toggleStar}
+                onTrashEmail={trashEmail}
+                onRestoreEmail={restoreEmail}
               />
 
               {/* Panel B: Email Detailed View (renders side-by-side only if an email is selected) */}
@@ -224,8 +242,19 @@ export default function Home() {
           )}
 
           {activeTab === 'RAG Settings' && <RAGSettingsView />}
+          {activeTab === 'Evaluation' && <EvaluationView />}
         </div>
       </div>
+
+      {/* Trash undo toast — floats above everything */}
+      {pendingTrash && (
+        <TrashToast
+          email={pendingTrash.email}
+          startedAt={pendingTrash.startedAt}
+          onUndo={undoTrash}
+          onDismiss={dismissTrashToast}
+        />
+      )}
 
       {isComposeOpen && (
         <ComposeWindow
