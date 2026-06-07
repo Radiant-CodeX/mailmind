@@ -3,15 +3,37 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Email } from '../lib/types';
 import {
-  fetchEmails,
-  triageEmail,
-  fetchSentEmails,
-  fetchDraftEmails,
-  fetchSpamEmails,
-  fetchTrashEmails,
+  fetchMailbox,
+  triageEmailsBatch,
   moveEmailToTrash,
   restoreEmailFromTrash,
+  markEmailRead,
+  archiveEmail as apiArchiveEmail,
+  reportSpam as apiReportSpam,
 } from '../lib/api';
+
+// Persistent triage-score cache (by email id) so refreshes/page revisits don't
+// re-run the NLP classifier. Capped to avoid unbounded growth.
+const TRIAGE_CACHE_KEY = 'mailmind_triage_cache';
+type TriageLite = NonNullable<Email['triage']>;
+
+function readTriageCache(): Record<string, TriageLite> {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(localStorage.getItem(TRIAGE_CACHE_KEY) || '{}'); } catch { return {}; }
+}
+
+function writeTriageCache(entries: Record<string, { composite_score: number }>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const merged = { ...readTriageCache(), ...entries } as Record<string, TriageLite>;
+    const keys = Object.keys(merged);
+    // Keep the cache bounded (most-recent ~1000 entries).
+    const trimmed = keys.length > 1000
+      ? Object.fromEntries(keys.slice(keys.length - 1000).map((k) => [k, merged[k]]))
+      : merged;
+    localStorage.setItem(TRIAGE_CACHE_KEY, JSON.stringify(trimmed));
+  } catch {}
+}
 
 function readCachedEmails(folder: string): Email[] | null {
   if (typeof window === 'undefined') return null;
@@ -29,6 +51,8 @@ interface RawEmail {
   received_at: string;
   composite_score?: number;
   triage?: Email['triage'];
+  is_read?: boolean;
+  has_attachments?: boolean;
 }
 
 export interface PendingTrash {
@@ -44,6 +68,15 @@ export interface PendingTrash {
  *  - score_*     → by triage composite score
  */
 export type SortKey = 'normal' | 'date_desc' | 'date_asc' | 'score_desc' | 'score_asc';
+export type DateRange = 'all' | 'today' | 'week' | 'month';
+
+export interface MailFilters {
+  dateRange: DateRange;
+  unreadOnly: boolean;
+  attachmentsOnly: boolean;
+}
+
+export const DEFAULT_FILTERS: MailFilters = { dateRange: 'all', unreadOnly: false, attachmentsOnly: false };
 
 const SORT_STORAGE_KEY = 'mailmind_sort';
 
@@ -64,6 +97,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     localStorage.setItem(SORT_STORAGE_KEY, key);
   }, []);
 
+  const [filters, setFilters] = useState<MailFilters>(DEFAULT_FILTERS);
+
   // --------------------------------------------------------------------------
   // emails state — dual-write to a ref so trashEmail can read the current list
   // synchronously inside a callback without capturing a stale closure.
@@ -79,112 +114,136 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   }, []);
 
   // --------------------------------------------------------------------------
-  // Tracks the folder we last loaded, so we can clear the open detail view only
-  // when the folder actually changes (not on a same-folder manual refresh).
+  // Pagination state (50 per page, cursor-based via next_page_token).
+  // --------------------------------------------------------------------------
+  const PAGE_SIZE = 50;
+  const [total, setTotal] = useState(0);
+  const [pageIndex, setPageIndex] = useState(0); // 0-based
+  const nextTokenRef = useRef<string | null>(null);
+  const tokenStackRef = useRef<(string | null)[]>([null]);
   const lastFolderRef = useRef<string | null>(null);
+  const searchRef = useRef('');
+  useEffect(() => { searchRef.current = searchQuery; }, [searchQuery]);
 
-  const loadEmails = useCallback(async () => {
-    // Don't hit the API until the user is authenticated — avoids the
-    // "Failed to fetch" / 401 error cascade on first paint.
+  const folderParam = (f: string) =>
+    (['Inbox', 'Starred', 'Important'].includes(f) ? 'inbox' : f.toLowerCase());
+
+  // Fetch a single page (token=null → first page). `silent` skips the spinner
+  // for background auto-refresh.
+  const loadPage = useCallback(async (token: string | null, silent = false) => {
     if (!enabled) return;
-    if (lastFolderRef.current !== activeFolder) {
-      lastFolderRef.current = activeFolder;
-      setSelectedEmailId(null);
-    }
-    // Instant switch: show cached emails immediately, then refresh from network.
-    const cached = readCachedEmails(activeFolder);
-    if (cached) {
-      setEmails(cached);
-      setLoading(false);
-    } else {
-      setEmails([]);
-      setLoading(true);
-    }
+    if (!silent) setLoading(true);
     setError(null);
-
     try {
-      let fetched: RawEmail[] = [];
-      if (['Inbox', 'Starred', 'Important'].includes(activeFolder)) {
-        fetched = await fetchEmails(10) as RawEmail[];
-      } else if (activeFolder === 'Sent') {
-        fetched = await fetchSentEmails(10) as RawEmail[];
-      } else if (activeFolder === 'Drafts') {
-        fetched = await fetchDraftEmails(10) as RawEmail[];
-      } else if (activeFolder === 'Spam') {
-        fetched = await fetchSpamEmails(10) as RawEmail[];
-      } else if (activeFolder === 'Trash') {
-        fetched = await fetchTrashEmails(10) as RawEmail[];
-      }
-
-      const cachedStr = localStorage.getItem(`mailmind_emails_${activeFolder}`);
-      const cachedMap = new Map<string, Email>();
-      if (cachedStr) {
-        try {
-          (JSON.parse(cachedStr) as Email[]).forEach((e) => cachedMap.set(e.id, e));
-        } catch {}
-      }
-
-      const mapped: Email[] = fetched.map((e: RawEmail) => {
+      const page = await fetchMailbox(folderParam(activeFolder), PAGE_SIZE, token, searchRef.current);
+      const raw = (page.emails || []) as unknown as RawEmail[];
+      // Reuse any triage scores we've already computed (avoids re-scoring on
+      // every refresh / page revisit).
+      const tcache = readTriageCache();
+      const mapped: Email[] = raw.map((e) => {
         const id = e.email_id || e.id || '';
-        const hit = cachedMap.get(id);
+        const cachedT = tcache[id];
         return {
           id,
           sender: e.sender,
           subject: e.subject,
           body: e.body,
           received_at: e.received_at,
-          composite_score: e.composite_score || hit?.composite_score || 0,
-          triage: e.triage || hit?.triage,
+          composite_score: cachedT ? Math.round(cachedT.composite_score) : (e.composite_score || 0),
+          triage: e.triage || cachedT,
+          isRead: e.is_read ?? true,
+          hasAttachments: e.has_attachments ?? false,
         };
       });
-
       setEmails(mapped);
-      localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(mapped));
-      setSelectedEmailId((prev) =>
-        prev && mapped.some((e) => e.id === prev) ? prev : null
-      );
+      setTotal(page.total || mapped.length);
+      nextTokenRef.current = page.next_page_token;
+      if (token === null) {
+        localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(mapped));
+      }
+      setSelectedEmailId((prev) => (prev && mapped.some((e) => e.id === prev) ? prev : null));
 
-      // Background triage for inbox-like folders
+      // Triage only the un-scored emails — in ONE batch request, not N.
       if (['Inbox', 'Starred', 'Important'].includes(activeFolder)) {
-        mapped.forEach(async (email) => {
-          if (email.triage) return;
+        const todo = mapped.filter((e) => !e.triage);
+        if (todo.length > 0) {
           try {
-            const res = await triageEmail({
-              email_id: email.id,
-              sender: email.sender,
-              subject: email.subject,
-              body: email.body,
-              received_at: email.received_at,
-            });
-            setEmails((prev) => {
-              const updated = prev.map((e) =>
-                e.id === email.id
-                  ? { ...e, composite_score: Math.round(res.composite_score), triage: res }
-                  : e
-              );
-              localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(updated));
-              return updated;
-            });
+            const scores = (await triageEmailsBatch(todo.map((e) => ({
+              email_id: e.id, sender: e.sender, subject: e.subject,
+              body: e.body, received_at: e.received_at,
+            })))) as TriageLite[];
+            const byId: Record<string, TriageLite> = {};
+            todo.forEach((e, i) => { if (scores[i]) byId[e.id] = scores[i]; });
+            writeTriageCache(byId);
+            setEmails((prev) => prev.map((e) =>
+              byId[e.id] ? { ...e, composite_score: Math.round(byId[e.id].composite_score), triage: byId[e.id] } : e));
           } catch (e) {
-            console.warn(`Failed to triage email ${email.id}`, e);
+            console.warn('Batch triage failed', e);
           }
-        });
+        }
       }
     } catch (err: unknown) {
       console.error('Failed to sync emails from backend', err);
       setError(err instanceof Error ? err.message : 'Failed to sync emails');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [activeFolder, enabled, setEmails]);
 
-  // Reload whenever the folder changes (loadEmails handles clearing selection).
-  // Deferred a tick so the state updates happen outside the effect body; the
-  // cached paint inside loadEmails still lands before the browser paints.
+  // Reload from page 0 (used on folder switch, refresh, and search).
+  const loadEmails = useCallback(async () => {
+    if (!enabled) return;
+    if (lastFolderRef.current !== activeFolder) {
+      lastFolderRef.current = activeFolder;
+      setSelectedEmailId(null);
+      const cached = readCachedEmails(activeFolder);
+      if (cached) setEmails(cached); // instant paint while page loads
+    }
+    tokenStackRef.current = [null];
+    setPageIndex(0);
+    await loadPage(null);
+  }, [activeFolder, enabled, loadPage, setEmails]);
+
+  const nextPage = useCallback(() => {
+    const t = nextTokenRef.current;
+    if (!t) return;
+    tokenStackRef.current.push(t);
+    setPageIndex((i) => i + 1);
+    loadPage(t);
+  }, [loadPage]);
+
+  const prevPage = useCallback(() => {
+    if (tokenStackRef.current.length <= 1) return;
+    tokenStackRef.current.pop();
+    const t = tokenStackRef.current[tokenStackRef.current.length - 1];
+    setPageIndex((i) => Math.max(0, i - 1));
+    loadPage(t);
+  }, [loadPage]);
+
+  const hasNextPage = (pageIndex + 1) * PAGE_SIZE < total;
+  const hasPrevPage = pageIndex > 0;
+
+  // Reload on folder change.
   useEffect(() => {
     const id = setTimeout(loadEmails, 0);
     return () => clearTimeout(id);
   }, [loadEmails]);
+
+  // Debounced server-side search: reload page 0 when the query changes.
+  useEffect(() => {
+    const id = setTimeout(() => { if (enabled) loadEmails(); }, 400);
+    return () => clearTimeout(id);
+  }, [searchQuery, enabled, loadEmails]);
+
+  // Auto-refresh the CURRENT page every 30s (silent — no spinner, no page jump).
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => {
+      const token = tokenStackRef.current[tokenStackRef.current.length - 1];
+      loadPage(token, true);
+    }, 30000);
+    return () => clearInterval(id);
+  }, [enabled, loadPage]);
 
   // --------------------------------------------------------------------------
   // Starred
@@ -296,6 +355,57 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   );
 
   // --------------------------------------------------------------------------
+  // Mark read / unread, archive, report spam
+  // --------------------------------------------------------------------------
+  const persist = useCallback((list: Email[]) => {
+    localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(list));
+  }, [activeFolder]);
+
+  const markRead = useCallback(async (emailId: string, read: boolean) => {
+    setEmails((prev) => {
+      const next = prev.map((e) => (e.id === emailId ? { ...e, isRead: read } : e));
+      persist(next);
+      return next;
+    });
+    try {
+      await markEmailRead(emailId, read);
+    } catch (err) {
+      console.error(`Failed to mark ${read ? 'read' : 'unread'}`, err);
+    }
+  }, [setEmails, persist]);
+
+  const removeFrom = useCallback((emailId: string) => {
+    setEmails((prev) => {
+      const next = prev.filter((e) => e.id !== emailId);
+      persist(next);
+      return next;
+    });
+    setSelectedEmailId((prev) => (prev === emailId ? null : prev));
+  }, [setEmails, persist]);
+
+  const archiveEmail = useCallback(async (emailId: string) => {
+    removeFrom(emailId);
+    localStorage.removeItem('mailmind_emails_Archive');
+    try {
+      await apiArchiveEmail(emailId);
+    } catch (err) {
+      console.error(`Failed to archive ${emailId}`, err);
+      loadEmails();
+    }
+  }, [removeFrom, loadEmails]);
+
+  const reportSpam = useCallback(async (emailId: string) => {
+    removeFrom(emailId);
+    localStorage.removeItem('mailmind_emails_Spam');
+    try {
+      await apiReportSpam(emailId);
+    } catch (err) {
+      console.error(`Failed to report spam ${emailId}`, err);
+      loadEmails();
+    }
+  }, [removeFrom, loadEmails]);
+
+  // --------------------------------------------------------------------------
   // Derived lists
   // --------------------------------------------------------------------------
   const filteredAndSortedEmails = useMemo(() => {
@@ -303,14 +413,27 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     if (activeFolder === 'Starred') list = list.filter((e) => e.isStarred);
     else if (activeFolder === 'Important') list = list.filter((e) => (e.composite_score || 0) >= 50);
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (e) =>
-          e.sender.toLowerCase().includes(q) ||
-          e.subject.toLowerCase().includes(q) ||
-          e.body.toLowerCase().includes(q)
-      );
+    // Note: text search is handled server-side (server-wide), so no client
+    // text filter here — only the structured filters below.
+
+    // Advanced filters: read-status, attachments, date range.
+    if (filters.unreadOnly) list = list.filter((e) => e.isRead === false);
+    if (filters.attachmentsOnly) list = list.filter((e) => e.hasAttachments === true);
+    if (filters.dateRange !== 'all') {
+      // Date filtering inherently needs the current time; safe to read here.
+      // eslint-disable-next-line react-hooks/purity
+      const now = Date.now();
+      const windows: Record<DateRange, number> = {
+        all: Infinity,
+        today: 24 * 60 * 60 * 1000,
+        week: 7 * 24 * 60 * 60 * 1000,
+        month: 30 * 24 * 60 * 60 * 1000,
+      };
+      const cutoff = now - windows[filters.dateRange];
+      list = list.filter((e) => {
+        const t = new Date(e.received_at).getTime();
+        return Number.isNaN(t) ? true : t >= cutoff;
+      });
     }
 
     const ts = (e: Email) => {
@@ -333,7 +456,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
         // Preserve the backend's native ordering.
         return list;
     }
-  }, [emails, searchQuery, activeFolder, starredIds, sortKey]);
+  }, [emails, activeFolder, starredIds, sortKey, filters]);
 
   const selectedEmail = useMemo(() => {
     const list = emails.map((e) => ({ ...e, isStarred: starredIds.has(e.id) }));
@@ -350,6 +473,16 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     setSearchQuery,
     sortKey,
     setSortKey,
+    filters,
+    setFilters,
+    // Pagination
+    total,
+    pageIndex,
+    pageSize: PAGE_SIZE,
+    hasNextPage,
+    hasPrevPage,
+    nextPage,
+    prevPage,
     loading,
     error,
     refresh: loadEmails,
@@ -359,5 +492,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     dismissTrashToast,
     pendingTrash,
     restoreEmail,
+    markRead,
+    archiveEmail,
+    reportSpam,
   };
 }

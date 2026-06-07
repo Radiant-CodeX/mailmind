@@ -15,6 +15,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from email.message import EmailMessage
+from email.utils import parsedate_to_datetime
 from typing import Any, List
 from urllib.parse import urlencode
 
@@ -200,6 +201,45 @@ def _decode_part(data: str) -> str:
         return ""
 
 
+def _clean_sender(value: str) -> str:
+    """Extract the bare email address from a 'From' header (Name <email>)."""
+    from email.utils import parseaddr
+    _, addr = parseaddr(value or "")
+    return addr or value or "unknown@gmail.com"
+
+
+def _parse_gmail_date(value: str) -> str:
+    """Convert a Gmail RFC-2822 'Date' header to an ISO-8601 string.
+
+    Gmail returns e.g. 'Sun, 07 Jun 2026 09:03:49 +0000' which isn't a valid
+    ISO datetime; the API response model needs ISO. Falls back to now on failure.
+    """
+    if value:
+        try:
+            return parsedate_to_datetime(value).isoformat()
+        except Exception:
+            pass
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _raise_for_gmail(resp: "httpx.Response") -> None:
+    """Convert a Gmail API error response into a clean HTTPException with the real reason."""
+    if resp.status_code < 400:
+        return
+    detail = f"Gmail API error {resp.status_code}"
+    try:
+        err = resp.json().get("error", {})
+        msg = err.get("message") if isinstance(err, dict) else str(err)
+        if msg:
+            detail = f"Gmail API: {msg}"
+    except Exception:
+        pass
+    from fastapi import HTTPException
+    # 401/403 = re-auth needed; everything else is an upstream gateway error.
+    code = 401 if resp.status_code in (401, 403) else 502
+    raise HTTPException(status_code=code, detail=detail)
+
+
 def _extract_body(payload: dict[str, Any]) -> str:
     """Pull a text/plain body out of a Gmail message payload."""
     if not payload:
@@ -233,29 +273,56 @@ class GmailClient:
         headers.setdefault("Accept", "application/json")
         with httpx.Client(timeout=30.0) as client:
             resp = client.request(method, f"{_GMAIL_API}{path}", headers=headers, **kwargs)
-        resp.raise_for_status()
+        _raise_for_gmail(resp)
         if resp.status_code in (202, 204) or not resp.content:
             return None
         return resp.json()
 
+    def _has_attachment(self, payload: dict[str, Any]) -> bool:
+        for part in payload.get("parts", []) or []:
+            if part.get("filename"):
+                return True
+            if self._has_attachment(part):
+                return True
+        return False
+
     def _list_formatted(self, label: str, limit: int, date_field: str = "received_at") -> List[dict[str, Any]]:
         data = self._request("GET", f"/messages?labelIds={label}&maxResults={limit}")
         ids = [m["id"] for m in (data or {}).get("messages", [])]
-        out: list[dict[str, Any]] = []
-        for mid in ids:
-            msg = self._request("GET", f"/messages/{mid}?format=full")
-            if not msg:
-                continue
-            payload = msg.get("payload", {})
-            headers = payload.get("headers", [])
-            out.append({
-                "email_id": msg.get("id", ""),
-                "sender": _header(headers, "From") or "unknown@gmail.com",
-                "subject": _header(headers, "Subject"),
-                "body": _extract_body(payload) or msg.get("snippet", ""),
-                "received_at": _header(headers, "Date") or "",
-            })
-        return out
+        return self._fetch_many(ids)
+
+    # ── Mail actions (label-based) ──
+    def mark_read(self, email_id: str, read: bool = True) -> None:
+        if self.use_mock:
+            return
+        body = {"removeLabelIds": ["UNREAD"]} if read else {"addLabelIds": ["UNREAD"]}
+        self._request("POST", f"/messages/{email_id}/modify", json=body)
+
+    def archive(self, email_id: str) -> None:
+        if self.use_mock:
+            return
+        self._request("POST", f"/messages/{email_id}/modify", json={"removeLabelIds": ["INBOX"]})
+
+    def report_spam(self, email_id: str) -> None:
+        if self.use_mock:
+            return
+        self._request(
+            "POST", f"/messages/{email_id}/modify",
+            json={"addLabelIds": ["SPAM"], "removeLabelIds": ["INBOX"]},
+        )
+
+    def forward_email(self, email_id: str, to: str, comment: str = "") -> None:
+        if self.use_mock:
+            print(f"[MOCK GMAIL] Forward {email_id} to {to}")
+            return
+        original = self._request("GET", f"/messages/{email_id}?format=full")
+        payload = (original or {}).get("payload", {})
+        headers = payload.get("headers", [])
+        subject = _header(headers, "Subject")
+        orig_body = _extract_body(payload) or (original or {}).get("snippet", "")
+        fwd_body = f"{comment}\n\n---------- Forwarded message ----------\n{orig_body}"
+        raw = self._build_raw(to, f"Fwd: {subject}", fwd_body)
+        self._request("POST", "/messages/send", json={"raw": raw})
 
     # ── mock data ──
     def _mock_inbox(self) -> List[dict[str, Any]]:
@@ -267,6 +334,7 @@ class GmailClient:
                 "subject": "[GitHub] Your CI run failed on main",
                 "body": "The workflow 'CI' failed on the latest push to main. Review the logs and re-run.",
                 "received_at": (now - timedelta(minutes=12)).isoformat() + "Z",
+                "is_read": False, "has_attachments": False,
             },
             {
                 "email_id": "gmail-2",
@@ -274,6 +342,7 @@ class GmailClient:
                 "subject": "Weekly digest: 4 pages updated",
                 "body": "Here's what changed in your workspace this week. 4 pages were updated by your team.",
                 "received_at": (now - timedelta(hours=3)).isoformat() + "Z",
+                "is_read": True, "has_attachments": True,
             },
             {
                 "email_id": "gmail-3",
@@ -281,8 +350,64 @@ class GmailClient:
                 "subject": "Lunch next week?",
                 "body": "Hey! Are you free for lunch sometime next week? Let me know what day works.",
                 "received_at": (now - timedelta(hours=20)).isoformat() + "Z",
+                "is_read": False, "has_attachments": False,
             },
         ]
+
+    _LABELS = {"inbox": "INBOX", "sent": "SENT", "drafts": "DRAFT", "spam": "SPAM", "trash": "TRASH"}
+
+    def list_emails(self, folder: str = "inbox", limit: int = 50,
+                    page_token: str | None = None, query: str | None = None) -> dict[str, Any]:
+        """Unified paginated listing for any folder with optional search."""
+        label = self._LABELS.get(folder, "INBOX")
+        if self.use_mock:
+            source = self._mock_inbox() if folder == "inbox" else []
+            if query:
+                q = query.lower()
+                source = [m for m in source if q in m["subject"].lower() or q in m["sender"].lower()]
+            return {"emails": source[:limit], "next_page_token": None, "total": len(source)}
+
+        params = [f"maxResults={limit}", f"labelIds={label}"]
+        if page_token:
+            params.append(f"pageToken={page_token}")
+        if query:
+            from urllib.parse import quote
+            params.append(f"q={quote(query)}")
+        data = self._request("GET", f"/messages?{'&'.join(params)}") or {}
+        ids = [m["id"] for m in data.get("messages", [])]
+        emails = self._fetch_many(ids)
+        return {
+            "emails": emails,
+            "next_page_token": data.get("nextPageToken"),
+            "total": int(data.get("resultSizeEstimate", len(emails))),
+        }
+
+    def _fetch_many(self, ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch + format many messages concurrently (Gmail has no batch GET, so
+        parallel requests turn ~50 sequential round-trips into a few batches)."""
+        if not ids:
+            return []
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=12) as pool:
+            results = list(pool.map(self._format_one, ids))
+        return [e for e in results if e]
+
+    def _format_one(self, mid: str) -> dict[str, Any] | None:
+        msg = self._request("GET", f"/messages/{mid}?format=full")
+        if not msg:
+            return None
+        payload = msg.get("payload", {})
+        headers = payload.get("headers", [])
+        label_ids = msg.get("labelIds", [])
+        return {
+            "email_id": msg.get("id", ""),
+            "sender": _clean_sender(_header(headers, "From")),
+            "subject": _header(headers, "Subject"),
+            "body": _extract_body(payload) or msg.get("snippet", ""),
+            "received_at": _parse_gmail_date(_header(headers, "Date")),
+            "is_read": "UNREAD" not in label_ids,
+            "has_attachments": self._has_attachment(payload),
+        }
 
     # ── public surface (mirrors GraphClient) ──
     def get_inbox_emails(self, limit: int = 10) -> List[dict[str, Any]]:
@@ -328,6 +453,26 @@ class GmailClient:
         raw = self._build_raw(to_addr, f"Re: {subject}", comment)
         self._request("POST", "/messages/send", json={"raw": raw, "threadId": thread_id})
 
+    def reply_all(self, email_id: str, comment: str) -> None:
+        if self.use_mock:
+            print(f"[MOCK GMAIL] Reply-all to {email_id}: {comment}")
+            return
+        original = self._request("GET", f"/messages/{email_id}?format=metadata")
+        headers = (original or {}).get("payload", {}).get("headers", [])
+        thread_id = (original or {}).get("threadId")
+        subject = _header(headers, "Subject")
+        # Recipients = original sender + everyone on To/Cc (excluding self).
+        recipients = {_clean_sender(_header(headers, "From"))}
+        for field in ("To", "Cc"):
+            for addr in (_header(headers, field) or "").split(","):
+                clean = _clean_sender(addr)
+                if "@" in clean:
+                    recipients.add(clean)
+        recipients.discard(current_google_email())
+        to = ", ".join(sorted(r for r in recipients if r))
+        raw = self._build_raw(to, f"Re: {subject}", comment)
+        self._request("POST", "/messages/send", json={"raw": raw, "threadId": thread_id})
+
     def send_new_email(self, to: str, subject: str, body: str, cc: str | None = None, bcc: str | None = None) -> None:
         if self.use_mock:
             print(f"[MOCK GMAIL] Send to={to} subject={subject}")
@@ -354,7 +499,7 @@ class GmailClient:
         headers["Authorization"] = f"Bearer {token}"
         with httpx.Client(timeout=30.0) as client:
             resp = client.request(method, url, headers=headers, **kwargs)
-        resp.raise_for_status()
+        _raise_for_gmail(resp)
         return resp.json() if resp.content else None
 
     def create_calendar_event(self, email_id: str, commitment: str, deadline: Any = None) -> str:

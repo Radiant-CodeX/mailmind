@@ -29,6 +29,8 @@ export interface Email {
   triage?: TriageResult;
   composite_score?: number;
   isStarred?: boolean;
+  isRead?: boolean;
+  hasAttachments?: boolean;
 }
 
 export interface CommitmentItem {

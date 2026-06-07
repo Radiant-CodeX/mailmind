@@ -33,6 +33,10 @@ class Settings:
     azure_client_id: str = os.getenv("AZURE_CLIENT_ID", "")
     azure_client_secret: str = os.getenv("AZURE_CLIENT_SECRET", "")
     azure_user_upn: str = os.getenv("AZURE_USER_UPN", "")
+    # Azure only permits https or http://localhost redirect URIs (not 127.0.0.1).
+    azure_redirect_uri: str = os.getenv(
+        "AZURE_REDIRECT_URI", "http://localhost:8000/api/auth/microsoft/callback"
+    )
     # Space-separated scopes used when acquiring Graph tokens
     graph_scopes: str = os.getenv("GRAPH_SCOPES", "Mail.ReadWrite Mail.Send Calendars.ReadWrite Tasks.ReadWrite")
     # Allow switching between the mock Graph client and a real Azure integration

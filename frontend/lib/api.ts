@@ -38,6 +38,20 @@ export async function triageEmail(payload: { email_id: string; sender: string; s
   return res.json();
 }
 
+/** Score many emails in ONE request — replaces N separate triage calls. */
+export async function triageEmailsBatch(
+  payloads: Array<{ email_id: string; sender: string; subject: string; body: string; received_at: string }>,
+) {
+  if (payloads.length === 0) return [];
+  const res = await fetch(`${BASE}/api/triage/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payloads),
+  });
+  if (!res.ok) throw new Error('Batch triage failed');
+  return res.json();
+}
+
 export async function extractCommitments(maskedText: string, threadSummary = '', emailId?: string) {
   const res = await fetch(`${BASE}/api/commitments/extract`, {
     method: 'POST',
@@ -151,6 +165,27 @@ export async function fetchEmails(limit = 10) {
   return res.json();
 }
 
+export interface MailboxPage {
+  emails: Array<Record<string, unknown>>;
+  next_page_token: string | null;
+  total: number;
+}
+
+/** Paginated mailbox listing (50/page) with optional server-side search. */
+export async function fetchMailbox(
+  folder: string,
+  limit = 50,
+  pageToken?: string | null,
+  query?: string,
+): Promise<MailboxPage> {
+  const params = new URLSearchParams({ folder, limit: String(limit) });
+  if (pageToken) params.set('page_token', pageToken);
+  if (query && query.trim()) params.set('q', query.trim());
+  const res = await fetch(`${BASE}/api/mailbox?${params.toString()}`);
+  if (!res.ok) throw new Error('Mailbox fetch failed');
+  return res.json();
+}
+
 export async function fetchSentEmails(limit = 10) {
   const res = await fetch(`${BASE}/api/emails/sent?limit=${limit}`);
   if (!res.ok) throw new Error('Sent emails fetch failed');
@@ -208,6 +243,26 @@ export async function moveEmailToTrash(emailId: string) {
   if (!res.ok) throw new Error('Failed to move email to trash');
   return res.json();
 }
+
+async function emailAction(emailId: string, action: string, body?: Record<string, unknown>) {
+  const res = await fetch(`${BASE}/api/emails/${emailId}/${action}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let message = `Failed: ${action}`;
+    try { const d = await res.json(); if (d?.detail) message = d.detail; } catch {}
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+export const markEmailRead = (id: string, read: boolean) => emailAction(id, 'read', { read });
+export const archiveEmail = (id: string) => emailAction(id, 'archive');
+export const reportSpam = (id: string) => emailAction(id, 'spam');
+export const forwardEmail = (id: string, to: string, comment: string) => emailAction(id, 'forward', { to, comment });
+export const replyAllEmail = (id: string, comment: string) => emailAction(id, 'reply-all', { comment });
 
 export async function composeEmail(payload: { to: string; subject: string; body: string; cc?: string; bcc?: string }) {
   const res = await fetch(`${BASE}/api/emails/compose`, {
@@ -270,6 +325,30 @@ export async function logoutUser() {
 export async function loginMock() {
   const res = await fetch(`${BASE}/api/auth/login-mock`, { method: 'POST' });
   if (!res.ok) throw new Error('Mock login failed');
+  return res.json();
+}
+
+export async function microsoftLoginInitiate() {
+  const res = await fetch(`${BASE}/api/auth/microsoft/login-initiate`, { method: 'POST' });
+  if (!res.ok) {
+    let message = 'Microsoft sign-in failed';
+    try { const d = await res.json(); if (d?.detail) message = d.detail; } catch {}
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+export async function microsoftLoginPoll(state: string) {
+  const res = await fetch(`${BASE}/api/auth/microsoft/poll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state }),
+  });
+  if (!res.ok) {
+    let message = 'Microsoft sign-in failed';
+    try { const d = await res.json(); if (d?.detail) message = d.detail; } catch {}
+    throw new Error(message);
+  }
   return res.json();
 }
 

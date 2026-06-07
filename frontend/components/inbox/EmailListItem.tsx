@@ -9,10 +9,53 @@ interface EmailListItemProps {
   onToggleStar: (id: string) => void;
   onTrash?: (id: string) => void;
   onRestore?: (id: string) => void;
+  onArchive?: (id: string) => void;
+  onSpam?: (id: string) => void;
+  onToggleRead?: (id: string, read: boolean) => void;
   isFullWidth: boolean;
 }
 
-export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, isFullWidth }: EmailListItemProps) {
+export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, isFullWidth }: EmailListItemProps) {
+  const isUnread = email.isRead === false;
+
+  const ReadButton = onToggleRead ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onToggleRead(email.id, isUnread); }}
+      className="p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--accent-primary)] transition-all cursor-pointer"
+      title={isUnread ? 'Mark as read' : 'Mark as unread'}
+      id={`btn-read-${email.id}`}
+    >
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        {isUnread
+          ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />}
+      </svg>
+    </button>
+  ) : null;
+
+  const ArchiveButton = onArchive ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onArchive(email.id); }}
+      className="p-1 rounded-md text-[var(--text-muted)] hover:bg-amber-500/10 hover:text-amber-500 transition-all cursor-pointer"
+      title="Archive" id={`btn-archive-${email.id}`}
+    >
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+      </svg>
+    </button>
+  ) : null;
+
+  const SpamButton = onSpam ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onSpam(email.id); }}
+      className="p-1 rounded-md text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500 transition-all cursor-pointer"
+      title="Report spam" id={`btn-spam-${email.id}`}
+    >
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+      </svg>
+    </button>
+  ) : null;
   // Restore button — shown only inside Trash folder
   const RestoreButton = onRestore ? (
     <button
@@ -96,22 +139,30 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
         id={`email-item-${email.id}`}
       >
         <div className="flex items-center justify-between gap-6 w-full">
-          {/* 1. Leftmost column: Mail ID / Sender */}
-          <div className="w-[140px] shrink-0 overflow-hidden">
-            <span className={`text-xs font-semibold truncate block ${
-              isSelected ? 'text-[var(--text-primary)] font-bold' : 'text-[var(--text-primary)]/80'
-            }`} title={email.sender}>
-              {email.sender.split('@')[0]}
-            </span>
-            <span className="text-[9px] text-[var(--text-muted)] font-mono block mt-0.5" suppressHydrationWarning>
-              {formatTime(email.received_at)}
-            </span>
+          {/* 1. Leftmost column: unread dot + Sender */}
+          <div className="w-[150px] shrink-0 overflow-hidden flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${isUnread ? 'bg-[var(--accent-primary)]' : 'bg-transparent'}`} title={isUnread ? 'Unread' : 'Read'} />
+            <div className="min-w-0">
+              <span className={`text-xs truncate block ${
+                isUnread ? 'text-[var(--text-primary)] font-bold' : 'font-semibold text-[var(--text-primary)]/80'
+              }`} title={email.sender}>
+                {email.sender.split('@')[0]}
+              </span>
+              <span className="text-[9px] text-[var(--text-muted)] font-mono block mt-0.5" suppressHydrationWarning>
+                {formatTime(email.received_at)}
+              </span>
+            </div>
           </div>
 
-          {/* 2. Middle column: Subject and snippet of body somewhat visible */}
+          {/* 2. Middle column: Subject (+attachment) and snippet */}
           <div className="flex-1 min-w-0 pr-4">
-            <h4 className="text-xs font-semibold text-[var(--text-primary)] truncate">
-              {email.subject}
+            <h4 className={`text-xs truncate flex items-center gap-1.5 ${isUnread ? 'font-bold text-[var(--text-primary)]' : 'font-semibold text-[var(--text-primary)]'}`}>
+              {email.hasAttachments && (
+                <svg className="w-3 h-3 shrink-0 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Has attachment">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                </svg>
+              )}
+              <span className="truncate">{email.subject}</span>
             </h4>
             <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5 font-medium opacity-80">
               {email.body.replace(/\s+/g, ' ')}
@@ -160,6 +211,9 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
               </svg>
             </button>
 
+            {ReadButton}
+            {ArchiveButton}
+            {SpamButton}
             {TrashButton}
             {RestoreButton}
           </div>

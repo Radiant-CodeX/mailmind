@@ -7,6 +7,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   authenticated: boolean;
   userEmail: string | null;
+  provider?: 'google' | 'microsoft';
   onLoginClick: () => void;
   onLogoutClick: () => void;
   onComposeClick?: () => void;
@@ -19,10 +20,12 @@ export function Sidebar({
   onToggleCollapse,
   authenticated,
   userEmail,
+  provider = 'microsoft',
   onLoginClick,
   onLogoutClick,
   onComposeClick,
 }: SidebarProps) {
+  const accountLabel = provider === 'google' ? 'Google Account' : 'Microsoft Account';
   const [isMoreExpanded, setIsMoreExpanded] = React.useState(false);
 
   const primaryItems = [
@@ -312,7 +315,7 @@ export function Sidebar({
                   {userEmail ? userEmail.slice(0, 2).toUpperCase() : 'US'}
                 </div>
                 <div className="overflow-hidden">
-                  <h4 className="text-xs font-semibold text-[var(--text-primary)] truncate">Microsoft Account</h4>
+                  <h4 className="text-xs font-semibold text-[var(--text-primary)] truncate">{accountLabel}</h4>
                   <p className="text-[10px] text-[var(--text-muted)] truncate" title={userEmail || ''}>
                     {userEmail}
                   </p>

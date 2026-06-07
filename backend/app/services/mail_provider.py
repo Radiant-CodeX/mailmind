@@ -1,12 +1,9 @@
-"""Provider-aware mail routing.
+"""Provider-aware mail routing + session activity.
 
-Tracks which email provider the current session is using (Microsoft or Google)
-and hands back the matching mail client. Mail endpoints call `get_mail_client()`
-instead of instantiating a specific client, so the whole app works identically
-for an Outlook or a Gmail account.
-
-The active provider is persisted to disk so it survives a backend restart — when
-combined with the persisted refresh tokens, the session resumes automatically.
+Tracks which provider the current session uses (Microsoft or Google), whether
+the session is *active* (logged in vs logged out), and routes to the matching
+mail client. Persisted to disk so an active session survives a backend restart —
+but a logout deactivates it so the login screen no longer bounces back.
 """
 from __future__ import annotations
 
@@ -25,10 +22,14 @@ def _load() -> dict[str, Any]:
             with open(_PROVIDER_PATH, "r", encoding="utf-8") as fh:
                 data = json.load(fh)
                 if data.get("provider") in ("microsoft", "google"):
-                    return {"provider": data["provider"], "email": data.get("email")}
+                    return {
+                        "provider": data["provider"],
+                        "email": data.get("email"),
+                        "active": bool(data.get("active", False)),
+                    }
     except Exception:
         pass
-    return {"provider": "microsoft", "email": None}
+    return {"provider": "microsoft", "email": None, "active": False}
 
 
 def _save() -> None:
@@ -45,15 +46,29 @@ _provider_session: dict[str, Any] = _load()
 
 
 def set_provider(provider: Provider, email: str | None = None) -> None:
+    """Mark a session active for a provider (called on login / resume)."""
     _provider_session["provider"] = provider
     _provider_session["email"] = email
+    _provider_session["active"] = True
+    _save()
+
+
+def deactivate() -> None:
+    """Log out: mark the session inactive but keep the provider/email hint."""
+    _provider_session["active"] = False
     _save()
 
 
 def clear_provider() -> None:
+    """Fully reset the session (logout)."""
     _provider_session["provider"] = "microsoft"
     _provider_session["email"] = None
+    _provider_session["active"] = False
     _save()
+
+
+def is_active() -> bool:
+    return bool(_provider_session.get("active"))
 
 
 def active_provider() -> str:
@@ -66,7 +81,7 @@ def active_email() -> str | None:
 
 def get_mail_client():
     """Return the mail client for the active provider."""
-    if _provider_session.get("provider") == "google":
+    if active_provider() == "google":
         from app.services.gmail import GmailClient
 
         return GmailClient()

@@ -60,6 +60,51 @@ def _build_public_client():
     return app, cache
 
 
+def _build_confidential_client():
+    """Build an MSAL ConfidentialClientApplication (web app) for the auth-code flow."""
+    cache = _load_token_cache()
+    tenant_id = settings.azure_tenant_id or "common"
+    app = msal.ConfidentialClientApplication(
+        settings.azure_client_id,
+        client_credential=settings.azure_client_secret,
+        authority=f"https://login.microsoftonline.com/{tenant_id}",
+        token_cache=cache,
+    )
+    return app, cache
+
+
+# In-flight Microsoft auth-code flows, keyed by the flow's own `state`.
+ms_auth_status: dict[str, dict[str, Any]] = {}
+
+
+def build_ms_auth_url() -> tuple[str, str]:
+    """Start a Microsoft authorization-code (popup) flow. Returns (auth_url, state)."""
+    app, _ = _build_confidential_client()
+    flow = app.initiate_auth_code_flow(_DELEGATED_SCOPES, redirect_uri=settings.azure_redirect_uri)
+    state = flow["state"]
+    ms_auth_status[state] = {"status": "pending", "flow": flow}
+    return flow["auth_uri"], state
+
+
+def exchange_ms_code(state: str, query_params: dict[str, str]) -> dict[str, Any]:
+    """Complete the auth-code flow from the redirect query params; store the session."""
+    rec = ms_auth_status.get(state)
+    if not rec or "flow" not in rec:
+        raise RuntimeError("Unknown or expired sign-in state. Please try again.")
+    app, cache = _build_confidential_client()
+    result = app.acquire_token_by_auth_code_flow(rec["flow"], query_params)
+    if not result or "access_token" not in result:
+        raise RuntimeError(result.get("error_description") if result else "Authentication failed")
+    claims = result.get("id_token_claims", {})
+    upn = claims.get("preferred_username") or claims.get("upn") or claims.get("email")
+    _user_token_cache["access_token"] = result["access_token"]
+    _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
+    _user_token_cache["user_principal_name"] = upn
+    _user_token_cache["tenant_id"] = claims.get("tid")
+    _save_token_cache(cache)
+    return {"email": upn}
+
+
 def _silent_acquire(username: str | None = None) -> dict[str, Any] | None:
     """Silently acquire a delegated access token from the persisted refresh token.
 
@@ -339,29 +384,114 @@ class GraphClient:
         path = f"{prefix}/mailFolders/inbox/messages?$top={limit}&$orderby=receivedDateTime desc"
         data = self._request("GET", path, headers={"Prefer": 'outlook.body-content-type="text"'})
         raw_msgs = data.get("value", [])
-        
+
         formatted = []
         for msg in raw_msgs:
             sender_addr = "unknown@example.com"
             from_obj = msg.get("from") or msg.get("sender")
             if from_obj and "emailAddress" in from_obj:
                 sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
-            
+
             body_content = ""
             body_obj = msg.get("body")
             if body_obj:
                 body_content = body_obj.get("content", "")
             else:
                 body_content = msg.get("bodyPreview", "")
-                
+
             formatted.append({
                 "email_id": msg.get("id"),
                 "sender": sender_addr,
                 "subject": msg.get("subject", ""),
                 "body": body_content,
                 "received_at": msg.get("receivedDateTime"),
+                "is_read": bool(msg.get("isRead", True)),
+                "has_attachments": bool(msg.get("hasAttachments", False)),
             })
         return formatted
+
+    _FOLDERS = {"inbox": "inbox", "sent": "sentitems", "drafts": "drafts",
+                "spam": "junkemail", "trash": "deleteditems"}
+
+    def list_emails(self, folder: str = "inbox", limit: int = 50,
+                    page_token: str | None = None, query: str | None = None) -> dict[str, Any]:
+        """Unified paginated listing for any folder with optional search.
+
+        page_token encodes the skip offset (Graph uses $skip-based paging).
+        """
+        if self.use_mock:
+            source = self.get_inbox_emails(limit=50) if folder == "inbox" else []
+            if query:
+                q = query.lower()
+                source = [m for m in source if q in m["subject"].lower() or q in str(m["sender"]).lower()]
+            return {"emails": source[:limit], "next_page_token": None, "total": len(source)}
+
+        folder_id = self._FOLDERS.get(folder, "inbox")
+        skip = int(page_token) if page_token and page_token.isdigit() else 0
+        prefix = self._get_prefix()
+        base = f"{prefix}/mailFolders/{folder_id}/messages?$top={limit}&$skip={skip}&$count=true"
+        if query:
+            from urllib.parse import quote
+            path = f'{base}&$search="{quote(query)}"'
+        else:
+            path = f"{base}&$orderby=receivedDateTime desc"
+        data = self._request("GET", path, headers={
+            "Prefer": 'outlook.body-content-type="text"', "ConsistencyLevel": "eventual"})
+        raw = data.get("value", [])
+        emails = []
+        for msg in raw:
+            from_obj = msg.get("from") or msg.get("sender")
+            sender = "unknown@example.com"
+            if from_obj and "emailAddress" in from_obj:
+                sender = from_obj["emailAddress"].get("address", sender)
+            body_obj = msg.get("body")
+            body = body_obj.get("content", "") if body_obj else msg.get("bodyPreview", "")
+            emails.append({
+                "email_id": msg.get("id"),
+                "sender": sender,
+                "subject": msg.get("subject", ""),
+                "body": body,
+                "received_at": msg.get("receivedDateTime"),
+                "is_read": bool(msg.get("isRead", True)),
+                "has_attachments": bool(msg.get("hasAttachments", False)),
+            })
+        total = int(data.get("@odata.count", skip + len(emails)))
+        next_token = str(skip + limit) if len(emails) == limit and (skip + limit) < total else None
+        return {"emails": emails, "next_page_token": next_token, "total": total}
+
+    # ── Mail actions ─────────────────────────────────────────────────────────
+    def mark_read(self, email_id: str, read: bool = True) -> None:
+        """Mark a message read/unread."""
+        if self.use_mock:
+            return
+        prefix = self._get_prefix()
+        self._request("PATCH", f"{prefix}/messages/{email_id}", json={"isRead": read})
+
+    def archive(self, email_id: str) -> None:
+        """Move a message to the Archive folder."""
+        if self.use_mock:
+            return
+        prefix = self._get_prefix()
+        self._request("POST", f"{prefix}/messages/{email_id}/move", json={"destinationId": "archive"})
+
+    def report_spam(self, email_id: str) -> None:
+        """Move a message to the Junk Email folder."""
+        if self.use_mock:
+            return
+        prefix = self._get_prefix()
+        self._request("POST", f"{prefix}/messages/{email_id}/move", json={"destinationId": "junkemail"})
+
+    def forward_email(self, email_id: str, to: str, comment: str = "") -> None:
+        """Forward a message to a new recipient."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Forward {email_id} to {to}")
+            return
+        prefix = self._get_prefix()
+        to_recipients = [{"emailAddress": {"address": a.strip()}} for a in to.split(",") if a.strip()]
+        self._request(
+            "POST", f"{prefix}/messages/{email_id}/forward",
+            json={"comment": comment, "toRecipients": to_recipients},
+        )
 
     def _format_messages(self, raw_msgs: list, date_field: str = "receivedDateTime") -> list:
         formatted = []
@@ -658,6 +788,14 @@ class GraphClient:
             "comment": comment
         }
         self._request("POST", f"{prefix}/messages/{email_id}/reply", json=payload)
+
+    def reply_all(self, email_id: str, comment: str) -> None:
+        """Reply to all recipients of a message via Microsoft Graph API."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Reply-all to email {email_id}")
+            return
+        prefix = self._get_prefix()
+        self._request("POST", f"{prefix}/messages/{email_id}/replyAll", json={"comment": comment})
 
     def restore_from_trash(self, email_id: str) -> None:
         """Move a message from Deleted Items back to the Inbox."""

@@ -17,6 +17,7 @@ from app.models.schemas import (
     ComposeRequest,
     DraftRequest,
     DraftResponse,
+    EmailPage,
     EmailPayload,
     IngestResponse,
     PrecedentItem,
@@ -30,7 +31,14 @@ from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
 from app.services.draft_service import DraftService
 from app.services.graph import GraphClient
-from app.services.mail_provider import active_email, active_provider, clear_provider, get_mail_client, set_provider
+from app.services.mail_provider import (
+    active_email,
+    active_provider,
+    clear_provider,
+    get_mail_client,
+    is_active,
+    set_provider,
+)
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
 from app.services.scorers import (
     ActionTypeScorer,
@@ -110,6 +118,22 @@ def ready() -> dict[str, Any]:
     return {"ready": overall, "checks": checks, "mode": "mock" if settings.use_mock_graph else "live"}
 
 
+@router.get("/mailbox", response_model=EmailPage)
+def get_mailbox(
+    folder: str = "inbox", limit: int = 50, page_token: str | None = None, q: str | None = None
+) -> dict[str, Any]:
+    """Paginated listing for any folder, with optional server-side search.
+
+    Works for inbox/sent/drafts/spam/trash on the active provider (Outlook/Gmail).
+    Returns up to `limit` (default 50) emails plus a cursor + total count.
+    """
+    client = get_mail_client()
+    try:
+        return client.list_emails(folder=folder, limit=limit, page_token=page_token, query=q)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to list {folder}: {str(e)}")
+
+
 @router.get("/emails", response_model=list[EmailPayload])
 def get_emails(limit: int = 10) -> list[dict[str, Any]]:
     """Fetch recent inbox messages from the active provider (Outlook or Gmail)."""
@@ -182,6 +206,60 @@ def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to send reply: {str(e)}")
+
+
+@router.post("/emails/{email_id}/read")
+def set_read_status(email_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Mark an email read or unread (default: read)."""
+    read = True if payload is None else bool(payload.get("read", True))
+    try:
+        get_mail_client().mark_read(email_id, read)
+        return {"success": True, "is_read": read}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to update read status: {str(e)}")
+
+
+@router.post("/emails/{email_id}/archive")
+def archive_email(email_id: str) -> dict[str, Any]:
+    """Archive an email (out of Inbox, not deleted)."""
+    try:
+        get_mail_client().archive(email_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to archive: {str(e)}")
+
+
+@router.post("/emails/{email_id}/spam")
+def report_spam(email_id: str) -> dict[str, Any]:
+    """Report an email as spam (move to Junk/Spam)."""
+    try:
+        get_mail_client().report_spam(email_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to report spam: {str(e)}")
+
+
+@router.post("/emails/{email_id}/forward")
+def forward_email(email_id: str, payload: dict[str, str]) -> dict[str, Any]:
+    """Forward an email to another recipient."""
+    to = (payload or {}).get("to", "").strip()
+    if not to:
+        raise HTTPException(status_code=400, detail="'to' recipient is required")
+    try:
+        get_mail_client().forward_email(email_id, to, (payload or {}).get("comment", ""))
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to forward: {str(e)}")
+
+
+@router.post("/emails/{email_id}/reply-all")
+def reply_all_email(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
+    """Reply to everyone on an email thread."""
+    try:
+        get_mail_client().reply_all(email_id, payload.comment)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to reply all: {str(e)}")
 
 
 @router.post("/emails/{email_id}/restore")
@@ -344,6 +422,77 @@ def login_mock() -> dict[str, Any]:
     }
 
 
+# ── Microsoft OAuth (authorization-code popup flow) ───────────────────────────
+
+
+@router.post("/auth/microsoft/login-initiate")
+def microsoft_login_initiate() -> dict[str, Any]:
+    """Begin Microsoft sign-in via the smooth popup (auth-code) flow.
+
+    Mock mode logs in instantly. Live mode returns the Microsoft consent URL;
+    the frontend opens it in a popup and polls /auth/microsoft/poll.
+    """
+    global _mock_logged_out
+    client = GraphClient()
+    if client.use_mock:
+        _mock_logged_out = False
+        set_provider("microsoft", "mock.user@example.com")
+        return {"status": "mock", "authenticated": True, "user_principal_name": "mock.user@example.com"}
+    if not settings.azure_client_id:
+        raise HTTPException(status_code=500, detail="Microsoft OAuth not configured (AZURE_CLIENT_ID).")
+    from app.services.graph import build_ms_auth_url
+    auth_url, state = build_ms_auth_url()
+    return {"status": "pending", "auth_url": auth_url, "state": state}
+
+
+@router.get("/auth/microsoft/callback", response_class=HTMLResponse)
+def microsoft_callback(request: Request) -> str:
+    """OAuth redirect target — exchanges the code and stores the session."""
+    from app.services.graph import exchange_ms_code, ms_auth_status
+    params = dict(request.query_params)
+    state = params.get("state", "")
+    if params.get("error"):
+        if state:
+            ms_auth_status[state] = {"status": "error", "error": params.get("error_description", params["error"])}
+        return f"<html><body><h3>Sign-in failed: {params.get('error')}</h3>You can close this window.</body></html>"
+    try:
+        info = exchange_ms_code(state, params)
+        set_provider("microsoft", info.get("email"))
+        ms_auth_status[state] = {"status": "success", "email": info.get("email")}
+        dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
+        return (
+            "<html><body style='font-family:sans-serif;text-align:center;padding-top:60px'>"
+            "<h2>✅ Microsoft account connected</h2>"
+            "<p>You can close this window and return to MailMind.</p>"
+            "<script>setTimeout(function(){window.close();"
+            f"setTimeout(function(){{window.location.href='{dashboard}';}},400);}},800);</script>"
+            "</body></html>"
+        )
+    except Exception as e:
+        if state:
+            ms_auth_status[state] = {"status": "error", "error": str(e)}
+        return f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>"
+
+
+@router.post("/auth/microsoft/poll")
+def microsoft_poll(payload: dict[str, str]) -> dict[str, Any]:
+    """Poll the status of an in-progress Microsoft sign-in."""
+    from app.services.graph import ms_auth_status
+    state = payload.get("state")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state")
+    info = ms_auth_status.get(state)
+    if not info:
+        return {"status": "pending", "authenticated": False}
+    if info.get("status") == "success":
+        ms_auth_status.pop(state, None)
+        return {"status": "success", "authenticated": True, "user_principal_name": info.get("email")}
+    if info.get("status") == "error":
+        ms_auth_status.pop(state, None)
+        raise HTTPException(status_code=400, detail=info.get("error", "Microsoft sign-in failed"))
+    return {"status": "pending", "authenticated": False}
+
+
 # ── Google / Gmail OAuth ──────────────────────────────────────────────────────
 
 
@@ -494,6 +643,16 @@ def auth_status() -> dict[str, Any]:
             "provider": active_provider(),
         }
 
+    # A logged-out session is never authenticated, even if a resumable refresh
+    # token still exists on disk (that's only used by Quick Login).
+    if not is_active():
+        return {
+            "status": "unauthenticated",
+            "authenticated": False,
+            "user_principal_name": None,
+            "provider": active_provider(),
+        }
+
     # Live Google session.
     if active_provider() == "google":
         from app.services.gmail import current_google_email, has_google_session
@@ -536,7 +695,7 @@ def auth_logout() -> dict[str, Any]:
     _user_token_cache["expires_at"] = 0.0
     _user_token_cache["user_principal_name"] = None
     sign_out_google()  # keeps the refresh token so Quick Login can resume
-    clear_provider()
+    clear_provider()   # reset provider + mark the session logged out
     return {"status": "logged_out"}
 
 
@@ -771,34 +930,52 @@ def evaluate_model():
     }
 
 
-@router.post("/triage", response_model=TriageResult)
-def triage_email(payload: EmailPayload) -> TriageResult:
-    """Calculate the five-axis triage score for an email."""
+def _make_scorers() -> dict[str, Any]:
+    """Build a reusable set of scorers (shared across a batch to reuse caches)."""
+    return {
+        "deadline": DeadlineScorer(),
+        "authority": SenderAuthorityScorer(GraphClient()),
+        "sentiment": SentimentScorer(),
+        "decay": ThreadAgeDecayScorer(),
+        "action": ActionTypeScorer(),
+        "aggregator": CompositeAggregator(),
+    }
+
+
+def _compute_triage(payload: EmailPayload, scorers: dict[str, Any]) -> TriageResult:
     from app.services.cache import triage_cache
     key = f"id:{payload.email_id}"
     cached = triage_cache.get(key)
     if cached is not None:
         return cached
-
-    deadline_scorer = DeadlineScorer()
-    authority_scorer = SenderAuthorityScorer(GraphClient())
-    sentiment_scorer = SentimentScorer()
-    decay_scorer = ThreadAgeDecayScorer()
-    action_scorer = ActionTypeScorer()
-    aggregator = CompositeAggregator()
-
     body = payload.body
-    # Calculate each axis score
-    deadline_score = deadline_scorer.score(body, payload.received_at)
-    authority_score = authority_scorer.score(str(payload.sender))
-    sentiment_score = sentiment_scorer.score(body)
-    decay_score = decay_scorer.score(payload.received_at)
-    action_score = action_scorer.score(body)
-
-    axes = [deadline_score, authority_score, sentiment_score, decay_score, action_score]
-    result = aggregator.aggregate(axes)
+    axes = [
+        scorers["deadline"].score(body, payload.received_at),
+        scorers["authority"].score(str(payload.sender)),
+        scorers["sentiment"].score(body),
+        scorers["decay"].score(payload.received_at),
+        scorers["action"].score(body),
+    ]
+    result = scorers["aggregator"].aggregate(axes)
     triage_cache.set(key, result)
     return result
+
+
+@router.post("/triage", response_model=TriageResult)
+def triage_email(payload: EmailPayload) -> TriageResult:
+    """Calculate the five-axis triage score for an email."""
+    return _compute_triage(payload, _make_scorers())
+
+
+@router.post("/triage/batch", response_model=list[TriageResult])
+def triage_batch(payloads: list[EmailPayload]) -> list[TriageResult]:
+    """Score many emails in one request (reuses scorers + cache).
+
+    Replaces N separate /triage calls with a single round-trip — drastically
+    cutting the number of API calls the client makes per page.
+    """
+    scorers = _make_scorers()
+    return [_compute_triage(p, scorers) for p in payloads]
 
 # ── Tone DNA routes ───────────────────────────────────────────────────────────
 

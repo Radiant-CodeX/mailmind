@@ -2,7 +2,8 @@ import React from 'react';
 import { Email } from '../../lib/types';
 import { EmailListItem } from './EmailListItem';
 import { SortMenu } from './SortMenu';
-import { SortKey } from '../../hooks/useEmails';
+import { FilterMenu } from './FilterMenu';
+import { SortKey, MailFilters } from '../../hooks/useEmails';
 
 interface EmailListProps {
   emails: Email[];
@@ -12,6 +13,15 @@ interface EmailListProps {
   onSearchChange: (query: string) => void;
   sortKey?: SortKey;
   onSortChange?: (key: SortKey) => void;
+  filters?: MailFilters;
+  onFiltersChange?: (f: MailFilters) => void;
+  total?: number;
+  pageIndex?: number;
+  pageSize?: number;
+  hasNextPage?: boolean;
+  hasPrevPage?: boolean;
+  onNextPage?: () => void;
+  onPrevPage?: () => void;
   loading?: boolean;
   onRefresh?: () => void;
   isFullWidth?: boolean;
@@ -19,6 +29,9 @@ interface EmailListProps {
   onToggleStar: (id: string) => void;
   onTrashEmail?: (id: string) => void;
   onRestoreEmail?: (id: string) => void;
+  onArchiveEmail?: (id: string) => void;
+  onReportSpam?: (id: string) => void;
+  onToggleRead?: (id: string, read: boolean) => void;
 }
 
 export function EmailList({
@@ -29,6 +42,15 @@ export function EmailList({
   onSearchChange,
   sortKey = 'normal',
   onSortChange,
+  filters,
+  onFiltersChange,
+  total = 0,
+  pageIndex = 0,
+  pageSize = 50,
+  hasNextPage = false,
+  hasPrevPage = false,
+  onNextPage,
+  onPrevPage,
   loading = false,
   onRefresh,
   isFullWidth = false,
@@ -36,7 +58,12 @@ export function EmailList({
   onToggleStar,
   onTrashEmail,
   onRestoreEmail,
+  onArchiveEmail,
+  onReportSpam,
+  onToggleRead,
 }: EmailListProps) {
+  // Archive/spam/read actions only make sense in the standard mail folders.
+  const showActions = !['Trash', 'Sent', 'Drafts', 'Spam'].includes(activeFolder);
   return (
     <div 
       className={`${
@@ -49,37 +76,56 @@ export function EmailList({
         <h2 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2 uppercase tracking-wide">
           {activeFolder}
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          {filters && onFiltersChange && <FilterMenu value={filters} onChange={onFiltersChange} />}
           {onSortChange && <SortMenu value={sortKey} onChange={onSortChange} />}
           {onRefresh && (
             <button
               onClick={onRefresh}
               disabled={loading}
-              className={`p-1.5 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all ${
-                loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+              className={`p-1.5 rounded-full hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all ${
+                loading ? 'cursor-not-allowed' : 'cursor-pointer'
               }`}
-              title="Sync Outlook Emails"
+              title="Refresh"
               id="btn-sync-emails"
             >
-              <svg
-                className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2.5}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M21 20v-5h-.581m0 0a8.003 8.003 0 01-15.357-2"
-                />
+              {/* Gmail-style circular reload (single curved arrow) */}
+              <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17.65 6.35A7.958 7.958 0 0 0 12 4a8 8 0 1 0 8 8h-2a6 6 0 1 1-6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
               </svg>
             </button>
           )}
-          <span className="px-2 py-0.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border)] text-[10px] font-bold text-[var(--text-primary)]">
-            {emails.length}
-          </span>
+
+          {/* Gmail-style pagination: "1–50 of N" with prev/next */}
+          {total > 0 && (
+            <div className="flex items-center gap-0.5 ml-1">
+              <span className="text-[11px] font-medium text-[var(--text-muted)] tabular-nums whitespace-nowrap px-1">
+                {pageIndex * pageSize + (emails.length ? 1 : 0)}–{pageIndex * pageSize + emails.length} of {total.toLocaleString()}
+              </span>
+              <button
+                onClick={onPrevPage}
+                disabled={!hasPrevPage || loading}
+                className="p-1 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Newer"
+                id="btn-prev-page"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <button
+                onClick={onNextPage}
+                disabled={!hasNextPage || loading}
+                className="p-1 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                title="Older"
+                id="btn-next-page"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -129,6 +175,9 @@ export function EmailList({
               onToggleStar={onToggleStar}
               onTrash={activeFolder !== 'Trash' ? onTrashEmail : undefined}
               onRestore={activeFolder === 'Trash' ? onRestoreEmail : undefined}
+              onArchive={showActions ? onArchiveEmail : undefined}
+              onSpam={showActions ? onReportSpam : undefined}
+              onToggleRead={showActions ? onToggleRead : undefined}
               isFullWidth={isFullWidth}
             />
           ))
