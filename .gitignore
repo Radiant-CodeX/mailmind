@@ -115,6 +115,14 @@ reports/
 msal_cache.bin
 **/msal_cache.bin
 
+# Google OAuth token store (holds refresh tokens — never commit)
+google_token.json
+**/google_token.json
+
+# Active provider session state
+active_provider.json
+**/active_provider.json
+
 # ==========================================
 # Azure
 # ==========================================

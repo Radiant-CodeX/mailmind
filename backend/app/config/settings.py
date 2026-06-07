@@ -3,7 +3,11 @@ from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
+from app.config.keyvault import load_keyvault_into_env
+
+# Load .env for local dev, then let Key Vault (if configured) take precedence.
 load_dotenv()
+load_keyvault_into_env()
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -33,6 +37,13 @@ class Settings:
     graph_scopes: str = os.getenv("GRAPH_SCOPES", "Mail.ReadWrite Mail.Send Calendars.ReadWrite Tasks.ReadWrite")
     # Allow switching between the mock Graph client and a real Azure integration
     use_mock_graph: bool = _bool_env("USE_MOCK_GRAPH", True)
+
+    # Google / Gmail OAuth Configuration
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    google_redirect_uri: str = os.getenv(
+        "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback"
+    )
 
     # OpenAI / Azure OpenAI Configuration
     # Store the raw env value; use azure_openai_base_endpoint for SDK calls.

@@ -1,4 +1,5 @@
 from app.config.settings import settings
+
 settings.use_mock_graph = True
 
 from app.models.schemas import AxisScore

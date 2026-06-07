@@ -7,15 +7,29 @@
  */
 
 export type LoginMode = 'mock' | 'live';
+export type Provider = 'microsoft' | 'google';
 
 export interface RememberedLogin {
   mode: LoginMode;
+  provider: Provider;
   email: string;
   /** ms timestamp of the last successful login */
   ts: number;
 }
 
 const KEY = 'mailmind_last_login';
+const REMEMBER_KEY = 'mailmind_remember_me';
+
+/** The "Remember me" checkbox preference (defaults to true). */
+export function getRememberMe(): boolean {
+  if (typeof window === 'undefined') return true;
+  return localStorage.getItem(REMEMBER_KEY) !== 'false';
+}
+
+export function setRememberMe(value: boolean): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(REMEMBER_KEY, String(value));
+}
 
 /** Quick Login stays available for one week after sign-out, then expires. */
 export const QUICK_LOGIN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -32,15 +46,26 @@ export function getRememberedLogin(): RememberedLogin | null {
       localStorage.removeItem(KEY);
       return null;
     }
+    // Backward-compat: default provider for entries saved before multi-provider.
+    if (!parsed.provider) parsed.provider = 'microsoft';
     return parsed;
   } catch {
     return null;
   }
 }
 
-export function rememberLogin(mode: LoginMode, email: string | null | undefined): void {
+export function rememberLogin(
+  mode: LoginMode,
+  email: string | null | undefined,
+  provider: Provider = 'microsoft'
+): void {
   if (typeof window === 'undefined') return;
-  const entry: RememberedLogin = { mode, email: email || 'Signed-in user', ts: Date.now() };
+  const entry: RememberedLogin = {
+    mode,
+    provider,
+    email: email || 'Signed-in user',
+    ts: Date.now(),
+  };
   localStorage.setItem(KEY, JSON.stringify(entry));
 }
 

@@ -4,4 +4,5 @@ line-length = 120
 select = ["E", "F", "I"]
 ignore = ["E501"]
 
-per-file-ignores = { "scripts/*.py" = ["E402"] }
+# Tests and scripts intentionally set env/settings before importing the app.
+per-file-ignores = { "scripts/*.py" = ["E402"], "tests/*.py" = ["E402"] }

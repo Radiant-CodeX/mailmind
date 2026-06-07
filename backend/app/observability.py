@@ -60,6 +60,23 @@ def _capture(exc: Exception) -> None:
             pass
 
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    """Echo the request Origin back so error responses are never blocked by CORS.
+
+    Exception handlers can bypass CORSMiddleware in some Starlette setups, which
+    makes the browser report a real 4xx/5xx as a misleading 'Failed to fetch'.
+    Adding the header here guarantees the client always sees the actual error.
+    """
+    origin = request.headers.get("origin")
+    if not origin:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
+
 def init_observability(app: FastAPI) -> None:
     """Attach structured logging and global exception handlers to the app."""
     init_sentry()
@@ -70,12 +87,14 @@ def init_observability(app: FastAPI) -> None:
         if exc.status_code >= 500:
             logger.error("HTTP %s on %s %s: %s", exc.status_code, request.method, request.url.path, exc.detail)
             _capture(exc)
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        return JSONResponse(
+            status_code=exc.status_code, content={"detail": exc.detail}, headers=_cors_headers(request)
+        )
 
     @app.exception_handler(RequestValidationError)
     async def _validation_exc(request: Request, exc: RequestValidationError) -> JSONResponse:
         logger.warning("Validation error on %s %s: %s", request.method, request.url.path, exc.errors())
-        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+        return JSONResponse(status_code=422, content={"detail": exc.errors()}, headers=_cors_headers(request))
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
@@ -89,4 +108,5 @@ def init_observability(app: FastAPI) -> None:
                 "detail": "An internal error occurred. Please try again.",
                 "error_id": error_id,
             },
+            headers=_cors_headers(request),
         )

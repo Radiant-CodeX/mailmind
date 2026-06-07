@@ -11,13 +11,14 @@ import { RAGSettingsView } from '../../components/rag/RAGSettingsView';
 import { ComposeWindow } from '../../components/inbox/ComposeWindow';
 import { TrashToast } from '../../components/shared/TrashToast';
 import { EvaluationView } from '../../components/evaluation/EvaluationView';
+import { TasksView } from '../../components/tasks/TasksView';
 
 import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
 import { checkAuthStatus, logoutUser } from '../../lib/api';
-import { rememberLogin } from '../../lib/session';
+import { rememberLogin, getRememberMe, Provider } from '../../lib/session';
 
 export default function Home() {
   const router = useRouter();
@@ -28,6 +29,7 @@ export default function Home() {
   const [authenticated, setAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isMockMode, setIsMockMode] = useState(false);
+  const [provider, setProvider] = useState<Provider>('microsoft');
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
 
@@ -40,6 +42,7 @@ export default function Home() {
           setAuthenticated(true);
           setUserEmail(data.user_principal_name);
           setIsMockMode(data.status === 'mock' || data.status === 'mock_unauthenticated');
+          if (data.provider === 'google' || data.provider === 'microsoft') setProvider(data.provider);
           setCheckingAuth(false);
         } else {
           router.push('/');
@@ -80,7 +83,7 @@ export default function Home() {
     dismissTrashToast,
     pendingTrash,
     restoreEmail,
-  } = useEmails(activeFolder);
+  } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const {
     loading: detailLoading,
@@ -133,10 +136,10 @@ export default function Home() {
 
   const handleLogout = async () => {
     try {
-      // Remember this account for one-tap Quick Login (valid for 1 week).
-      // Saved only on sign-out, so the card appears only after logging out.
-      if (userEmail) {
-        rememberLogin(isMockMode ? 'mock' : 'live', userEmail);
+      // Remember this account for one-tap Quick Login (valid for 1 week) —
+      // only when "Remember me" was checked, and only on sign-out.
+      if (userEmail && getRememberMe()) {
+        rememberLogin(isMockMode ? 'mock' : 'live', userEmail, provider);
       }
       await logoutUser();
       setAuthenticated(false);
@@ -242,6 +245,7 @@ export default function Home() {
           )}
 
           {activeTab === 'RAG Settings' && <RAGSettingsView />}
+          {activeTab === 'Tasks' && <TasksView />}
           {activeTab === 'Evaluation' && <EvaluationView />}
         </div>
       </div>

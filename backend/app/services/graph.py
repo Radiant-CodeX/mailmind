@@ -17,7 +17,10 @@ except Exception:  # pragma: no cover - imported at runtime when available
 
 
 # Delegated scopes requested for the signed-in user (email, calendar, tasks, profile).
-_DELEGATED_SCOPES = ["User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Tasks.ReadWrite"]
+_DELEGATED_SCOPES = [
+    "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Tasks.ReadWrite",
+    "ChannelMessage.Send", "OnlineMeetings.ReadWrite", "Team.ReadBasic.All",
+]
 
 # Persistent MSAL token cache. Holds the refresh token from the delegated login
 # so Quick Login can acquire fresh access tokens silently (no code/password).
@@ -580,6 +583,39 @@ class GraphClient:
         self._request("POST", f"{prefix}/todo/lists/{list_id}/tasks", json=payload)
         return self._todo_web_url()
 
+    def list_tasks(self, limit: int = 20) -> List[dict[str, Any]]:
+        """Return Microsoft To Do tasks, normalized to {id, title, status, due}."""
+        if self.use_mock:
+            now = datetime.utcnow()
+            return [
+                {"id": "mtask-1", "title": "Approve Q3 budget", "status": "notStarted",
+                 "due": (now + timedelta(days=1)).isoformat() + "Z"},
+                {"id": "mtask-2", "title": "Sign service agreement", "status": "notStarted",
+                 "due": (now + timedelta(days=3)).isoformat() + "Z"},
+            ]
+        try:
+            prefix = self._get_prefix()
+            lists = self._request("GET", f"{prefix}/todo/lists")
+            lists_val = lists.get("value", []) if lists else []
+            if not lists_val:
+                return []
+            list_id = lists_val[0]["id"]
+            data = self._request("GET", f"{prefix}/todo/lists/{list_id}/tasks?$top={limit}")
+        except Exception:
+            return []
+        out = []
+        for t in (data or {}).get("value", []):
+            due = ""
+            if t.get("dueDateTime"):
+                due = t["dueDateTime"].get("dateTime", "")
+            out.append({
+                "id": t.get("id", ""),
+                "title": t.get("title", ""),
+                "status": t.get("status", "notStarted"),
+                "due": due,
+            })
+        return out
+
     def _todo_web_url(self) -> str:
         """Return the correct Microsoft To Do web app URL for the signed-in account.
 
@@ -683,6 +719,41 @@ class GraphClient:
             "saveToSentItems": "true"
         }
         self._request("POST", f"{prefix}/sendMail", json=payload)
+
+    # ── Microsoft Teams ──────────────────────────────────────────────────────
+    def list_teams(self) -> List[dict[str, Any]]:
+        """Return the teams the signed-in user has joined."""
+        if self.use_mock:
+            return [{"id": "team-mock-1", "displayName": "Engineering"}]
+        data = self._request("GET", "/me/joinedTeams")
+        return data.get("value", []) if data else []
+
+    def post_teams_message(self, team_id: str, channel_id: str, message: str) -> dict[str, Any]:
+        """Post a message to a Teams channel."""
+        if self.use_mock:
+            print(f"[MOCK GRAPH] Teams message to {team_id}/{channel_id}: {message}")
+            return {"id": "msg-mock-1", "status": "sent"}
+        payload = {"body": {"contentType": "text", "content": message}}
+        result = self._request("POST", f"/teams/{team_id}/channels/{channel_id}/messages", json=payload)
+        return result or {"status": "sent"}
+
+    def create_online_meeting(self, subject: str, start: str | None = None, end: str | None = None) -> dict[str, Any]:
+        """Create a Teams online meeting and return its join URL."""
+        if self.use_mock:
+            return {
+                "id": "meeting-mock-1",
+                "subject": subject,
+                "joinUrl": "https://teams.microsoft.com/l/meetup-join/mock-meeting",
+            }
+        prefix = self._get_prefix()
+        now = datetime.utcnow()
+        payload = {
+            "subject": subject,
+            "startDateTime": start or (now + timedelta(minutes=5)).isoformat() + "Z",
+            "endDateTime": end or (now + timedelta(minutes=35)).isoformat() + "Z",
+        }
+        result = self._request("POST", f"{prefix}/onlineMeetings", json=payload)
+        return result or {}
 
     def fetch_sent_email(self, email_id: str) -> dict[str, Any] | None:
         """Fetch a sent email by message id for re-indexing."""
