@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MailMind logo">
+  <rect width="120" height="120" rx="22" fill="#BEF867"/>
+  <!-- Three rising angular strokes forming a dynamic M mark -->
+  <polygon points="16,90 31,90 49,52 34,52" fill="#0A0A0A"/>
+  <polygon points="44,90 59,90 70,66 55,66" fill="#0A0A0A"/>
+  <polygon points="68,90 83,90 101,28 86,28" fill="#0A0A0A"/>
+</svg>

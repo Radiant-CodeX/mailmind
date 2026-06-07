@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from app.config.settings import settings
 from app.models.schemas import (
@@ -30,6 +30,7 @@ from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
 from app.services.draft_service import DraftService
 from app.services.graph import GraphClient
+from app.services.mail_provider import active_email, active_provider, clear_provider, get_mail_client, set_provider
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
 from app.services.scorers import (
     ActionTypeScorer,
@@ -46,6 +47,10 @@ router = APIRouter(prefix="/api")
 
 # In-memory rate limit store keyed by client IP address.
 rate_limit_store: dict[str, list[datetime]] = {}
+
+# Cache of evaluation predictions keyed by email text — the golden dataset is
+# fixed, so after the first run every re-run is instant.
+_eval_prediction_cache: dict[str, str] = {}
 
 
 def _rate_limit(request: Request) -> None:
@@ -107,24 +112,26 @@ def ready() -> dict[str, Any]:
 
 @router.get("/emails", response_model=list[EmailPayload])
 def get_emails(limit: int = 10) -> list[dict[str, Any]]:
-    """Fetch recent emails/messages from the Outlook Inbox."""
-    client = GraphClient()
+    """Fetch recent inbox messages from the active provider (Outlook or Gmail)."""
+    client = get_mail_client()
     return client.get_inbox_emails(limit=limit)
 
 
 @router.get("/emails/sent", response_model=list[EmailPayload])
 def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
-    """Fetch recent sent emails/messages from the Outlook Sent Items folder."""
-    client = GraphClient()
+    """Fetch recent sent messages from the active provider (Outlook or Gmail)."""
+    client = get_mail_client()
     raw_emails = client.fetch_sent_emails(days=30)
-    
+
     formatted = []
     for msg in raw_emails[:limit]:
         sender_addr = "unknown@example.com"
         from_obj = msg.get("from") or msg.get("sender")
-        if from_obj and "emailAddress" in from_obj:
+        if isinstance(from_obj, dict) and "emailAddress" in from_obj:
             sender_addr = from_obj["emailAddress"].get("address", "unknown@example.com")
-        
+        elif isinstance(from_obj, str) and from_obj:
+            sender_addr = from_obj
+
         # Body may be a Graph dict ({"content": ...}) in live mode or a plain
         # string in mock mode — handle both.
         body_obj = msg.get("body")
@@ -148,28 +155,28 @@ def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
 @router.get("/emails/drafts", response_model=list[EmailPayload])
 def get_draft_emails(limit: int = 10) -> list[dict[str, Any]]:
     """Fetch emails from the Drafts folder."""
-    client = GraphClient()
+    client = get_mail_client()
     return client.get_draft_emails(limit=limit)
 
 
 @router.get("/emails/spam", response_model=list[EmailPayload])
 def get_spam_emails(limit: int = 10) -> list[dict[str, Any]]:
     """Fetch emails from the Junk/Spam folder."""
-    client = GraphClient()
+    client = get_mail_client()
     return client.get_spam_emails(limit=limit)
 
 
 @router.get("/emails/trash", response_model=list[EmailPayload])
 def get_trash_emails(limit: int = 10) -> list[dict[str, Any]]:
     """Fetch emails from the Deleted Items folder."""
-    client = GraphClient()
+    client = get_mail_client()
     return client.get_trash_emails(limit=limit)
 
 
 @router.post("/emails/{email_id}/reply")
 def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
-    """Send a reply to the specified email via Microsoft Graph."""
-    client = GraphClient()
+    """Send a reply to the specified email via the active provider."""
+    client = get_mail_client()
     try:
         client.send_reply(email_id, payload.comment)
         return {"success": True}
@@ -180,7 +187,7 @@ def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
 @router.post("/emails/{email_id}/restore")
 def restore_email_from_trash(email_id: str) -> dict[str, Any]:
     """Restore the specified email from Trash back to Inbox."""
-    client = GraphClient()
+    client = get_mail_client()
     try:
         client.restore_from_trash(email_id)
         return {"success": True}
@@ -191,7 +198,7 @@ def restore_email_from_trash(email_id: str) -> dict[str, Any]:
 @router.post("/emails/{email_id}/trash")
 def move_email_to_trash(email_id: str) -> dict[str, Any]:
     """Move the specified email to the Deleted Items (Trash) folder."""
-    client = GraphClient()
+    client = get_mail_client()
     try:
         client.move_to_trash(email_id)
         return {"success": True}
@@ -201,8 +208,8 @@ def move_email_to_trash(email_id: str) -> dict[str, Any]:
 
 @router.post("/emails/compose")
 def compose_email(payload: ComposeRequest) -> dict[str, Any]:
-    """Compose and send a new email via Microsoft Graph."""
-    client = GraphClient()
+    """Compose and send a new email via the active provider."""
+    client = get_mail_client()
     try:
         client.send_new_email(
             to=payload.to,
@@ -218,6 +225,41 @@ def compose_email(payload: ComposeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=f"Failed to compose email: {str(e)}")
 
 
+
+
+# ── Microsoft Teams ───────────────────────────────────────────────────────────
+
+
+@router.get("/teams")
+def list_teams() -> list[dict[str, Any]]:
+    """List the Teams the signed-in user belongs to."""
+    return GraphClient().list_teams()
+
+
+@router.post("/teams/message")
+def post_teams_message(payload: dict[str, str]) -> dict[str, Any]:
+    """Post a message to a Teams channel."""
+    team_id = payload.get("team_id")
+    channel_id = payload.get("channel_id")
+    message = payload.get("message", "")
+    if not team_id or not channel_id:
+        raise HTTPException(status_code=400, detail="team_id and channel_id are required")
+    try:
+        result = GraphClient().post_teams_message(team_id, channel_id, message)
+        return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to post Teams message: {str(e)}")
+
+
+@router.post("/teams/meeting")
+def create_teams_meeting(payload: dict[str, str]) -> dict[str, Any]:
+    """Create a Teams online meeting and return its join URL."""
+    subject = payload.get("subject", "MailMind Meeting")
+    try:
+        result = GraphClient().create_online_meeting(subject, payload.get("start"), payload.get("end"))
+        return {"success": True, "join_url": result.get("joinUrl"), "meeting": result}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create meeting: {str(e)}")
 
 
 @router.post("/auth/login-initiate")
@@ -272,6 +314,7 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
     status_val = state.get("status")
     if status_val == "success":
         _device_flow_status.pop(device_code, None)
+        set_provider("microsoft", state.get("user_principal_name"))
         return {
             "status": "success",
             "authenticated": True,
@@ -290,14 +333,97 @@ _mock_logged_out = True
 
 @router.post("/auth/login-mock")
 def login_mock() -> dict[str, Any]:
-    """Log in dynamically in mock/demo mode."""
+    """Log in dynamically in mock/demo mode (Microsoft provider)."""
     global _mock_logged_out
     _mock_logged_out = False
+    set_provider("microsoft", "mock.user@example.com")
     return {
         "status": "mock",
         "authenticated": True,
         "user_principal_name": "mock.user@example.com"
     }
+
+
+# ── Google / Gmail OAuth ──────────────────────────────────────────────────────
+
+
+@router.post("/auth/google/login-initiate")
+def google_login_initiate(payload: dict[str, str] | None = None) -> dict[str, Any]:
+    """Begin Google sign-in.
+
+    Mock mode logs in instantly as a Gmail account. Live mode returns the Google
+    consent URL; the frontend opens it and polls /auth/google/poll.
+    """
+    import uuid
+
+    from app.services.gmail import build_auth_url, google_auth_status
+
+    global _mock_logged_out
+    email = (payload or {}).get("email") or "demo.user@gmail.com"
+    client = GraphClient()
+    if client.use_mock:
+        _mock_logged_out = False
+        set_provider("google", email)
+        return {"status": "mock", "authenticated": True, "user_principal_name": email}
+
+    if not settings.google_client_id:
+        raise HTTPException(status_code=500, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID/SECRET.")
+
+    state = uuid.uuid4().hex
+    google_auth_status[state] = {"status": "pending"}
+    return {"status": "pending", "auth_url": build_auth_url(state), "state": state}
+
+
+@router.get("/auth/google/callback", response_class=HTMLResponse)
+def google_callback(code: str | None = None, state: str | None = None, error: str | None = None) -> str:
+    """OAuth redirect target — exchanges the code and stores the session."""
+    from app.services.gmail import exchange_code, google_auth_status
+
+    if error:
+        if state:
+            google_auth_status[state] = {"status": "error", "error": error}
+        return f"<html><body><h3>Sign-in failed: {error}</h3>You can close this window.</body></html>"
+    if not code or not state:
+        return "<html><body><h3>Missing code/state</h3></body></html>"
+    try:
+        info = exchange_code(code)
+        set_provider("google", info.get("email"))
+        google_auth_status[state] = {"status": "success", "email": info.get("email")}
+        dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
+        # Close the popup (the opener polls and navigates). If this is a full-page
+        # flow instead, window.close() is a no-op, so redirect to the app.
+        return (
+            "<html><body style='font-family:sans-serif;text-align:center;padding-top:60px'>"
+            "<h2>✅ Google account connected</h2>"
+            "<p>You can close this window and return to MailMind.</p>"
+            "<script>"
+            "setTimeout(function(){window.close();"
+            f"setTimeout(function(){{window.location.href='{dashboard}';}},400);}},800);"
+            "</script></body></html>"
+        )
+    except Exception as e:
+        google_auth_status[state] = {"status": "error", "error": str(e)}
+        return f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>"
+
+
+@router.post("/auth/google/poll")
+def google_poll(payload: dict[str, str]) -> dict[str, Any]:
+    """Poll the status of an in-progress Google sign-in."""
+    from app.services.gmail import google_auth_status
+
+    state = payload.get("state")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state")
+    info = google_auth_status.get(state)
+    if not info:
+        return {"status": "pending", "authenticated": False}
+    if info.get("status") == "success":
+        google_auth_status.pop(state, None)
+        return {"status": "success", "authenticated": True, "user_principal_name": info.get("email")}
+    if info.get("status") == "error":
+        google_auth_status.pop(state, None)
+        raise HTTPException(status_code=400, detail=info.get("error", "Google sign-in failed"))
+    return {"status": "pending", "authenticated": False}
 
 
 @router.post("/auth/quick-login")
@@ -309,24 +435,35 @@ def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
       (client-credentials) session, so the user lands directly in the app.
     """
     email = (payload or {}).get("email")
+    provider = (payload or {}).get("provider") or "microsoft"
     global _mock_logged_out
     client = GraphClient()
 
     if client.use_mock:
         _mock_logged_out = False
+        set_provider(provider, email or ("demo.user@gmail.com" if provider == "google" else "mock.user@example.com"))
         return {
             "status": "mock",
             "authenticated": True,
-            "user_principal_name": email or "mock.user@example.com",
+            "user_principal_name": active_email(),
         }
 
-    # Live mode: resume the delegated session silently via the persisted refresh
-    # token. This is a USER (delegated) token — it works with personal accounts
-    # and is not subject to the app-only Conditional Access block (AADSTS53003).
+    # Live Google: resume silently from the persisted Google refresh token.
+    if provider == "google":
+        from app.services.gmail import _refresh_access_token, current_google_email, has_google_session
+        if not has_google_session() or not _refresh_access_token():
+            raise HTTPException(status_code=400, detail="No Google session to resume. Please connect Google again.")
+        set_provider("google", current_google_email() or email)
+        return {"status": "authenticated", "authenticated": True, "user_principal_name": active_email()}
+
+    # Live Microsoft: resume the delegated session silently via the persisted
+    # refresh token. Delegated tokens work with personal accounts and avoid the
+    # app-only Conditional Access block (AADSTS53003).
     try:
         info = client.quick_login(email)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    set_provider("microsoft", info.get("user_principal_name") or email)
     return {
         "status": "authenticated",
         "authenticated": True,
@@ -338,34 +475,52 @@ def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
 def auth_status() -> dict[str, Any]:
     """Check the current login status and user principal name."""
     from app.services.graph import _user_token_cache
-    client = GraphClient()
-    
+
     global _mock_logged_out
-    if client.use_mock:
+    # Use the settings flag directly — don't construct a Graph/MSAL client here
+    # (that can do slow network discovery and stall the login screen).
+    if settings.use_mock_graph:
         if _mock_logged_out:
             return {
                 "status": "mock_unauthenticated",
                 "authenticated": False,
-                "user_principal_name": None
+                "user_principal_name": None,
+                "provider": active_provider(),
             }
         return {
             "status": "mock",
             "authenticated": True,
-            "user_principal_name": "mock.user@example.com"
+            "user_principal_name": active_email() or "mock.user@example.com",
+            "provider": active_provider(),
         }
-        
+
+    # Live Google session.
+    if active_provider() == "google":
+        from app.services.gmail import current_google_email, has_google_session
+        if has_google_session():
+            return {
+                "status": "authenticated",
+                "authenticated": True,
+                "user_principal_name": current_google_email(),
+                "provider": "google",
+            }
+        return {"status": "unauthenticated", "authenticated": False, "user_principal_name": None, "provider": "google"}
+
+    # Live Microsoft session.
     import time
     now = time.time()
     if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
         return {
             "status": "authenticated",
             "authenticated": True,
-            "user_principal_name": _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com"
+            "user_principal_name": _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com",
+            "provider": "microsoft",
         }
     return {
         "status": "unauthenticated",
         "authenticated": False,
-        "user_principal_name": None
+        "user_principal_name": None,
+        "provider": "microsoft",
     }
 
 
@@ -375,10 +530,13 @@ def auth_logout() -> dict[str, Any]:
     global _mock_logged_out
     _mock_logged_out = True
 
+    from app.services.gmail import sign_out_google
     from app.services.graph import _user_token_cache
     _user_token_cache["access_token"] = None
     _user_token_cache["expires_at"] = 0.0
     _user_token_cache["user_principal_name"] = None
+    sign_out_google()  # keeps the refresh token so Quick Login can resume
+    clear_provider()
     return {"status": "logged_out"}
 
 
@@ -459,9 +617,28 @@ def fetch_thread(thread_id: str) -> list[dict[str, Any]]:
 
 @router.get("/calendar", response_model=list[CalendarEvent])
 def fetch_calendar(days: int = 3) -> list[CalendarEvent]:
-    """Fetch upcoming calendar events from the Graph stub client."""
-    fetcher = CalendarFetcher(GraphClient())
+    """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
+    fetcher = CalendarFetcher(get_mail_client())
     return fetcher.fetch_next_events(days=days)
+
+
+@router.get("/tasks")
+def list_tasks(limit: int = 20) -> list[dict[str, Any]]:
+    """List the user's tasks from the active provider (Microsoft To Do or Google Tasks)."""
+    return get_mail_client().list_tasks(limit=limit)
+
+
+@router.post("/tasks")
+def create_task(payload: dict[str, str]) -> dict[str, Any]:
+    """Create a task in the active provider's task list."""
+    title = (payload or {}).get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    try:
+        url = get_mail_client().create_todo("manual", title)
+        return {"success": True, "url": url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to create task: {str(e)}")
 
 
 @router.post("/rag/retrieve", response_model=list[PrecedentItem])
@@ -528,7 +705,7 @@ def generate_draft(payload: DraftRequest) -> DraftResponse:
 @router.post("/commitments/extract", response_model=CommitmentExtractionResponse)
 def extract_commitments(payload: CommitmentExtractionRequest) -> CommitmentExtractionResponse:
     """Extract commitment candidates from masked email text."""
-    service = CommitmentService(GraphClient())
+    service = CommitmentService(get_mail_client())
     commitments = service.extract(payload.masked_email_text, payload.thread_summary or "", payload.email_id)
     return CommitmentExtractionResponse(commitments=commitments)
 
@@ -537,7 +714,7 @@ def extract_commitments(payload: CommitmentExtractionRequest) -> CommitmentExtra
 def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | None = Header(None)) -> CommitmentConfirmResponse:
     """Confirm approved commitments and create tasks/calendar events."""
     _validate_approval_token(x_approval_token)
-    service = CommitmentService(GraphClient())
+    service = CommitmentService(get_mail_client())
     try:
         result = service.confirm(payload.email_id, payload.commitments)
     except HTTPException:
@@ -559,36 +736,33 @@ def evaluate_model():
     with open(dataset_path, "r", encoding="utf-8") as file:
         dataset = json.load(file)
 
-    results = []
-    correct = 0
     classifier = ClassificationService()
 
-    for item in dataset:
+    def _evaluate_one(item: dict) -> dict:
         email_text = f"Subject: {item['subject']}\nSender: {item['sender']}\nBody: {item['body']}"
-        prediction = classifier.classify(email_text)
-        
-        # Map output to dataset priority labels
-        pred_priority = prediction.priority
-        if pred_priority == "CRITICAL":
-            predicted = "Critical"
-        elif pred_priority == "HIGH":
-            predicted = "High"
-        else:
-            predicted = "Normal"
-
+        predicted = _eval_prediction_cache.get(email_text)
+        if predicted is None:
+            pred_priority = classifier.classify(email_text).priority
+            predicted = {"CRITICAL": "Critical", "HIGH": "High"}.get(pred_priority, "Normal")
+            _eval_prediction_cache[email_text] = predicted
         expected = item["expected_priority"]
-        is_correct = expected == predicted
-        if is_correct:
-            correct += 1
-
-        results.append({
+        return {
             "subject": item["subject"],
             "expected": expected,
             "predicted": predicted,
-            "is_correct": is_correct,
-        })
+            "is_correct": expected == predicted,
+        }
 
-    accuracy = round((correct / len(dataset)) * 100, 2)
+    # Run rows concurrently so a live LLM-backed eval finishes in seconds
+    # instead of (rows × per-call latency). Order is preserved via the index map.
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = 1 if settings.use_mock_graph else min(8, max(2, len(dataset)))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(_evaluate_one, dataset))
+
+    correct = sum(1 for r in results if r["is_correct"])
+    accuracy = round((correct / len(dataset)) * 100, 2) if dataset else 0.0
     return {
         "accuracy": accuracy,
         "total_samples": len(dataset),

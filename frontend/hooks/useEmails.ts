@@ -47,7 +47,7 @@ export type SortKey = 'normal' | 'date_desc' | 'date_asc' | 'score_desc' | 'scor
 
 const SORT_STORAGE_KEY = 'mailmind_sort';
 
-export function useEmails(activeFolder: string = 'Inbox') {
+export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = true) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
@@ -84,6 +84,9 @@ export function useEmails(activeFolder: string = 'Inbox') {
   const lastFolderRef = useRef<string | null>(null);
 
   const loadEmails = useCallback(async () => {
+    // Don't hit the API until the user is authenticated — avoids the
+    // "Failed to fetch" / 401 error cascade on first paint.
+    if (!enabled) return;
     if (lastFolderRef.current !== activeFolder) {
       lastFolderRef.current = activeFolder;
       setSelectedEmailId(null);
@@ -173,7 +176,7 @@ export function useEmails(activeFolder: string = 'Inbox') {
     } finally {
       setLoading(false);
     }
-  }, [activeFolder, setEmails]);
+  }, [activeFolder, enabled, setEmails]);
 
   // Reload whenever the folder changes (loadEmails handles clearing selection).
   // Deferred a tick so the state updates happen outside the effect body; the

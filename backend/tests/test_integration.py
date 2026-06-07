@@ -166,6 +166,90 @@ def test_quick_login_mock(client):
     assert status["authenticated"] is True
 
 
+def test_google_login_and_provider_routing(client):
+    # Switching to Google (mock) routes the inbox to the Gmail connector.
+    r = client.post("/api/auth/google/login-initiate", json={"email": "demo.user@gmail.com"})
+    assert r.status_code == 200
+    assert r.json()["authenticated"] is True
+
+    status = client.get("/api/auth/status").json()
+    assert status["provider"] == "google"
+    assert status["user_principal_name"] == "demo.user@gmail.com"
+
+    inbox = client.get("/api/emails?limit=10").json()
+    assert len(inbox) > 0
+    assert all(e["email_id"].startswith("gmail-") for e in inbox)
+
+    # Trash + restore work through the Gmail client too.
+    assert client.post("/api/emails/gmail-1/trash").json()["success"] is True
+    assert client.post("/api/emails/gmail-1/restore").json()["success"] is True
+
+    # Logout resets the provider back to Microsoft (default).
+    client.post("/api/auth/logout")
+    back = client.get("/api/emails?limit=10").json()
+    assert all(e["email_id"].startswith("email-") for e in back)
+
+
+def test_gmail_client_mock_surface():
+    from app.services.gmail import GmailClient
+    g = GmailClient()
+    assert len(g.get_inbox_emails(5)) > 0
+    assert len(g.fetch_sent_emails()) > 0
+    # Write operations are no-ops in mock mode (should not raise).
+    g.send_new_email("a@b.com", "Hi", "Body")
+    g.send_reply("gmail-1", "thanks")
+    g.move_to_trash("gmail-1")
+    g.restore_from_trash("gmail-1")
+    # Calendar/Tasks parity returns shareable links in mock mode.
+    assert g.create_todo("gmail-1", "Send the report").startswith("http")
+    assert g.create_calendar_event("gmail-1", "Review deck", None).startswith("http")
+
+
+def test_tasks_and_calendar(client):
+    # Microsoft (default) tasks + calendar.
+    tasks = client.get("/api/tasks").json()
+    assert isinstance(tasks, list) and len(tasks) > 0
+    assert {"id", "title", "status", "due"} <= set(tasks[0].keys())
+
+    cal = client.get("/api/calendar?days=3").json()
+    assert isinstance(cal, list) and len(cal) > 0
+    assert {"title", "start_time", "end_time", "organizer"} <= set(cal[0].keys())
+
+    created = client.post("/api/tasks", json={"title": "Write the report"})
+    assert created.status_code == 200 and created.json()["success"] is True
+    assert client.post("/api/tasks", json={"title": ""}).status_code == 400
+
+
+def test_google_calendar_and_tasks_parity(client):
+    # Switch to Google and confirm calendar + tasks route to the Gmail client.
+    client.post("/api/auth/google/login-initiate", json={"email": "demo.user@gmail.com"})
+    cal = client.get("/api/calendar?days=3").json()
+    assert any("gmail.com" in e["organizer"] for e in cal)
+    tasks = client.get("/api/tasks").json()
+    assert any(t["id"].startswith("gtask-") for t in tasks)
+    client.post("/api/auth/logout")  # reset provider
+
+
+def test_teams_endpoints(client):
+    teams = client.get("/api/teams").json()
+    assert isinstance(teams, list) and len(teams) > 0
+
+    msg = client.post(
+        "/api/teams/message",
+        json={"team_id": "team-mock-1", "channel_id": "ch-1", "message": "Deploy is green ✅"},
+    )
+    assert msg.status_code == 200
+    assert msg.json()["success"] is True
+
+    meeting = client.post("/api/teams/meeting", json={"subject": "Sprint sync"})
+    assert meeting.status_code == 200
+    assert meeting.json()["join_url"].startswith("http")
+
+    # Missing identifiers are rejected.
+    bad = client.post("/api/teams/message", json={"message": "x"})
+    assert bad.status_code == 400
+
+
 def test_evaluate(client):
     r = client.get("/api/evaluate")
     assert r.status_code == 200
@@ -181,6 +265,17 @@ def test_security_headers_present(client):
     assert r.headers.get("X-Content-Type-Options") == "nosniff"
     assert r.headers.get("X-Frame-Options") == "DENY"
     assert "Referrer-Policy" in r.headers
+
+
+def test_webhook_validation_and_receive(client):
+    # Graph subscription validation echoes the token back as plain text.
+    v = client.get("/api/webhook?validationToken=ping123")
+    assert v.status_code == 200
+    assert v.text == "ping123"
+
+    # A notification payload is accepted and enqueued.
+    r = client.post("/api/webhook", json={"value": [{"resourceData": {"id": "abc"}}]})
+    assert r.status_code == 200
 
 
 def test_unknown_route_returns_404(client):
