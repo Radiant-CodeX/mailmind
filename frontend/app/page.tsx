@@ -4,12 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   checkAuthStatus,
-  loginInitiate,
-  loginPoll,
-  loginMock,
   quickLogin,
   googleLoginInitiate,
   googleLoginPoll,
+  microsoftLoginInitiate,
+  microsoftLoginPoll,
 } from '../lib/api';
 import {
   getRememberedLogin,
@@ -35,17 +34,12 @@ export default function LoginPage() {
   const [remembered, setRemembered] = useState<RememberedLogin | null>(null);
   const [email, setEmail] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
-  const [deviceFlow, setDeviceFlow] = useState<{
-    userCode: string;
-    verificationUri: string;
-    deviceCode: string;
-    message: string;
-  } | null>(null);
   const [googleWaiting, setGoogleWaiting] = useState(false);
+  const [msWaiting, setMsWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const pollingIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
   const googlePopupRef = React.useRef<Window | null>(null);
+  const msPopupRef = React.useRef<Window | null>(null);
 
   useEffect(() => {
     async function init() {
@@ -75,73 +69,81 @@ export default function LoginPage() {
     persistRememberMe(val);
   };
 
-  // ── Microsoft (device-code flow) ───────────────────────────────────────────
-  const handleMockLogin = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await loginMock();
-      router.push('/dashboard');
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Mock login failed');
-      setLoading(false);
-    }
-  };
-
-  const handleMicrosoft = async () => {
+  // ── Microsoft (OAuth popup flow) ───────────────────────────────────────────
+  const handleMicrosoft = async (forceOAuth = false) => {
     persistRememberMe(rememberMe);
-    setLoading(true);
     setError(null);
+    // Open the popup SYNCHRONOUSLY to preserve the click gesture.
+    msPopupRef.current = window.open('', 'ms-login', 'width=520,height=680');
+    setLoading(true);
+    // Saved Microsoft account → resume silently and go straight to the dashboard.
+    if (!forceOAuth && remembered?.provider === 'microsoft') {
+      try {
+        await quickLogin(remembered.email, 'microsoft');
+        msPopupRef.current?.close();
+        router.push('/dashboard');
+        return;
+      } catch { /* fall through to the OAuth popup */ }
+    }
     try {
-      const data = await loginInitiate();
-      if (data.status === 'mock') {
-        await handleMockLogin();
+      const data = await microsoftLoginInitiate();
+      if (data.authenticated || data.status === 'mock') {
+        msPopupRef.current?.close();
+        router.push('/dashboard');
         return;
       }
-      setDeviceFlow({
-        userCode: data.user_code,
-        verificationUri: data.verification_uri,
-        deviceCode: data.device_code,
-        message: data.message,
-      });
-      startMicrosoftPolling(data.device_code);
+      if (msPopupRef.current && data.auth_url) {
+        msPopupRef.current.location.replace(data.auth_url);
+        setMsWaiting(true);
+        startMicrosoftPolling(data.state, msPopupRef.current);
+      } else if (data.auth_url) {
+        window.location.assign(data.auth_url);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to initiate login flow');
+      msPopupRef.current?.close();
+      setError(err instanceof Error ? err.message : 'Microsoft sign-in failed');
       setLoading(false);
+      setMsWaiting(false);
     }
   };
 
-  const startMicrosoftPolling = (deviceCode: string) => {
+  const startMicrosoftPolling = (state: string, popup: Window | null) => {
     if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
     pollingIntervalRef.current = setInterval(async () => {
       try {
-        const data = await loginPoll(deviceCode);
+        const data = await microsoftLoginPoll(state);
         if (data.status === 'success') {
           if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+          popup?.close();
           router.push('/dashboard');
-        } else if (data.status !== 'pending') {
-          if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-          setLoading(false);
-          setDeviceFlow(null);
-          setError('Authentication flow expired or cancelled.');
         }
       } catch (err) {
         if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
         setLoading(false);
-        setDeviceFlow(null);
-        setError(err instanceof Error ? err.message : 'Connection lost during polling.');
+        setMsWaiting(false);
+        setError(err instanceof Error ? err.message : 'Microsoft sign-in failed');
       }
-    }, 4000);
+    }, 2500);
   };
 
   // ── Google (OAuth popup flow) ──────────────────────────────────────────────
-  const handleGoogle = async (emailHint?: string) => {
+  const handleGoogle = async (emailHint?: string, forceOAuth = false) => {
     persistRememberMe(rememberMe);
     setError(null);
     // Open the popup SYNCHRONOUSLY (inside the click) so the browser keeps the
     // user-gesture and doesn't block it. We navigate it once we have the URL.
     googlePopupRef.current = window.open('', 'google-login', 'width=500,height=680');
     setLoading(true);
+    // Saved Google account → resume silently; if it works, close the popup and
+    // go straight to the dashboard (no consent screen).
+    if (!forceOAuth && remembered?.provider === 'google') {
+      try {
+        await quickLogin(remembered.email, 'google');
+        googlePopupRef.current?.close();
+        router.push('/dashboard');
+        return;
+      } catch { /* session can't resume — use the open popup for full OAuth */ }
+    }
     try {
       const data = await googleLoginInitiate(emailHint);
       if (data.authenticated || data.status === 'mock') {
@@ -185,9 +187,12 @@ export default function LoginPage() {
     }, 2500);
   };
 
-  const cancelGoogle = () => {
+  const cancelWaiting = () => {
     if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+    googlePopupRef.current?.close();
+    msPopupRef.current?.close();
     setGoogleWaiting(false);
+    setMsWaiting(false);
     setLoading(false);
   };
 
@@ -198,10 +203,11 @@ export default function LoginPage() {
       setError('Please enter your email address.');
       return;
     }
+    // Email-first sign-in respects the typed address → force a fresh OAuth.
     if (providerForEmail(email) === 'google') {
-      handleGoogle(email);
+      handleGoogle(email, true);
     } else {
-      handleMicrosoft();
+      handleMicrosoft(true);
     }
   };
 
@@ -218,9 +224,9 @@ export default function LoginPage() {
       // a full sign-in for the remembered provider instead of showing an error.
       setLoading(false);
       if (remembered.provider === 'google') {
-        handleGoogle(remembered.email);
+        handleGoogle(remembered.email, true);
       } else {
-        handleMicrosoft();
+        handleMicrosoft(true);
       }
     }
   };
@@ -228,17 +234,6 @@ export default function LoginPage() {
   const handleForgetAccount = () => {
     clearRememberedLogin();
     setRemembered(null);
-  };
-
-  const handleCopyCode = async () => {
-    if (!deviceFlow) return;
-    try {
-      await navigator.clipboard.writeText(deviceFlow.userCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Copy failed', e);
-    }
   };
 
   if (authStatus === 'checking') {
@@ -252,7 +247,7 @@ export default function LoginPage() {
     );
   }
 
-  const showMainForm = !deviceFlow && !googleWaiting;
+  const showMainForm = !googleWaiting && !msWaiting;
 
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary px-4" id="login-workspace">
@@ -391,7 +386,7 @@ export default function LoginPage() {
             </button>
 
             <button
-              onClick={handleMicrosoft}
+              onClick={() => handleMicrosoft()}
               disabled={loading}
               className="w-full flex items-center justify-center gap-2.5 py-2.5 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-bold text-sm rounded-xl cursor-pointer border border-[var(--border)] transition-all active:scale-95"
               id="btn-login-microsoft"
@@ -407,76 +402,21 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* ── Google waiting ── */}
-        {googleWaiting && (
+        {/* ── Waiting for provider sign-in (popup) ── */}
+        {(googleWaiting || msWaiting) && (
           <div className="space-y-6 animate-fade-in text-center">
             <div className="w-10 h-10 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mx-auto" />
             <div>
-              <p className="text-sm font-bold text-[var(--text-primary)]">Waiting for Google sign-in…</p>
+              <p className="text-sm font-bold text-[var(--text-primary)]">
+                Waiting for {googleWaiting ? 'Google' : 'Microsoft'} sign-in…
+              </p>
               <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">
                 Complete the sign-in in the popup window. If it didn’t open, check your popup blocker.
               </p>
             </div>
             <button
-              onClick={cancelGoogle}
+              onClick={cancelWaiting}
               className="w-full py-2.5 bg-[var(--bg-elevated)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/20 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:text-red-500 transition-all cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
-
-        {/* ── Microsoft device-code ── */}
-        {deviceFlow && (
-          <div className="space-y-6 animate-fade-in">
-            <p className="text-xs text-[var(--text-muted)] text-center leading-relaxed">
-              Open the Microsoft device activation link and enter the one-time authentication code.
-            </p>
-            <div className="text-center">
-              <a
-                href={deviceFlow.verificationUri}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]/80 border border-[var(--border)] rounded-xl text-xs font-bold text-[var(--accent-primary)] transition-all cursor-pointer shadow-sm hover:shadow"
-                id="login-auth-link"
-              >
-                1. Open Device Login Page
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              </a>
-            </div>
-            <div className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl p-5 flex flex-col items-center justify-center gap-2">
-              <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-extrabold">2. Copy and Enter this Code</span>
-              <div className="flex items-center gap-4 mt-1">
-                <span className="font-mono text-2xl font-black tracking-widest text-[var(--text-primary)] select-all" id="login-user-code">
-                  {deviceFlow.userCode}
-                </span>
-                <button
-                  onClick={handleCopyCode}
-                  className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer ${
-                    copied
-                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500'
-                      : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                  }`}
-                  id="btn-login-copy-code"
-                >
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-            <div className="text-xs font-bold text-[var(--text-muted)] flex items-center justify-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary)] animate-ping shrink-0" />
-              <span>Waiting for Microsoft approval…</span>
-            </div>
-            <button
-              onClick={() => {
-                if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-                setLoading(false);
-                setDeviceFlow(null);
-              }}
-              className="w-full py-2.5 bg-[var(--bg-elevated)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/20 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:text-red-500 transition-all cursor-pointer text-center"
-              id="btn-login-cancel"
             >
               Cancel
             </button>

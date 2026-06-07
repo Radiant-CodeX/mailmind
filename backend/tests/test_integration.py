@@ -53,7 +53,35 @@ def test_inbox_returns_emails(client):
     emails = r.json()
     assert isinstance(emails, list)
     assert len(emails) > 0
-    assert {"email_id", "sender", "subject", "body"} <= set(emails[0].keys())
+    # Enriched fields present for read-status + attachment indicators.
+    assert {"email_id", "sender", "subject", "body", "is_read", "has_attachments"} <= set(emails[0].keys())
+
+
+def test_mailbox_pagination_and_search(client):
+    # Paginated mailbox returns the page shape with total + cursor.
+    r = client.get("/api/mailbox?folder=inbox&limit=50")
+    assert r.status_code == 200
+    page = r.json()
+    assert {"emails", "next_page_token", "total"} <= set(page.keys())
+    assert isinstance(page["emails"], list)
+    assert page["total"] >= len(page["emails"])
+
+    # Server-side search filters the results.
+    s = client.get("/api/mailbox?folder=inbox&limit=50&q=zzzznomatch").json()
+    assert s["total"] == 0
+    assert s["emails"] == []
+
+
+def test_mail_actions(client):
+    # All actions are mock no-ops that return success.
+    assert client.post("/api/emails/email-1/read", json={"read": False}).json()["is_read"] is False
+    assert client.post("/api/emails/email-1/read", json={"read": True}).json()["is_read"] is True
+    assert client.post("/api/emails/email-1/archive").json()["success"] is True
+    assert client.post("/api/emails/email-1/spam").json()["success"] is True
+    assert client.post("/api/emails/email-1/forward", json={"to": "x@y.com", "comment": "fyi"}).json()["success"] is True
+    assert client.post("/api/emails/email-1/reply-all", json={"comment": "thanks all"}).json()["success"] is True
+    # Forward requires a recipient.
+    assert client.post("/api/emails/email-1/forward", json={"comment": "no to"}).status_code == 400
 
 
 @pytest.mark.parametrize("folder", ["sent", "drafts", "spam", "trash"])
@@ -248,6 +276,15 @@ def test_teams_endpoints(client):
     # Missing identifiers are rejected.
     bad = client.post("/api/teams/message", json={"message": "x"})
     assert bad.status_code == 400
+
+
+def test_logout_deactivates_session(client):
+    # Logging in marks the session authenticated...
+    client.post("/api/auth/login-mock")
+    assert client.get("/api/auth/status").json()["authenticated"] is True
+    # ...and logging out flips it to unauthenticated (so the login page won't bounce).
+    client.post("/api/auth/logout")
+    assert client.get("/api/auth/status").json()["authenticated"] is False
 
 
 def test_evaluate(client):

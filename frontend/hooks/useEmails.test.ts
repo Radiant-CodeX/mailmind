@@ -13,14 +13,13 @@ const { rawEmails } = vi.hoisted(() => ({
 
 // Mock the API module so the hook never touches the network.
 vi.mock('../lib/api', () => ({
-  fetchEmails: vi.fn().mockResolvedValue(rawEmails),
-  fetchSentEmails: vi.fn().mockResolvedValue([]),
-  fetchDraftEmails: vi.fn().mockResolvedValue([]),
-  fetchSpamEmails: vi.fn().mockResolvedValue([]),
-  fetchTrashEmails: vi.fn().mockResolvedValue(rawEmails),
+  fetchMailbox: vi.fn().mockResolvedValue({ emails: rawEmails, next_page_token: null, total: rawEmails.length }),
   triageEmail: vi.fn().mockResolvedValue({ composite_score: 50 }),
   moveEmailToTrash: vi.fn().mockResolvedValue({ success: true }),
   restoreEmailFromTrash: vi.fn().mockResolvedValue({ success: true }),
+  markEmailRead: vi.fn().mockResolvedValue({ success: true }),
+  archiveEmail: vi.fn().mockResolvedValue({ success: true }),
+  reportSpam: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 import { useEmails } from './useEmails';

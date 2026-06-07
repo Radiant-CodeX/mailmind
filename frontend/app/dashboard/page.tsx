@@ -75,6 +75,15 @@ export default function Home() {
     setSearchQuery,
     sortKey,
     setSortKey,
+    filters,
+    setFilters,
+    total,
+    pageIndex,
+    pageSize,
+    hasNextPage,
+    hasPrevPage,
+    nextPage,
+    prevPage,
     loading,
     refresh,
     toggleStar,
@@ -83,7 +92,17 @@ export default function Home() {
     dismissTrashToast,
     pendingTrash,
     restoreEmail,
+    markRead,
+    archiveEmail,
+    reportSpam,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
+
+  // Opening an email marks it read.
+  const handleSelectEmail = (id: string) => {
+    setSelectedEmailId(id);
+    const target = emails.find((e) => e.id === id);
+    if (target && target.isRead === false) markRead(id, true);
+  };
 
   const {
     loading: detailLoading,
@@ -142,11 +161,14 @@ export default function Home() {
         rememberLogin(isMockMode ? 'mock' : 'live', userEmail, provider);
       }
       await logoutUser();
+    } catch (err) {
+      console.error('Logout request failed (signing out anyway)', err);
+    } finally {
+      // Always sign the user out locally and return to the login page, even if
+      // the backend logout call failed.
       setAuthenticated(false);
       setUserEmail(null);
-      router.push('/');
-    } catch (err) {
-      console.error('Logout failed', err);
+      router.replace('/');
     }
   };
 
@@ -165,6 +187,7 @@ export default function Home() {
         onToggleCollapse={toggleSidebar}
         authenticated={authenticated}
         userEmail={userEmail}
+        provider={provider}
         onLoginClick={() => {}}
         onLogoutClick={handleLogout}
         onComposeClick={() => setIsComposeOpen(true)}
@@ -183,11 +206,20 @@ export default function Home() {
               <EmailList
                 emails={emails}
                 selectedEmailId={selectedEmailId}
-                onSelectEmail={setSelectedEmailId}
+                onSelectEmail={handleSelectEmail}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 sortKey={sortKey}
                 onSortChange={setSortKey}
+                filters={filters}
+                onFiltersChange={setFilters}
+                total={total}
+                pageIndex={pageIndex}
+                pageSize={pageSize}
+                hasNextPage={hasNextPage}
+                hasPrevPage={hasPrevPage}
+                onNextPage={nextPage}
+                onPrevPage={prevPage}
                 loading={loading}
                 onRefresh={refresh}
                 isFullWidth={true}
@@ -195,6 +227,9 @@ export default function Home() {
                 onToggleStar={toggleStar}
                 onTrashEmail={trashEmail}
                 onRestoreEmail={restoreEmail}
+                onArchiveEmail={archiveEmail}
+                onReportSpam={reportSpam}
+                onToggleRead={markRead}
               />
 
               {/* Panel B: Email Detailed View (renders side-by-side only if an email is selected) */}

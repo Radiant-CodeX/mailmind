@@ -7,13 +7,24 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class EmailPayload(BaseModel):
-    """Schema for incoming email payloads used by the ingest endpoint."""
+    """Schema for email payloads used by the ingest + list endpoints."""
 
     email_id: str
-    sender: EmailStr
+    # Plain str (not EmailStr) so real-world 'From' values never fail validation.
+    sender: str
     subject: str
     body: str
     received_at: datetime
+    is_read: bool = True
+    has_attachments: bool = False
+
+
+class EmailPage(BaseModel):
+    """A paginated page of emails (50 per page, cursor-based)."""
+
+    emails: List[EmailPayload]
+    next_page_token: Optional[str] = None
+    total: int = 0
 
 
 class IngestResponse(BaseModel):

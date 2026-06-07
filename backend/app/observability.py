@@ -96,17 +96,18 @@ def init_observability(app: FastAPI) -> None:
         logger.warning("Validation error on %s %s: %s", request.method, request.url.path, exc.errors())
         return JSONResponse(status_code=422, content={"detail": exc.errors()}, headers=_cors_headers(request))
 
+    debug_errors = os.getenv("APP_ENV", "development") != "production"
+
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
-        # Last-resort handler: never leak stack traces to the client.
         error_id = uuid.uuid4().hex[:12]
         logger.exception("Unhandled error [%s] on %s %s", error_id, request.method, request.url.path)
         _capture(exc)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "detail": "An internal error occurred. Please try again.",
-                "error_id": error_id,
-            },
-            headers=_cors_headers(request),
-        )
+        content: dict = {
+            "detail": "An internal error occurred. Please try again.",
+            "error_id": error_id,
+        }
+        # In non-production, surface the actual error so it's debuggable directly.
+        if debug_errors:
+            content["error"] = f"{type(exc).__name__}: {exc}"
+        return JSONResponse(status_code=500, content=content, headers=_cors_headers(request))
