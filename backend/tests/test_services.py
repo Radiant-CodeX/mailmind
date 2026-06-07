@@ -8,6 +8,8 @@ from app.services.commitments import CommitmentService
 from app.services.graph import GraphClient
 from app.services.scorers import CompositeAggregator, DeadlineScorer, SentimentScorer
 
+settings.use_mock_graph = True
+
 
 def test_classification_fallback_critical():
     svc = ClassificationService()
