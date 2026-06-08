@@ -1,27 +1,23 @@
 """
-API Bridge: Translate frontend /api/* calls to internal backend routes.
+API Bridge: Translate frontend /api/* calls to the agentic pipeline.
 
-Frontend expects structure:
-  GET /api/auth/status
+Frontend expects:
+  GET  /api/auth/status
   POST /api/auth/login-poll
-  GET /api/emails
-  POST /api/emails/triage
-  POST /api/commitments/extract
-  POST /api/emails/compose
-  POST /api/emails/{id}/reply
+  GET  /api/emails
+  POST /api/emails/triage         → POST /api/agent/triage
+  POST /api/emails/draft          → POST /api/agent/process  (full pipeline)
+  POST /api/emails/summary        → POST /api/agent/process  (full pipeline)
+  POST /api/commitments/extract   → POST /api/agent/commitments
+  POST /api/emails/{id}/reply     → POST /api/agent/approve/{id}
   etc.
 
-Backend has:
-  GET /emails
-  POST /triage
-  POST /conflict-check
-  POST /approve
-  etc.
-
-This bridge translates between them and provides mock fallbacks.
+All AI routes are forwarded to the LangGraph agent pipeline endpoints.
+Auth, email-list, calendar, and graph routes remain pass-through.
 """
 import logging
 import os
+import uuid
 
 import requests
 from fastapi import APIRouter, HTTPException, Request
@@ -29,9 +25,27 @@ from fastapi import APIRouter, HTTPException, Request
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
 
+# Agent pipeline lives in the same process; call via localhost to avoid import cycles.
 BACKEND_URL = os.getenv("INTERNAL_BACKEND_URL", "http://localhost:8000")
 MOCK_MODE = os.getenv("MOCK_AUTH", "true").lower() == "true"
-REQUEST_TIMEOUT = 15
+REQUEST_TIMEOUT = 20  # Agent pipeline can take longer than simple routes
+
+# ── Helper: build a normalised agent request payload ─────────────────────────
+
+def _agent_payload(body: dict, email_id: str | None = None) -> dict:
+    """Normalise bridge request body into the AgentProcessRequest schema."""
+    sender = body.get("sender") or body.get("from") or "unknown@company.com"
+    # Agent requires a valid email address
+    if "@" not in sender:
+        sender = f"{sender.lower().replace(' ', '.')}@company.com"
+    return {
+        "email_id": email_id or body.get("email_id") or str(uuid.uuid4()),
+        "sender": sender,
+        "subject": body.get("subject", "(no subject)"),
+        "body": body.get("body", ""),
+        "received_at": body.get("received_at", ""),
+        "calendar_events": body.get("calendar_events", []),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -153,127 +167,132 @@ async def get_emails():
 
 @router.post("/emails/triage")
 async def triage_email(request: Request):
-    """Triage an email across 5 axes."""
+    """Triage an email through the LangGraph triage sub-pipeline."""
     try:
         body = await request.json()
-
         resp = requests.post(
-            f"{BACKEND_URL}/triage",
-            json={
-                "sender": body.get("from") or body.get("sender", ""),
-                "subject": body.get("subject", ""),
-                "body": body.get("body", ""),
-            },
+            f"{BACKEND_URL}/api/agent/triage",
+            json=_agent_payload(body),
             timeout=REQUEST_TIMEOUT,
         )
-
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            # Normalise to the shape the frontend expects
+            return {
+                "priority_score": round(data.get("composite_score", 50) / 100, 2),
+                "priority_label": data.get("priority", "MEDIUM"),
+                "composite_score": data.get("composite_score", 50),
+                "approval_mode": data.get("approval_mode", "SUGGEST"),
+                "axes": data.get("axes", []),
+                "triage_reasoning": data.get("triage_reasoning"),
+                "errors": data.get("errors", []),
+            }
     except Exception as e:
-        logger.error(f"Triage failed: {e}")
+        logger.error(f"Triage via agent failed: {e}")
 
-    # Fallback
     return {
         "priority_score": 0.5,
-        "priority_label": "NORMAL",
-        "axes": [
-            {"axis": "urgency", "raw_score": 0.5},
-            {"axis": "stakeholder_power", "raw_score": 0.5},
-            {"axis": "complexity", "raw_score": 0.5},
-            {"axis": "time_sensitivity", "raw_score": 0.5},
-            {"axis": "escalation_risk", "raw_score": 0.5},
-        ]
+        "priority_label": "MEDIUM",
+        "composite_score": 50.0,
+        "approval_mode": "SUGGEST",
+        "axes": [],
+        "triage_reasoning": None,
+        "errors": ["agent_unavailable"],
     }
 
 
 @router.post("/emails/conflict-check")
 async def conflict_check(request: Request):
-    """Check for calendar conflicts."""
+    """Check for calendar conflicts via the full agent pipeline."""
     try:
         body = await request.json()
-
         resp = requests.post(
-            f"{BACKEND_URL}/conflict-check",
-            json={
-                "email_id": body.get("email_id", ""),
-                "sender": body.get("from") or body.get("sender", ""),
-                "subject": body.get("subject", ""),
-                "body": body.get("body", ""),
-            },
+            f"{BACKEND_URL}/api/agent/process",
+            json=_agent_payload(body, email_id=body.get("email_id")),
             timeout=REQUEST_TIMEOUT,
         )
-
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            commitments_with_conflicts = [
+                c for c in data.get("commitments", []) if c.get("conflict_badge")
+            ]
+            return {
+                "conflict_detected": len(commitments_with_conflicts) > 0,
+                "conflict_summary": data.get("conflict_summary"),
+                "conflicting_events": [
+                    {"detail": c["conflict_detail"], "commitment": c["commitment"]}
+                    for c in commitments_with_conflicts
+                ],
+            }
     except Exception as e:
-        logger.error(f"Conflict check failed: {e}")
+        logger.error(f"Conflict check via agent failed: {e}")
 
     return {
         "conflict_detected": False,
+        "conflict_summary": None,
         "conflicting_events": [],
-        "precedents": [],
     }
 
 
 @router.post("/emails/draft")
 async def generate_draft(request: Request):
-    """Generate AI draft reply."""
+    """Generate AI draft reply via the full agent pipeline (RAG + Tone DNA)."""
     try:
         body = await request.json()
-
         resp = requests.post(
-            f"{BACKEND_URL}/draft",
-            json={
-                "sender": body.get("from") or body.get("sender", ""),
-                "subject": body.get("subject", ""),
-                "body": body.get("body", ""),
-            },
+            f"{BACKEND_URL}/api/agent/process",
+            json=_agent_payload(body),
             timeout=REQUEST_TIMEOUT,
         )
-
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            return {
+                "draft_reply": data.get("draft_reply", ""),
+                "priority": data.get("priority"),
+                "citations": [
+                    {"subject": p["subject"], "similarity": p["similarity_score"]}
+                    for p in data.get("precedents", [])
+                ],
+                "triage_reasoning": data.get("triage_reasoning"),
+            }
     except Exception as e:
-        logger.error(f"Draft generation failed: {e}")
+        logger.error(f"Draft via agent failed: {e}")
 
     return {
-        "draft_reply": """Hello,
-
-Thank you for your email. I have received your message and will review it shortly.
-
-I will get back to you with an update.
-
-Regards,
-Rithish Barath""",
-        "status": "Fallback draft",
+        "draft_reply": (
+            "Hello,\n\nThank you for your email. I have received your message "
+            "and will review it shortly.\n\nRegards"
+        ),
+        "priority": None,
         "citations": [],
+        "triage_reasoning": None,
     }
 
 
 @router.post("/emails/approve")
 async def approve_draft(request: Request):
-    """Approve and send draft."""
+    """Approve, reject, or edit a draft via the agent approval gate."""
     try:
         body = await request.json()
-
+        email_id = body.get("email_id", str(uuid.uuid4()))
         resp = requests.post(
-            f"{BACKEND_URL}/approve",
+            f"{BACKEND_URL}/api/agent/approve/{email_id}",
             json={
-                "email_id": body.get("email_id", ""),
                 "action": body.get("action", "approve"),
-                "draft_reply": body.get("draft_reply", ""),
+                "edited_draft": body.get("draft_reply") or body.get("edited_draft"),
+                "reviewer_note": body.get("reviewer_note"),
             },
             timeout=REQUEST_TIMEOUT,
         )
-
         if resp.status_code == 200:
             return resp.json()
     except Exception as e:
-        logger.error(f"Approval failed: {e}")
+        logger.error(f"Approval via agent gate failed: {e}")
 
     return {
-        "status": "Approved",
-        "message": "Draft approved",
+        "action": "approve",
+        "approved": True,
+        "reviewed_at": None,
     }
 
 
@@ -310,19 +329,13 @@ async def send_email_reply(email_id: str, request: Request):
         if not comment:
             raise HTTPException(status_code=400, detail="Empty reply")
 
-        # Try to send via Graph API
+        # Record approval in the agent gate, then send
         try:
-            resp = requests.post(
-                f"{BACKEND_URL}/approve",
-                json={
-                    "email_id": email_id,
-                    "action": "approve",
-                    "draft_reply": comment,
-                },
+            requests.post(
+                f"{BACKEND_URL}/api/agent/approve/{email_id}",
+                json={"action": "approve", "edited_draft": comment},
                 timeout=REQUEST_TIMEOUT,
             )
-            if resp.status_code == 200:
-                return resp.json()
         except Exception:
             pass
 
@@ -343,33 +356,29 @@ async def send_email_reply(email_id: str, request: Request):
 
 @router.post("/commitments/extract")
 async def extract_commitments(request: Request):
-    """Extract tasks and events from email."""
+    """Extract action items via the agent commitment sub-pipeline."""
     try:
-        await request.json()
-
-        # Mock commitments
-        return {
-            "commitments": [
-                {
-                    "id": "task1",
-                    "type": "task",
-                    "title": "Review budget proposal",
-                    "dueDate": "2026-06-15",
-                    "priority": "high",
-                    "status": "pending",
-                    "extracted_from": "email",
-                }
-            ],
-            "tasks": ["task1"],
-            "events": [],
-        }
+        body = await request.json()
+        resp = requests.post(
+            f"{BACKEND_URL}/api/agent/commitments",
+            json=_agent_payload(body),
+            timeout=REQUEST_TIMEOUT,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            commitments = data.get("commitments", [])
+            tasks = [c["id"] for c in commitments if not c.get("deadline")]
+            events = [c["id"] for c in commitments if c.get("deadline")]
+            return {
+                "commitments": commitments,
+                "tasks": tasks,
+                "events": events,
+                "commitment_reasoning": data.get("commitment_reasoning"),
+            }
     except Exception as e:
-        logger.error(f"Extract commitments failed: {e}")
-        return {
-            "commitments": [],
-            "tasks": [],
-            "events": [],
-        }
+        logger.error(f"Commitment extraction via agent failed: {e}")
+
+    return {"commitments": [], "tasks": [], "events": [], "commitment_reasoning": None}
 
 
 @router.post("/commitments/confirm")
@@ -454,27 +463,33 @@ async def create_graph_event(request: Request):
 
 @router.post("/emails/summary")
 async def get_email_summary(request: Request):
-    """Get AI summary of email."""
+    """Get AI triage summary via the agent triage sub-pipeline."""
     try:
         body = await request.json()
-
         resp = requests.post(
-            f"{BACKEND_URL}/summary",
-            json={
-                "sender": body.get("from") or body.get("sender", ""),
-                "subject": body.get("subject", ""),
-                "body": body.get("body", ""),
-            },
+            f"{BACKEND_URL}/api/agent/triage",
+            json=_agent_payload(body),
             timeout=REQUEST_TIMEOUT,
         )
-
         if resp.status_code == 200:
-            return resp.json()
+            data = resp.json()
+            return {
+                "summary": data.get("triage_reasoning") or f"Priority: {data.get('priority', 'MEDIUM')}",
+                "priority": data.get("priority"),
+                "composite_score": data.get("composite_score"),
+                "action_required": (
+                    "Requires immediate response"
+                    if data.get("priority") in ("CRITICAL", "HIGH")
+                    else "Review when convenient"
+                ),
+            }
     except Exception as e:
-        logger.error(f"Summary failed: {e}")
+        logger.error(f"Summary via agent failed: {e}")
 
     return {
         "summary": "Email summary unavailable",
+        "priority": None,
+        "composite_score": None,
         "action_required": "Review manually",
     }
 

@@ -38,6 +38,8 @@ interface EmailDetailProps {
   confirmSelectedCommitments: () => void;
   checkConflict: (deadline: string | null) => CalendarEvent | null;
   onClose: () => void;
+  /** When false (e.g. the Sent folder) the AI pipeline panels are hidden. */
+  showPipeline?: boolean;
 }
 
 export function EmailDetail({
@@ -69,6 +71,7 @@ export function EmailDetail({
   confirmSelectedCommitments,
   checkConflict,
   onClose,
+  showPipeline = true,
 }: EmailDetailProps) {
   const [isDraftExpanded, setIsDraftExpanded] = useState(false);
   const [isCommitmentsExpanded, setIsCommitmentsExpanded] = useState(false);
@@ -213,6 +216,7 @@ export function EmailDetail({
             </p>
           </div>
 
+          {showPipeline && (<>
           {/* AI Draft Tool Accordion */}
           <div className="border border-[var(--border)] rounded-lg bg-[var(--bg-surface)] overflow-hidden shadow-sm" id="accordion-draft">
             <button
@@ -315,6 +319,7 @@ export function EmailDetail({
 
           {/* RAG Precedents List */}
           <PrecedentList precedents={precedents} />
+          </>)}
 
           {/* Thread History View */}
           <ThreadView emailId={email.id} />

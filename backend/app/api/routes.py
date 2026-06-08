@@ -75,8 +75,17 @@ def _rate_limit(request: Request) -> None:
 
 
 def _validate_approval_token(token: str | None) -> None:
-    """Ensure the approval token matches the configured secret."""
-    if not settings.use_mock_graph and settings.approval_token == "secret-approval-token":
+    """Ensure the approval token matches the configured secret.
+
+    In mock/demo mode the approval token is not enforced — the frontend and
+    backend may run with different defaults, and there is no real action being
+    authorised, so requiring a matching token only blocks the demo flow
+    (e.g. confirming a commitment to the calendar). Live mode still enforces it.
+    """
+    if settings.use_mock_graph:
+        return
+
+    if settings.approval_token == "secret-approval-token":
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Default approval token cannot be used in Live Mode. Please configure APPROVAL_TOKEN in settings."
@@ -445,6 +454,66 @@ def microsoft_login_initiate() -> dict[str, Any]:
     return {"status": "pending", "auth_url": auth_url, "state": state}
 
 
+def _connected_screen(email: str, dashboard_url: str) -> str:
+    """Branded 'account connected' screen shown after a successful OAuth redirect."""
+    safe_email = (email or "").replace("<", "&lt;").replace(">", "&gt;")
+    who = f"<p class='email'>{safe_email}</p>" if safe_email else ""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connected · MailMind</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); color: #1e1b2e;
+    }}
+    .card {{
+      background: #fff; border-radius: 20px; padding: 40px 36px; width: 380px; max-width: 90vw;
+      text-align: center; box-shadow: 0 24px 60px rgba(49, 46, 129, .35); animation: rise .45s ease-out;
+    }}
+    @keyframes rise {{ from {{ opacity: 0; transform: translateY(14px); }} to {{ opacity: 1; transform: none; }} }}
+    .logo {{ width: 56px; height: 56px; margin: 0 auto 18px; display: block; }}
+    .check {{
+      width: 64px; height: 64px; margin: 0 auto 20px; border-radius: 50%;
+      background: #ecfdf5; display: flex; align-items: center; justify-content: center;
+    }}
+    .check svg {{ width: 34px; height: 34px; stroke: #10b981; }}
+    h2 {{ margin: 0 0 6px; font-size: 20px; font-weight: 700; }}
+    .email {{ margin: 0 0 14px; font-size: 13px; font-weight: 600; color: #6366F1; }}
+    p.sub {{ margin: 0; font-size: 13px; color: #6b7280; line-height: 1.5; }}
+    .spin {{
+      margin: 22px auto 0; width: 20px; height: 20px; border-radius: 50%;
+      border: 3px solid #e5e7eb; border-top-color: #6366F1; animation: spin .8s linear infinite;
+    }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="check">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 13l4 4L19 7" />
+      </svg>
+    </div>
+    <h2>You're connected to MailMind</h2>
+    {who}
+    <p class="sub">Your Microsoft account is securely linked.<br/>Returning you to your workspace…</p>
+    <div class="spin"></div>
+  </div>
+  <script>
+    setTimeout(function () {{
+      try {{ window.close(); }} catch (e) {{}}
+      setTimeout(function () {{ window.location.href = '{dashboard_url}'; }}, 400);
+    }}, 1200);
+  </script>
+</body>
+</html>"""
+
+
 @router.get("/auth/microsoft/callback", response_class=HTMLResponse)
 def microsoft_callback(request: Request) -> str:
     """OAuth redirect target — exchanges the code and stores the session."""
@@ -460,14 +529,8 @@ def microsoft_callback(request: Request) -> str:
         set_provider("microsoft", info.get("email"))
         ms_auth_status[state] = {"status": "success", "email": info.get("email")}
         dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
-        return (
-            "<html><body style='font-family:sans-serif;text-align:center;padding-top:60px'>"
-            "<h2>✅ Microsoft account connected</h2>"
-            "<p>You can close this window and return to MailMind.</p>"
-            "<script>setTimeout(function(){window.close();"
-            f"setTimeout(function(){{window.location.href='{dashboard}';}},400);}},800);</script>"
-            "</body></html>"
-        )
+        email = info.get("email") or ""
+        return _connected_screen(email, dashboard)
     except Exception as e:
         if state:
             ms_auth_status[state] = {"status": "error", "error": str(e)}
@@ -775,10 +838,44 @@ def fetch_thread(thread_id: str) -> list[dict[str, Any]]:
 
 
 @router.get("/calendar", response_model=list[CalendarEvent])
-def fetch_calendar(days: int = 3) -> list[CalendarEvent]:
+def fetch_calendar(days: int = 7) -> list[CalendarEvent]:
     """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
     fetcher = CalendarFetcher(get_mail_client())
     return fetcher.fetch_next_events(days=days)
+
+
+@router.post("/calendar/event")
+def create_calendar_event(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create a calendar event in the user's Outlook or Google calendar."""
+    title = (payload.get("title") or "").strip()
+    start = (payload.get("start_time") or "").strip()
+    end = (payload.get("end_time") or "").strip()
+    description = (payload.get("description") or "").strip()
+
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    if not start:
+        raise HTTPException(status_code=400, detail="start_time is required")
+
+    client = get_mail_client()
+    try:
+        from datetime import datetime
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        end_dt = datetime.fromisoformat(end.replace("Z", "+00:00")) if end else start_dt + __import__('datetime').timedelta(hours=1)
+        link = client.create_calendar_event(
+            email_id=payload.get("email_id", "manual"),
+            commitment=f"{title}\n\n{description}".strip(),
+            deadline=start_dt,
+        )
+        return {
+            "success": True,
+            "title": title,
+            "start_time": start_dt.isoformat(),
+            "end_time": end_dt.isoformat(),
+            "event_url": link,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create event: {str(e)}")
 
 
 @router.get("/tasks")
@@ -843,7 +940,9 @@ def generate_draft(payload: DraftRequest) -> DraftResponse:
     import hashlib
 
     from app.services.cache import precedents_cache
-    key = f"draft:{payload.style}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    # Include current_user_email in the cache key — different users get different drafts.
+    user_part = (payload.current_user_email or "anon").lower()
+    key = f"draft:{payload.style}:{user_part}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
         return cached
@@ -853,7 +952,8 @@ def generate_draft(payload: DraftRequest) -> DraftResponse:
         email_text=payload.email_text,
         style=payload.style,
         sender=payload.sender,
-        subject=payload.subject
+        subject=payload.subject,
+        current_user_email=payload.current_user_email,
     )
     result = DraftResponse(draft=draft, precedent_citations=citations)
     precedents_cache.set(key, result)
@@ -865,7 +965,7 @@ def generate_draft(payload: DraftRequest) -> DraftResponse:
 def extract_commitments(payload: CommitmentExtractionRequest) -> CommitmentExtractionResponse:
     """Extract commitment candidates from masked email text."""
     service = CommitmentService(get_mail_client())
-    commitments = service.extract(payload.masked_email_text, payload.thread_summary or "", payload.email_id)
+    commitments = service.extract(payload.get_text(), payload.thread_summary or "", payload.email_id)
     return CommitmentExtractionResponse(commitments=commitments)
 
 

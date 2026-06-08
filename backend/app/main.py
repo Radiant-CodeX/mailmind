@@ -20,8 +20,11 @@ except Exception:
     JaegerExporter = None
 
 from app.api.agent_routes import router as agent_router
+from app.api.compliance_routes import router as compliance_router
+from app.api.monitoring_routes import router as monitoring_router
 from app.api.routes import router
 from app.config.settings import settings
+from app.db.base import init_db
 from app.middleware import RateLimitMiddleware, SecurityHeadersMiddleware
 from app.observability import init_observability
 from app.queue.queue import EmailQueue
@@ -30,12 +33,9 @@ from routes.email_routes import router as email_router
 from routes.evaluation_routes import router as evaluation_router
 from routes.graph_routes import router as graph_router
 
-# API Bridge: Translate frontend /api/* calls to internal routes
-try:
-    from api_bridge import router as api_bridge_router
-except ImportError:
-    logging.warning("api_bridge.py not found; /api/* routes will not be available")
-    api_bridge_router = None
+# api_bridge.py is no longer included — app/api/routes.py handles all /api/* routes
+# (including auth, emails, commitments, triage, drafts, etc.)
+api_bridge_router = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -64,6 +64,12 @@ tracer = trace.get_tracer("mailmind.v2")
 async def lifespan(app: FastAPI):
     app.state.email_queue = EmailQueue()
     app.state.tracer = tracer
+
+    # Initialise persistence (no-op when DATABASE_URL is unset / dev mode).
+    try:
+        init_db()
+    except Exception as _e:
+        logging.warning(f"Database init skipped: {_e}")
 
     # DNA-01: Build Tone DNA profile on startup if not yet present
     from app.services.graph import GraphClient
@@ -119,14 +125,14 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(agent_router)
+app.include_router(monitoring_router, prefix="/api")
+app.include_router(compliance_router)
 app.include_router(email_router)
 app.include_router(ai_router)
 app.include_router(graph_router)
 app.include_router(evaluation_router)
 
-# Include API Bridge for frontend /api/* routes
-if api_bridge_router:
-    app.include_router(api_bridge_router)
+# api_bridge_router is disabled — routes.py supersedes it
 
 
 # ── OBS-01/02: Helper for custom spans ────────────────────────────────────────

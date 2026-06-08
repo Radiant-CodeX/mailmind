@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Production scaling override — Supabase + Redis + enrichment workers.
+#
+# Wired to the MailMind Supabase project (ap-south-1, ACTIVE_HEALTHY).
+# Uses the Supabase session pooler (IPv4, port 5432) so it works inside
+# Docker containers (avoids IPv6-only direct DB host).
+#
+# Usage:
+#   # With mock Graph (demo):
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --build
+#
+#   # Full production (live Azure/Graph secrets):
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#                  -f docker-compose.scale.yml up -d --build
+#
+# Scale workers: docker compose ... up -d --scale worker=4
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    environment:
+      - QUEUE_BACKEND=redis
+      - REDIS_URL=redis://redis:6379/0
+      # Supabase session pooler — IPv4, resolves from inside containers
+      - DATABASE_URL=postgresql://postgres.iwmlmmmcpihfqnqtzfwz:${SUPABASE_DB_PASSWORD}@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require
+      - METRICS_ENABLED=true
+      - SLA_TRIAGE_SECONDS=1.5
+      - SLA_ENRICHMENT_SECONDS=10.0
+      - DATA_RETENTION_DAYS=90
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # Deferred-enrichment consumer. Stateless → safe to scale to N replicas.
+  worker:
+    build: ./backend
+    command: python -m app.workers.enrichment
+    environment:
+      - QUEUE_BACKEND=redis
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres.iwmlmmmcpihfqnqtzfwz:${SUPABASE_DB_PASSWORD}@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require
+      - METRICS_ENABLED=true
+      - USE_MOCK_GRAPH=${USE_MOCK_GRAPH:-true}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
+      - AZURE_OPENAI_CHAT_DEPLOYMENT=${AZURE_OPENAI_CHAT_DEPLOYMENT:-gpt-4o}
+    volumes:
+      - ./backend/data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes      # AOF persistence across restarts
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# No local postgres — using Supabase (managed, HA, automatic backups).
+# The SUPABASE_DB_PASSWORD env var must be set (from backend/.env or CI secrets).
+
+volumes:
+  redis_data:

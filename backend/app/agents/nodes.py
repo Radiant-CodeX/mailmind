@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import AzureChatOpenAI
 
 from app.graph.state import EmailAgentState
+from app.monitoring.metrics import observe_node, record_llm_call, record_pii_masked
 from app.tools.email_tools import (
     ALL_TOOLS,
     TRIAGE_TOOLS,
@@ -48,14 +50,25 @@ logger = logging.getLogger(__name__)
 # LLM FACTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Module-level LLM cache — one instance per temperature, reused across all requests.
+# Creating AzureChatOpenAI is not free: it validates credentials and sets up the
+# HTTP client. Caching saves ~200-400ms per request.
+_llm_cache: dict[float, AzureChatOpenAI] = {}
+
+
 def _get_llm(temperature: float = 0.1) -> AzureChatOpenAI | None:
     """
-    Return an AzureChatOpenAI instance configured from environment variables.
+    Return a cached AzureChatOpenAI instance. Built once per temperature value
+    and reused for all subsequent requests in this process lifetime.
     Returns None if Azure credentials are not present (triggers fallback paths).
     """
+    global _llm_cache
+    if temperature in _llm_cache:
+        return _llm_cache[temperature]
+
     from app.config import settings as _settings
     api_key = _settings.azure_openai_api_key
-    endpoint = _settings.azure_openai_base_endpoint  # strips deployment path / query params
+    endpoint = _settings.azure_openai_base_endpoint
     deployment = _settings.azure_openai_chat_deployment
     api_version = _settings.azure_openai_api_version
 
@@ -63,13 +76,16 @@ def _get_llm(temperature: float = 0.1) -> AzureChatOpenAI | None:
         logger.warning("Azure OpenAI credentials not set — using deterministic fallbacks")
         return None
 
-    return AzureChatOpenAI(
+    instance = AzureChatOpenAI(
         azure_endpoint=endpoint,
         azure_deployment=deployment,
         api_key=api_key,
         api_version=api_version,
         temperature=temperature,
     )
+    _llm_cache[temperature] = instance
+    logger.info("AzureChatOpenAI instance cached (temperature=%.1f)", temperature)
+    return instance
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +142,16 @@ def ingest_node(state: EmailAgentState) -> dict[str, Any]:
     logger.info(f"[INGEST] Processing email_id={state['email_id']}")
 
     from app.services.pii import pii_sanitizer
-    masked, mapping = pii_sanitizer.mask_text(state["body"])
+    with observe_node("ingest"):
+        masked, mapping = pii_sanitizer.mask_text(state["body"])
+
+    # Record PII coverage by category (counts only — never raw values).
+    if mapping:
+        category_counts: dict[str, int] = {}
+        for placeholder in mapping:                      # e.g. "[PERSON_1]"
+            category = placeholder.strip("[]").rsplit("_", 1)[0]
+            category_counts[category] = category_counts.get(category, 0) + 1
+        record_pii_masked(category_counts)
 
     return {
         "masked_body": masked,
@@ -145,19 +170,130 @@ def ingest_node(state: EmailAgentState) -> dict[str, Any]:
 # NODE 2: TRIAGE AGENT NODE
 # ─────────────────────────────────────────────────────────────────────────────
 
+# The five triage axes the LLM must score. Note: the dynamic LLM path uses
+# "thread_risk" (a holistic stakeholder/escalation-risk judgement) where the
+# deterministic fallback uses the simpler time-based "decay" axis.
+TRIAGE_AXES = ["deadline", "authority", "sentiment", "thread_risk", "action"]
+
+# Default weights used to normalise / repair LLM weight output. Mirror the
+# static weighting so a missing axis weight degrades gracefully.
+DEFAULT_DYNAMIC_WEIGHTS = {
+    "deadline": 0.30,
+    "authority": 0.25,
+    "sentiment": 0.20,
+    "thread_risk": 0.15,
+    "action": 0.10,
+}
+
+
+def _priority_from_score(composite: float) -> tuple[str, str]:
+    """Map a 0–100 composite score to (priority, approval_mode)."""
+    if composite >= 75:
+        return "CRITICAL", "GATE"
+    if composite >= 50:
+        return "HIGH", "SUGGEST"
+    if composite >= 25:
+        return "MEDIUM", "SUGGEST"
+    return "LOW", "SUGGEST"
+
+
+def _normalise_weights(weights: dict[str, Any]) -> dict[str, float]:
+    """
+    Coerce LLM-supplied weights into clean floats that sum to exactly 1.0.
+
+    Missing axes are filled from DEFAULT_DYNAMIC_WEIGHTS; the whole set is then
+    renormalised so the final dict always sums to 1.0 regardless of LLM output.
+    """
+    cleaned: dict[str, float] = {}
+    for axis in TRIAGE_AXES:
+        try:
+            cleaned[axis] = max(0.0, float(weights.get(axis, DEFAULT_DYNAMIC_WEIGHTS[axis])))
+        except (TypeError, ValueError):
+            cleaned[axis] = DEFAULT_DYNAMIC_WEIGHTS[axis]
+
+    total = sum(cleaned.values())
+    if total <= 0:
+        cleaned = dict(DEFAULT_DYNAMIC_WEIGHTS)
+        total = sum(cleaned.values())
+
+    return {axis: round(w / total, 4) for axis, w in cleaned.items()}
+
+
+def _recompute_composite(axes: list[dict], weights: dict[str, float]) -> float:
+    """
+    Recalculate the composite score in code from axis raw_scores × weights.
+
+    Never trust the LLM's own composite_score — this is the authoritative value.
+    """
+    by_axis = {a["axis"]: a for a in axes}
+    weighted_sum = sum(
+        float(by_axis.get(axis, {}).get("raw_score", 0.0)) * weight
+        for axis, weight in weights.items()
+    )
+    return round(max(0.0, min(100.0, weighted_sum * 100.0)), 2)
+
+
+def _parse_triage_json(raw: str) -> dict[str, Any]:
+    """Strip markdown fences and parse the LLM triage JSON payload."""
+    content = raw.strip()
+    content = re.sub(r"^```(?:json)?\s*", "", content)
+    content = re.sub(r"\s*```$", "", content)
+    return json.loads(content)
+
+
+def _validate_axes(raw_axes: Any) -> list[dict]:
+    """
+    Validate and clean the LLM's axis list. Raises ValueError if the payload
+    is unusable (triggering the deterministic fallback in the caller).
+    """
+    if not isinstance(raw_axes, list) or not raw_axes:
+        raise ValueError("axes missing or not a list")
+
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_axes:
+        if not isinstance(item, dict):
+            continue
+        axis = str(item.get("axis", "")).strip().lower()
+        if axis not in TRIAGE_AXES or axis in seen:
+            continue
+        seen.add(axis)
+        cleaned.append({
+            "axis": axis,
+            "raw_score": max(0.0, min(1.0, float(item.get("raw_score", 0.0)))),
+            "confidence": max(0.0, min(1.0, float(item.get("confidence", 0.5)))),
+            "evidence": str(item.get("evidence", "")).strip(),
+            "explanation": str(item.get("explanation", "")).strip(),
+        })
+
+    missing = set(TRIAGE_AXES) - seen
+    if missing:
+        raise ValueError(f"LLM omitted required axes: {sorted(missing)}")
+
+    return cleaned
+
+
 def triage_node(state: EmailAgentState) -> dict[str, Any]:
     """
-    Agentic triage node. Uses GPT-4o with bound triage tools to:
-      1. Score all five axes (deadline, authority, sentiment, decay, action)
-      2. Compute the composite score (0–100)
-      3. Determine priority (CRITICAL/HIGH/MEDIUM/LOW) and approval mode
+    Dynamic agentic triage node.
 
-    When Azure OpenAI is available: the LLM reasons about which scoring tools
-    to call and in what order, producing a chain-of-thought triage explanation.
+    When Azure OpenAI is available, GPT-4o performs a single holistic triage
+    pass that:
+      1. Classifies the email_type (e.g. client_escalation, internal_request).
+      2. Scores five axes (deadline, authority, sentiment, thread_risk, action)
+         from 0–1 with a confidence and supporting evidence for each — inferring
+         business urgency from the subject, sender, masked body, implied
+         deadlines, and stakeholder risk rather than keyword matching.
+      3. Assigns dynamic per-axis weights tailored to this specific email.
 
-    When unavailable: falls back to calling all five scoring tools deterministically.
+    The composite score is ALWAYS recomputed in code from raw_scores × weights —
+    the LLM's own composite/priority numbers are never trusted directly.
 
-    State updates: axes, composite_score, priority, approval_mode, triage_reasoning
+    When the LLM is unavailable, returns invalid JSON, or errors, the node falls
+    back to the unchanged deterministic five-tool scoring path.
+
+    State updates: axes, dynamic_weights, email_type, composite_score, priority,
+                   approval_mode, triage_reasoning
     """
     logger.info(f"[TRIAGE] Scoring email_id={state['email_id']}")
     llm = _get_llm(temperature=0.0)
@@ -165,71 +301,106 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
 
     if llm:
         try:
-            llm_with_tools = llm.bind_tools(TRIAGE_TOOLS)
-            messages = [
-                SystemMessage(content=(
-                    "You are MailMind's Triage Agent. Your task is to score the incoming email "
-                    "across five axes using the provided tools, then compute a composite score.\n\n"
-                    "REQUIRED STEPS (call each tool in order):\n"
-                    "1. score_deadline_axis — detect and score urgency of any deadlines\n"
-                    "2. score_authority_axis — assess sender importance\n"
-                    "3. score_sentiment_axis — detect emotional urgency signals\n"
-                    "4. score_decay_axis — penalise older threads\n"
-                    "5. score_action_axis — detect whether a direct response is required\n"
-                    "6. compute_composite_score — combine all axis scores into a final 0–100 score\n\n"
-                    "After all tool calls, summarise your triage reasoning in 2–3 sentences."
-                )),
-                HumanMessage(content=(
-                    f"Email Details:\n"
-                    f"Sender: {state['sender']}\n"
-                    f"Subject: {state['subject']}\n"
-                    f"Received: {state['received_at']}\n"
-                    f"Body: {masked_body}\n\n"
-                    f"Run all five axis scoring tools, then compute_composite_score."
-                )),
-            ]
+            system_prompt = (
+                "You are MailMind's Triage Agent for an enterprise inbox. Assess the "
+                "BUSINESS urgency of one email and respond with JSON ONLY.\n\n"
+                "Do NOT rely on keyword spotting. Reason about meaning: infer implied "
+                "deadlines (even when phrased indirectly), the sender's stakeholder power "
+                "and escalation risk, the true emotional tone, and whether a concrete "
+                "action is actually required of the recipient.\n\n"
+                "Score these FIVE axes, each from 0.0 (none) to 1.0 (maximal):\n"
+                "  - deadline:    time pressure / urgency of any explicit or implied due date\n"
+                "  - authority:   stakeholder power & importance of the sender / referenced people\n"
+                "  - sentiment:   emotional urgency, frustration, or escalation in the tone\n"
+                "  - thread_risk: business/relationship risk if this email is ignored or delayed\n"
+                "  - action:      how strongly a direct response or action is required\n\n"
+                "Then assign dynamic_weights to each axis reflecting what matters MOST for "
+                "THIS email (e.g. a legal threat weights thread_risk higher; a newsletter "
+                "weights everything low). dynamic_weights MUST sum to 1.0.\n\n"
+                "Anchor all relative dates ('today', 'tomorrow', 'by Friday') to the email's "
+                "received timestamp, not the current date.\n\n"
+                "Respond with EXACTLY this JSON shape and nothing else (no markdown):\n"
+                "{\n"
+                '  "email_type": "<short category, e.g. client_escalation | internal_request | '
+                'meeting_request | fyi_newsletter | approval_request>",\n'
+                '  "axes": [\n'
+                '    {"axis": "deadline", "raw_score": 0.0, "confidence": 0.0, '
+                '"evidence": "<quote/paraphrase from the email>", "explanation": "<why>"},\n'
+                '    {"axis": "authority", ...},\n'
+                '    {"axis": "sentiment", ...},\n'
+                '    {"axis": "thread_risk", ...},\n'
+                '    {"axis": "action", ...}\n'
+                "  ],\n"
+                '  "dynamic_weights": {"deadline": 0.0, "authority": 0.0, "sentiment": 0.0, '
+                '"thread_risk": 0.0, "action": 0.0},\n'
+                '  "composite_score": 0.0,\n'
+                '  "priority": "CRITICAL|HIGH|MEDIUM|LOW",\n'
+                '  "approval_mode": "GATE|SUGGEST",\n'
+                '  "overall_reasoning": "<2-3 sentence justification>"\n'
+                "}"
+            )
+            user_prompt = (
+                f"Email metadata and content:\n"
+                f"Sender: {state['sender']}\n"
+                f"Subject: {state['subject']}\n"
+                f"Received: {state['received_at']}\n"
+                f"Body:\n{masked_body}"
+            )
 
-            axes: list[dict] = []
-            composite_result: dict = {}
-            reasoning = ""
-            max_iterations = 10
+            response: AIMessage = llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
 
-            for _ in range(max_iterations):
-                response: AIMessage = llm_with_tools.invoke(messages)
-                messages.append(response)
+            data = _parse_triage_json(response.content)
 
-                if not response.tool_calls:
-                    reasoning = response.content or ""
-                    break
+            axes = _validate_axes(data.get("axes"))
+            weights = _normalise_weights(data.get("dynamic_weights", {}))
+            # Authoritative composite — recomputed in code, LLM value discarded.
+            composite = _recompute_composite(axes, weights)
+            priority, approval_mode = _priority_from_score(composite)
 
-                for tc in response.tool_calls:
-                    result = _dispatch_tool(tc)
-                    messages.append(
-                        ToolMessage(content=json.dumps(result), tool_call_id=tc["id"])
-                    )
-                    if isinstance(result, dict):
-                        if "axis" in result:
-                            axes.append(result)
-                        elif "composite_score" in result:
-                            composite_result = result
+            email_type = str(data.get("email_type", "")).strip() or "uncategorised"
+            reasoning = str(data.get("overall_reasoning", "")).strip()
+
+            logger.info(
+                f"[TRIAGE] email_id={state['email_id']} type={email_type} "
+                f"score={composite} priority={priority}"
+            )
+            record_llm_call("triage", "success")
 
             return {
                 "axes": axes,
-                "composite_score": composite_result.get("composite_score", 0.0),
-                "priority": composite_result.get("priority", "LOW"),
-                "approval_mode": composite_result.get("approval_mode", "SUGGEST"),
+                "dynamic_weights": weights,
+                "email_type": email_type,
+                "composite_score": composite,
+                "priority": priority,
+                "approval_mode": approval_mode,
                 "triage_reasoning": reasoning,
                 "current_step": "triage",
             }
 
         except Exception as e:
-            logger.warning(f"[TRIAGE] LLM failed: {e} — using deterministic fallback")
+            logger.warning(f"[TRIAGE] Dynamic LLM triage failed: {e} — using deterministic fallback")
             state["errors"].append(f"triage_llm_error: {str(e)}")
+            record_llm_call("triage", "error")
+
+    # The deterministic path runs both when no LLM is configured and after an
+    # LLM error — count it as a fallback for the fallback-rate metric.
+    record_llm_call("triage", "fallback")
 
     # ── Deterministic fallback ────────────────────────────────────────────────
     axes = [
-        score_deadline_axis.invoke({"body": masked_body}),
-        score_authority_axis.invoke({"sender_email": state["sender"]}),
+        score_deadline_axis.invoke({
+            "body": masked_body,
+            "subject": state["subject"],
+            "received_at": state["received_at"],
+        }),
+        score_authority_axis.invoke({
+            "sender_email": state["sender"],
+            "subject": state["subject"],
+            "body": masked_body,
+        }),
         score_sentiment_axis.invoke({"body": masked_body}),
         score_decay_axis.invoke({"received_at": state["received_at"]}),
         score_action_axis.invoke({"body": masked_body}),
@@ -238,6 +409,12 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
 
     return {
         "axes": axes,
+        # Static weights (mirrors compute_composite_score) for response parity.
+        "dynamic_weights": {
+            "deadline": 0.30, "authority": 0.25, "sentiment": 0.20,
+            "decay": 0.15, "action": 0.10,
+        },
+        "email_type": "uncategorised",
         "composite_score": composite["composite_score"],
         "priority": composite["priority"],
         "approval_mode": composite["approval_mode"],
@@ -500,9 +677,6 @@ def gate_node(state: EmailAgentState) -> dict[str, Any]:
         "approved": False,  # Human must set this to True via the confirm endpoint
     }
 
-
-# Re-export for graph assembly
-import re  # noqa: E402 — needed inside commitment_node
 
 __all__ = [
     "ingest_node",

@@ -9,7 +9,7 @@ interface SortOption {
 }
 
 const OPTIONS: SortOption[] = [
-  { key: 'normal', label: 'Normal order' },
+  { key: 'normal', label: 'Default order' },
   { key: 'date_desc', label: 'Newest first' },
   { key: 'date_asc', label: 'Oldest first' },
   { key: 'score_desc', label: 'Highest triage score' },

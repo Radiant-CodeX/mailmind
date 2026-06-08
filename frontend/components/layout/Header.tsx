@@ -1,5 +1,4 @@
 import React from 'react';
-import { BASE } from '../../lib/api';
 
 interface HeaderProps {
   themeMode: 'light' | 'dark';
@@ -12,17 +11,14 @@ export function Header({ themeMode, onToggleTheme, isMockMode }: HeaderProps) {
     <header className="h-16 border-b border-[var(--border)] px-6 flex items-center justify-between bg-[var(--bg-surface)] w-full" id="header">
       <div className="flex items-center gap-4">
         <h1 className="text-lg font-bold text-[var(--text-primary)]">Triage Workspace</h1>
-        <div className="h-4 w-[1px] bg-[var(--border)]"></div>
-        {isMockMode ? (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-semibold tracking-wide uppercase">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse"></span>
-            Mock Mode Active
-          </div>
-        ) : (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-semibold tracking-wide uppercase">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse"></span>
-            Live Account Connected
-          </div>
+        {isMockMode && (
+          <>
+            <div className="h-4 w-[1px] bg-[var(--border)]"></div>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px] font-semibold tracking-wide uppercase">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse"></span>
+              Mock Mode Active
+            </div>
+          </>
         )}
       </div>
 
@@ -52,15 +48,6 @@ export function Header({ themeMode, onToggleTheme, isMockMode }: HeaderProps) {
             </>
           )}
         </button>
-
-        <div className="h-4 w-[1px] bg-[var(--border)]"></div>
-        
-        <div className="flex items-center gap-2">
-          <span>API Base:</span>
-          <code className="px-2 py-1 rounded bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-primary)] font-mono text-[10px]">
-            {BASE}
-          </code>
-        </div>
       </div>
     </header>
   );

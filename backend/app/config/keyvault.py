@@ -38,15 +38,25 @@ def load_keyvault_into_env() -> bool:
         return False
 
     try:
-        client = SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
+        # additionally_allowed_tenants="*" lets the credential work even when
+        # AZURE_TENANT_ID is set to "common" or a different tenant than the vault's.
+        client = SecretClient(
+            vault_url=vault_url,
+            credential=DefaultAzureCredential(additionally_allowed_tenants=["*"]),
+        )
         loaded = 0
         for prop in client.list_properties_of_secrets():
             secret = client.get_secret(prop.name)
             env_key = prop.name.replace("-", "_").upper()
             os.environ[env_key] = secret.value or ""
             loaded += 1
-        logger.info("Loaded %d secret(s) from Azure Key Vault", loaded)
+        logger.info("Loaded %d secret(s) from Azure Key Vault (%s)", loaded, vault_url)
         return loaded > 0
     except Exception as exc:  # pragma: no cover - network/permission dependent
-        logger.warning("Key Vault load failed (%s); falling back to environment/.env.", exc)
+        # Common causes: vault not created yet, wrong URL, no auth credentials set
+        logger.warning(
+            "Key Vault load failed — falling back to environment/.env. "
+            "Cause: %s. Run 'bash scripts/setup-keyvault.sh' to populate the vault.",
+            exc,
+        )
         return False

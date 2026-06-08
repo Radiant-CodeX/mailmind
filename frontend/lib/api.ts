@@ -28,8 +28,64 @@ export async function classifyEmail(text: string) {
   return res.json();
 }
 
+/**
+ * Run ONLY the enrichment phase (commitment + calendar + rag in parallel).
+ * Triage is skipped — caller passes the pre-computed triage state from the
+ * inbox batch score. This halves the end-to-end latency since the most
+ * expensive step (triage LLM call) was already done while loading the inbox.
+ */
+export async function enrichEmail(payload: {
+  email_id: string;
+  sender: string;
+  subject: string;
+  body: string;
+  received_at: string;
+  masked_body?: string | null;
+  axes?: unknown[];
+  composite_score?: number;
+  priority?: string;
+  approval_mode?: string;
+  triage_reasoning?: string | null;
+  calendar_events?: unknown[];
+  current_user_email?: string | null;
+  /** Default false — skips RAG/draft. Pass true only when user clicks Generate Draft. */
+  generate_draft?: boolean;
+}) {
+  const res = await fetch(`${BASE}/api/agent/enrich`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Enrichment failed');
+  return res.json();
+}
+
+/**
+ * Full pipeline fallback — used only when no triage score is available.
+ */
+export async function processEmailFull(payload: {
+  email_id: string;
+  sender: string;
+  subject: string;
+  body: string;
+  received_at: string;
+  calendar_events?: unknown[];
+}) {
+  const res = await fetch(`${BASE}/api/agent/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Full pipeline failed');
+  return res.json();
+}
+
+/**
+ * Triage a single email through the LangGraph agent pipeline.
+ * Uses /api/agent/triage so the LLM call is traced in LangSmith.
+ */
 export async function triageEmail(payload: { email_id: string; sender: string; subject: string; body: string; received_at: string }) {
-  const res = await fetch(`${BASE}/api/triage`, {
+  const res = await fetch(`${BASE}/api/agent/triage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -38,18 +94,54 @@ export async function triageEmail(payload: { email_id: string; sender: string; s
   return res.json();
 }
 
-/** Score many emails in ONE request — replaces N separate triage calls. */
+/**
+ * Score many emails — fans out to /api/agent/triage in parallel (capped at 5
+ * concurrent) so every call goes through LangGraph and appears in LangSmith.
+ * Falls back to the fast deterministic /api/triage/batch if the agent route fails.
+ */
 export async function triageEmailsBatch(
   payloads: Array<{ email_id: string; sender: string; subject: string; body: string; received_at: string }>,
 ) {
   if (payloads.length === 0) return [];
-  const res = await fetch(`${BASE}/api/triage/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payloads),
-  });
-  if (!res.ok) throw new Error('Batch triage failed');
-  return res.json();
+
+  const CONCURRENCY = 5;
+  const results: unknown[] = new Array(payloads.length);
+
+  // Process in windows of CONCURRENCY to avoid hammering the LLM.
+  for (let i = 0; i < payloads.length; i += CONCURRENCY) {
+    const window = payloads.slice(i, i + CONCURRENCY);
+    const settled = await Promise.allSettled(
+      window.map((p) =>
+        fetch(`${BASE}/api/agent/triage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(p),
+        }).then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      )
+    );
+    settled.forEach((s, j) => {
+      results[i + j] = s.status === 'fulfilled' ? s.value : null;
+    });
+  }
+
+  // Any nulls (agent failures) are filled with a deterministic fallback.
+  const failed = payloads.filter((_, i) => !results[i]);
+  if (failed.length > 0) {
+    try {
+      const fallback = await fetch(`${BASE}/api/triage/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(failed),
+      });
+      if (fallback.ok) {
+        const fallbackData = await fallback.json();
+        let fi = 0;
+        results.forEach((r, i) => { if (!r) results[i] = fallbackData[fi++]; });
+      }
+    } catch { /* ignore fallback errors */ }
+  }
+
+  return results;
 }
 
 export async function extractCommitments(maskedText: string, threadSummary = '', emailId?: string) {
@@ -108,7 +200,13 @@ export async function generateDraftPrompt(text: string) {
   return res.json();
 }
 
-export async function generateEmailDraft(text: string, style: string, sender?: string, subject?: string) {
+export async function generateEmailDraft(
+  text: string,
+  style: string,
+  sender?: string,
+  subject?: string,
+  currentUserEmail?: string,
+) {
   const res = await fetch(`${BASE}/api/rag/draft`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -117,6 +215,8 @@ export async function generateEmailDraft(text: string, style: string, sender?: s
       style: style,
       sender: sender,
       subject: subject,
+      // Let the backend personalise the sign-off with the actual logged-in user.
+      current_user_email: currentUserEmail,
     }),
   });
   if (!res.ok) throw new Error('Email draft generation failed');
@@ -124,9 +224,25 @@ export async function generateEmailDraft(text: string, style: string, sender?: s
 }
 
 
-export async function fetchCalendar(days = 3) {
+export async function fetchCalendar(days = 7) {
   const res = await fetch(`${BASE}/api/calendar?days=${days}`);
   if (!res.ok) throw new Error('Calendar fetch failed');
+  return res.json();
+}
+
+export async function createCalendarEvent(payload: {
+  title: string;
+  start_time: string;
+  end_time?: string;
+  description?: string;
+  email_id?: string;
+}) {
+  const res = await fetch(`${BASE}/api/calendar/event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to create calendar event');
   return res.json();
 }
 

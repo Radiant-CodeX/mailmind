@@ -11,10 +11,12 @@ from __future__ import annotations
 from typing import Any, Literal, Optional, TypedDict
 
 
-class AxisScore(TypedDict):
+class AxisScore(TypedDict, total=False):
     axis: str
     raw_score: float
     explanation: str
+    confidence: float          # 0–1 LLM confidence in this axis score
+    evidence: str              # Text from the email supporting the score
 
 
 class CommitmentItem(TypedDict):
@@ -54,6 +56,8 @@ class EmailAgentState(TypedDict):
     masked_body: Optional[str]                # PII-scrubbed body
     mask_mapping: Optional[dict[str, str]]    # Mapping to restore PII
     axes: list[AxisScore]                     # Five individual axis scores
+    dynamic_weights: dict[str, float]         # LLM-assigned per-axis weights (sum=1.0)
+    email_type: Optional[str]                 # LLM-inferred email category
     composite_score: float                    # 0–100 weighted aggregate
     priority: Optional[Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]]
     approval_mode: Optional[Literal["GATE", "SUGGEST"]]
