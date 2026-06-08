@@ -56,106 +56,288 @@ def mask_pii(text: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @tool
-def score_deadline_axis(body: str) -> dict[str, Any]:
+def score_deadline_axis(body: str, subject: str = "", received_at: str = "") -> dict[str, Any]:
     """
     Score the email on the DEADLINE axis (weight: 30%).
 
-    Parses natural language deadline expressions (today, tomorrow, next Friday,
-    ISO dates, 'due by X', 'deadline: X') and calculates urgency based on
-    days remaining. Closer deadlines score higher (0.0–1.0).
+    Parses natural language deadline expressions across both subject and body:
+    - Relative: today, tomorrow, next Friday, this Monday, end of week/month
+    - Absolute: June 15, 15th June, June 15th, 2026-06-15, 06/15/2026
+    - Time-relative: within 24 hours, within 48 hours, within the week
+    - Time-of-day: by EOD, by 5 PM, by noon, by end of day
+    - Business: by COB, by close of business
+
+    All relative expressions are anchored to received_at (the email's arrival
+    time) rather than the current clock, so "today" means the day the email
+    was sent, not when the pipeline processes it.
 
     Args:
         body: PII-masked email body text.
+        subject: Email subject line (may contain deadline hints).
+        received_at: ISO 8601 datetime when the email was received. Defaults
+                     to current time if not provided.
 
     Returns:
         dict with keys: axis (str), raw_score (float 0-1), explanation (str).
     """
-    body_lower = body.lower()
-    now = datetime.now(tz=timezone.utc)
-    deadline = None
+    # ── Reference point: use email's received_at, not pipeline runtime ──────
+    now_real = datetime.now(tz=timezone.utc)
+    try:
+        ref = datetime.fromisoformat(received_at.replace("Z", "+00:00"))
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+    except (ValueError, AttributeError):
+        ref = now_real
 
-    # Natural language patterns
-    if "today" in body_lower:
-        deadline = now
-    elif "tomorrow" in body_lower:
-        deadline = now + timedelta(days=1)
-    elif "next week" in body_lower:
-        deadline = now + timedelta(days=7)
-    else:
-        # Regex: "due by", "by Friday", ISO dates
-        patterns = [
-            r"due(?:\s+by)?\s+([a-zA-Z0-9\-:, ]+)",
-            r"by\s+([a-zA-Z0-9\-:, ]+)",
-            r"deadline(?:\s*:)?\s+([a-zA-Z0-9\-:, ]+)",
-            r"(\d{4}-\d{2}-\d{2})",
-        ]
+    # Search both subject and body; subject keywords often carry the deadline
+    full_text = f"{subject} {body}".lower().strip()
+    deadline: datetime | None = None
+    explanation_hint = ""
+
+    # ── 1. Overdue / already-passed signals ─────────────────────────────────
+    if re.search(r"\b(overdue|past due|missed deadline|already late)\b", full_text):
+        return {"axis": "deadline", "raw_score": 1.0, "explanation": "Email signals an overdue/missed deadline"}
+
+    # ── 2. Absolute time-relative expressions ───────────────────────────────
+    within_match = re.search(r"within\s+(\d+)\s*(hour|hr|day)", full_text)
+    if within_match:
+        qty = int(within_match.group(1))
+        unit = within_match.group(2)
+        delta = timedelta(hours=qty) if "hour" in unit or "hr" in unit else timedelta(days=qty)
+        deadline = ref + delta
+        explanation_hint = f"'within {qty} {unit}(s)' of receipt"
+
+    # ── 3. EOD / COB / noon expressions ─────────────────────────────────────
+    if not deadline:
+        if re.search(r"\b(eod|end of (the )?day|close of (business|day)|cob)\b", full_text):
+            deadline = ref.replace(hour=17, minute=0, second=0, microsecond=0)
+            if deadline < ref:
+                deadline += timedelta(days=1)
+            explanation_hint = "by end of business day"
+        elif re.search(r"\bby\s+noon\b", full_text):
+            deadline = ref.replace(hour=12, minute=0, second=0, microsecond=0)
+            if deadline < ref:
+                deadline += timedelta(days=1)
+            explanation_hint = "by noon"
+        elif re.search(r"\bby\s+(\d{1,2})\s*(am|pm)\b", full_text):
+            m = re.search(r"\bby\s+(\d{1,2})\s*(am|pm)\b", full_text)
+            hour = int(m.group(1))
+            if m.group(2) == "pm" and hour != 12:
+                hour += 12
+            elif m.group(2) == "am" and hour == 12:
+                hour = 0
+            deadline = ref.replace(hour=hour, minute=0, second=0, microsecond=0)
+            if deadline < ref:
+                deadline += timedelta(days=1)
+            explanation_hint = f"by {m.group(1)}{m.group(2)}"
+
+    # ── 4. Simple relative words ─────────────────────────────────────────────
+    if not deadline:
+        if re.search(r"\btoday\b", full_text):
+            deadline = ref.replace(hour=17, minute=0, second=0, microsecond=0)
+            explanation_hint = "today"
+        elif re.search(r"\btomorrow\b", full_text):
+            deadline = ref + timedelta(days=1)
+            deadline = deadline.replace(hour=17, minute=0, second=0, microsecond=0)
+            explanation_hint = "tomorrow"
+        elif re.search(r"\bend of (this )?week\b", full_text):
+            days_to_friday = (4 - ref.weekday()) % 7 or 7
+            deadline = ref + timedelta(days=days_to_friday)
+            deadline = deadline.replace(hour=17, minute=0, second=0, microsecond=0)
+            explanation_hint = "end of week"
+        elif re.search(r"\bnext week\b", full_text):
+            deadline = ref + timedelta(days=7)
+            explanation_hint = "next week"
+        elif re.search(r"\bend of (this )?month\b", full_text):
+            # Last day of the reference month
+            if ref.month == 12:
+                deadline = ref.replace(year=ref.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                deadline = ref.replace(month=ref.month + 1, day=1) - timedelta(days=1)
+            deadline = deadline.replace(hour=17, minute=0, second=0, microsecond=0)
+            explanation_hint = "end of month"
+
+    # ── 5. Named weekdays: "this Monday", "next Friday", "by Friday" ─────────
+    if not deadline:
         weekday_map = {
             "monday": 0, "tuesday": 1, "wednesday": 2,
             "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
         }
-        for pattern in patterns:
-            match = re.search(pattern, body_lower)
-            if match:
-                raw = match.group(1).strip()
-                for day_name, day_idx in weekday_map.items():
-                    if day_name in raw:
-                        offset = (day_idx - now.weekday() + 7) % 7 or 7
-                        deadline = now + timedelta(days=offset)
-                        break
-                if not deadline:
-                    try:
-                        deadline = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-                        if deadline.tzinfo is None:
-                            deadline = deadline.replace(tzinfo=timezone.utc)
-                    except ValueError:
-                        pass
-                if deadline:
-                    break
+        next_match = re.search(
+            r"\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", full_text
+        )
+        this_match = re.search(
+            r"\b(?:this|by|on)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", full_text
+        )
+        target_match = next_match or this_match
+        if target_match:
+            day_name = target_match.group(1)
+            target_wd = weekday_map[day_name]
+            if next_match:
+                # "next Friday" = always the Friday of next calendar week
+                days_ahead = (target_wd - ref.weekday() + 7) % 7
+                days_ahead = days_ahead if days_ahead > 0 else 7
+                days_ahead += 7 if next_match else 0
+            else:
+                # "this Friday" / "by Friday" = nearest upcoming occurrence
+                days_ahead = (target_wd - ref.weekday() + 7) % 7 or 7
+            deadline = ref + timedelta(days=days_ahead)
+            deadline = deadline.replace(hour=17, minute=0, second=0, microsecond=0)
+            explanation_hint = f"by {day_name}"
 
+    # ── 6. Month + day: "June 15", "June 15th", "15th June", "Jun 15" ───────
+    if not deadline:
+        month_map = {
+            "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+            "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+            "january": 1, "february": 2, "march": 3, "april": 4,
+            "june": 6, "july": 7, "august": 8, "september": 9,
+            "october": 10, "november": 11, "december": 12,
+        }
+        # "June 15" / "June 15th"
+        m = re.search(
+            r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+            r"\s+(\d{1,2})(?:st|nd|rd|th)?\b",
+            full_text,
+        )
+        if not m:
+            # "15th June" / "15 June"
+            m = re.search(
+                r"\b(\d{1,2})(?:st|nd|rd|th)?\s+"
+                r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+                r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+                full_text,
+            )
+            if m:
+                day_part, month_part = m.group(1), m.group(2)
+            else:
+                day_part, month_part = None, None
+        else:
+            month_part, day_part = m.group(1), m.group(2)
+
+        if month_part and day_part:
+            month_num = month_map.get(month_part[:3].lower()) or month_map.get(month_part.lower())
+            if month_num:
+                year = ref.year
+                try:
+                    candidate = datetime(year, month_num, int(day_part), 17, 0, 0, tzinfo=timezone.utc)
+                    if candidate < ref:
+                        candidate = candidate.replace(year=year + 1)
+                    deadline = candidate
+                    explanation_hint = f"{month_part.title()} {day_part}"
+                except ValueError:
+                    pass
+
+    # ── 7. ISO / numeric dates: 2026-06-15, 06/15/2026, 15-06-2026 ──────────
+    if not deadline:
+        iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", full_text)
+        us = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", full_text)
+        if iso:
+            try:
+                deadline = datetime(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)),
+                                    17, 0, 0, tzinfo=timezone.utc)
+                explanation_hint = iso.group(0)
+            except ValueError:
+                pass
+        elif us:
+            try:
+                deadline = datetime(int(us.group(3)), int(us.group(1)), int(us.group(2)),
+                                    17, 0, 0, tzinfo=timezone.utc)
+                explanation_hint = us.group(0)
+            except ValueError:
+                pass
+
+    # ── No deadline found ────────────────────────────────────────────────────
     if not deadline:
         return {"axis": "deadline", "raw_score": 0.0, "explanation": "No deadline detected"}
 
-    days_until = max(0.0, (deadline - now).total_seconds() / 86400.0)
-    raw_score = max(0.0, min(1.0, 1.0 - (days_until / 14.0)))
-    explanation = f"Deadline in {days_until:.1f} days" if days_until > 0 else "Deadline is today or overdue"
+    # ── Score: use real wall-clock time to measure urgency from now ──────────
+    seconds_until = (deadline - now_real).total_seconds()
+    if seconds_until <= 0:
+        raw_score = 1.0
+        explanation = f"Deadline already passed ({explanation_hint})" if explanation_hint else "Deadline already passed"
+    else:
+        days_until = seconds_until / 86400.0
+        # Steep decay: full score at 0 days, 0 score at 14 days
+        raw_score = max(0.0, min(1.0, 1.0 - (days_until / 14.0)))
+        explanation = (
+            f"Deadline in {days_until:.1f} days ({explanation_hint})"
+            if explanation_hint
+            else f"Deadline in {days_until:.1f} days"
+        )
+
     return {"axis": "deadline", "raw_score": round(raw_score, 3), "explanation": explanation}
 
 
 @tool
-def score_authority_axis(sender_email: str) -> dict[str, Any]:
+def score_authority_axis(sender_email: str, subject: str = "", body: str = "") -> dict[str, Any]:
     """
     Score the email on the SENDER AUTHORITY axis (weight: 25%).
 
-    Classifies sender as C-suite, manager, internal peer, or external party
-    based on email domain and title keywords. Higher authority = higher score.
+    Checks three signal sources in descending priority:
+      1. Sender email address (domain + local-part keywords)
+      2. Subject line (e.g. "RE: CEO request", "From the Board")
+      3. Body text (e.g. "As your manager", "escalating to the CTO")
+
+    Returns the highest authority level found across all three sources.
 
     Args:
-        sender_email: The sender's email address (already PII-safe as it's metadata).
+        sender_email: The sender's email address.
+        subject: Email subject line.
+        body: PII-masked email body text.
 
     Returns:
         dict with keys: axis, raw_score (0-1), explanation.
     """
-    lower = sender_email.lower()
+    email_lower = sender_email.lower()
+    subject_lower = subject.lower()
+    # Limit body scan to first 500 chars — authority signals appear early
+    body_lower = body[:500].lower()
+    combined = f"{email_lower} {subject_lower} {body_lower}"
 
-    # C-suite / executive indicators
-    if any(kw in lower for kw in ["ceo", "cto", "cfo", "coo", "president", "vp", "director"]):
-        return {"axis": "authority", "raw_score": 1.0, "explanation": "Executive-level sender detected"}
+    # C-suite / board / executive
+    c_suite = ["ceo", "cto", "cfo", "coo", "president", "chairm", "board of director",
+               "executive director", "chief executive", "chief technology", "chief financial",
+               "chief operating", "evp", "svp", " vp ", "vice president"]
+    if any(kw in combined for kw in c_suite):
+        # Distinguish: is it the *sender* or a *mention* in the body?
+        if any(kw in email_lower or kw in subject_lower for kw in c_suite):
+            return {"axis": "authority", "raw_score": 1.0, "explanation": "C-suite / executive sender"}
+        return {"axis": "authority", "raw_score": 0.95, "explanation": "C-suite executive referenced in email"}
 
-    # Manager / lead indicators
-    if any(kw in lower for kw in ["manager", "lead", "head", "chief", "supervisor"]):
-        return {"axis": "authority", "raw_score": 0.8, "explanation": "Manager-level sender detected"}
+    # Director / senior leadership
+    director_kws = ["director", "head of", "global head", "senior director", "principal"]
+    if any(kw in combined for kw in director_kws):
+        return {"axis": "authority", "raw_score": 0.88, "explanation": "Director / senior leadership signal"}
 
-    # Client / partner (external high-priority)
-    if any(kw in lower for kw in ["client", "partner", "vendor", "customer"]):
-        return {"axis": "authority", "raw_score": 0.7, "explanation": "Client/partner sender"}
+    # Manager / team lead
+    manager_kws = ["manager", " lead ", "team lead", "supervisor", "your manager",
+                   "as your manager", "line manager", "reporting to"]
+    if any(kw in combined for kw in manager_kws):
+        return {"axis": "authority", "raw_score": 0.75, "explanation": "Manager / lead signal"}
 
-    # Internal peer (same domain heuristic)
-    if "@" in lower and not any(
-        domain in lower for domain in ["gmail.com", "yahoo.com", "hotmail.com", "outlook.com"]
-    ):
-        return {"axis": "authority", "raw_score": 0.5, "explanation": "Internal peer sender"}
+    # Client / partner / legal
+    external_high = ["client", "partner", "vendor", "customer", "legal", "compliance",
+                     "audit", "regulator", "investor", "board member"]
+    if any(kw in combined for kw in external_high):
+        return {"axis": "authority", "raw_score": 0.70, "explanation": "Client / partner / legal sender"}
 
-    return {"axis": "authority", "raw_score": 0.2, "explanation": "External or unknown sender"}
+    # Escalation language in body/subject (regardless of sender title)
+    escalation_kws = ["escalat", "escalating", "raising this", "looping in", "cc'd my manager",
+                      "cc'ing", "forwarding to", "bringing in"]
+    if any(kw in subject_lower or kw in body_lower for kw in escalation_kws):
+        return {"axis": "authority", "raw_score": 0.65, "explanation": "Escalation language detected"}
+
+    # Internal peer (non-consumer domain)
+    consumer_domains = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+                        "icloud.com", "aol.com", "protonmail.com"}
+    if "@" in email_lower:
+        domain = email_lower.split("@")[-1].strip()
+        if domain and domain not in consumer_domains:
+            return {"axis": "authority", "raw_score": 0.45, "explanation": f"Internal / corporate sender ({domain})"}
+
+    return {"axis": "authority", "raw_score": 0.20, "explanation": "External or unknown sender"}
 
 
 @tool

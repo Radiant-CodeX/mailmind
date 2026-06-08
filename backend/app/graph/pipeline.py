@@ -142,6 +142,8 @@ def run_pipeline(
         # Triage outputs
         "masked_body": None,
         "axes": [],
+        "dynamic_weights": {},
+        "email_type": None,
         "composite_score": 0.0,
         "priority": None,
         "approval_mode": None,
@@ -166,3 +168,21 @@ def run_pipeline(
         return graph.stream(initial_state)
 
     return graph.invoke(initial_state)
+
+
+def _load_rag_index() -> list[dict]:
+    """Load RAG index documents — shared by pipeline.py and agent_routes.py."""
+    import json
+    import os
+    index_path = os.getenv("CHROMA_DATA_PATH", "./data/chroma")
+    index_file = os.path.join(index_path, "index.json")
+    try:
+        with open(index_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _load_rag_index_safe() -> list[dict]:
+    """Alias used by the parallel enrichment endpoint."""
+    return _load_rag_index()

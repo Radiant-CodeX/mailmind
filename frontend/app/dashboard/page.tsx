@@ -17,8 +17,10 @@ import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
-import { checkAuthStatus, logoutUser } from '../../lib/api';
+import { checkAuthStatus, logoutUser, createCalendarEvent } from '../../lib/api';
 import { rememberLogin, getRememberMe, Provider } from '../../lib/session';
+import { userStorage } from '../../lib/userStorage';
+import { CalendarEvent } from '../../lib/types';
 
 export default function Home() {
   const router = useRouter();
@@ -43,6 +45,8 @@ export default function Home() {
           setUserEmail(data.user_principal_name);
           setIsMockMode(data.status === 'mock' || data.status === 'mock_unauthenticated');
           if (data.provider === 'google' || data.provider === 'microsoft') setProvider(data.provider);
+          // Scope all localStorage data to this user — prevents cross-account leaks.
+          if (data.user_principal_name) userStorage.setUser(data.user_principal_name);
           setCheckingAuth(false);
         } else {
           router.push('/');
@@ -65,6 +69,9 @@ export default function Home() {
 
   const MAIL_TABS = ['Inbox', 'Drafts', 'Sent', 'Spam', 'Trash', 'Starred', 'Important'];
   const activeFolder = MAIL_TABS.includes(activeTab) ? activeTab : 'Inbox';
+  // The AI pipeline (triage / commitments / draft reply) doesn't apply to mail
+  // you've already sent — hide it for the Sent folder.
+  const showPipeline = activeFolder !== 'Sent';
 
   const {
     emails,
@@ -120,7 +127,7 @@ export default function Home() {
     setActiveStyle,
     isSendingDraft,
     sendDraft,
-  } = useEmailDetail(selectedEmail);
+  } = useEmailDetail(selectedEmail, showPipeline, userEmail);
 
   const {
     commitments,
@@ -132,7 +139,10 @@ export default function Home() {
     eventUrls,
     toggleCommitment,
     confirmSelected,
-  } = useCommitments(selectedEmail?.id || null, selectedEmail?.body || null);
+  } = useCommitments(
+    showPipeline ? selectedEmail?.id || null : null,
+    showPipeline ? selectedEmail?.body || null : null,
+  );
 
   const {
     events: calendarEvents,
@@ -166,6 +176,8 @@ export default function Home() {
     } finally {
       // Always sign the user out locally and return to the login page, even if
       // the backend logout call failed.
+      // Clear all user-scoped cached data so the next user starts fresh.
+      userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);
       router.replace('/');
@@ -265,6 +277,7 @@ export default function Home() {
                   confirmSelectedCommitments={confirmSelected}
                   checkConflict={checkConflict}
                   onClose={() => setSelectedEmailId(null)}
+                  showPipeline={showPipeline}
                 />
               )}
             </>
@@ -276,6 +289,13 @@ export default function Home() {
               loading={calendarLoading}
               error={calendarError}
               onRefresh={loadCalendar}
+              onCreateEvent={async (event: Partial<CalendarEvent>) => {
+                await createCalendarEvent({
+                  title: event.title || '',
+                  start_time: event.start_time || '',
+                  end_time: event.end_time,
+                });
+              }}
             />
           )}
 

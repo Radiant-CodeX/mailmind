@@ -7,8 +7,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from openai import AzureOpenAI, OpenAI
-
 from app.config.settings import settings
 from app.services.graph import GraphClient
 from app.services.rag import RAGIndexFactory, RetrievalService, mask_pii
@@ -21,18 +19,27 @@ class DraftService:
     def __init__(self) -> None:
         self._tone_dna = ToneDNAService(GraphClient())
 
-    def _get_llm_client(self) -> tuple[OpenAI | AzureOpenAI | None, str]:
+    def _get_llm_client(self):
+        """
+        Return a LangChain AzureChatOpenAI client so that every draft generation
+        call is automatically traced in LangSmith (same client used by the agent nodes).
+        Returns None when credentials are missing — triggers mock draft fallback.
+        """
         if settings.use_mock_graph:
-            return None, ""
-        if settings.azure_openai_api_key and settings.azure_openai_endpoint:
-            return AzureOpenAI(
-                api_key=settings.azure_openai_api_key,
-                api_version="2024-02-01",
-                azure_endpoint=settings.azure_openai_endpoint,
-            ), settings.azure_openai_chat_deployment
-        elif settings.openai_api_key:
-            return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
-        return None, ""
+            return None
+        if settings.azure_openai_api_key and settings.azure_openai_base_endpoint:
+            try:
+                from langchain_openai import AzureChatOpenAI
+                return AzureChatOpenAI(
+                    azure_endpoint=settings.azure_openai_base_endpoint,
+                    azure_deployment=settings.azure_openai_chat_deployment,
+                    api_key=settings.azure_openai_api_key,
+                    api_version=settings.azure_openai_api_version,
+                    temperature=0.7,
+                )
+            except Exception as e:
+                logger.warning("LangChain AzureChatOpenAI init failed: %s", e)
+        return None
 
     def _get_clean_name(self, sender: str | None) -> str:
         if not sender:
@@ -62,12 +69,22 @@ class DraftService:
             f"I have received your email and am looking into the details. I will get back to you shortly.\n\nBest regards,\nMailMind Co-Pilot"
         )
 
+    def _get_user_display_name(self, email: str | None) -> str:
+        """Derive a first-name display from an email address (e.g. tarun.sharma@co.com → Tarun)."""
+        if not email:
+            return ""
+        local = email.split("@")[0]          # tarun.sharma  or  tarun_sharma
+        # Replace dots/underscores/hyphens with spaces, take the first word, title-case it.
+        first = local.replace(".", " ").replace("_", " ").replace("-", " ").split()[0]
+        return first.strip().title()
+
     def generate_draft(
         self,
         email_text: str,
         style: str,
         sender: str | None = None,
         subject: str | None = None,
+        current_user_email: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         style = style.lower()
         if style not in ("standard", "formal", "indepth"):
@@ -90,9 +107,13 @@ class DraftService:
             for item in precedents
         ]
 
-        client, model = self._get_llm_client()
+        client = self._get_llm_client()
         if not client:
             return self._generate_mock_draft(email_text, style, sender, subject), citations
+
+        # Derive the sender's display name and the current user's display name.
+        sender_name = self._get_clean_name(sender) if sender else "there"
+        user_name = self._get_user_display_name(current_user_email)
 
         # DNA-04: inject Tone DNA prefix
         tone_prefix = self._tone_dna.get_system_prefix(context=email_text)
@@ -106,34 +127,50 @@ class DraftService:
 
         style_map = {
             "formal": (
-                "Write a highly professional formal email. Use 'Dear {name}', avoid contractions, "
-                "sign off formally."
+                f"Write a highly professional formal email. "
+                f"Open with 'Dear {sender_name},' and sign off with 'Sincerely,' followed by your name."
             ),
             "indepth": (
-                "Write a comprehensive email with numbered action items, next steps, and invite collaboration."
+                f"Write a comprehensive email addressing {sender_name} with numbered action items, "
+                f"next steps, and an invitation to collaborate. Sign off with 'Best regards,' and your name."
             ),
-            "standard": "Write a concise, helpful, friendly reply addressing the key points.",
+            "standard": (
+                f"Write a concise, helpful, friendly reply to {sender_name} addressing the key points. "
+                f"Sign off with 'Best regards,' and your name."
+            ),
         }
+
+        # Tell the LLM exactly who is writing this reply so the sign-off is personalised.
+        identity_line = (
+            f"You are {user_name} ({current_user_email}). "
+            if user_name and current_user_email
+            else ""
+        )
 
         system_prompt = (
             f"{tone_prefix}"
-            f"Task: Generate a draft reply.\nStyle: {style_map[style]}\n\n{rag_context}\n\n"
-            f"Output ONLY the draft email content."
+            f"{identity_line}"
+            f"Task: Generate a draft reply on behalf of yourself.\n"
+            f"Style: {style_map[style]}\n\n"
+            f"{rag_context}\n\n"
+            f"IMPORTANT: Do NOT use placeholder names like 'John', 'Alice', '[Your Name]', or '[Name]'. "
+            f"Use the actual sender name '{sender_name}' and sign off as '{user_name or 'MailMind User'}'. "
+            f"Output ONLY the draft email content — no meta-commentary."
         )
         user_content = (
-            f"Subject: {subject or 'No Subject'}\nSender: {sender or 'unknown@example.com'}\n\n{email_text}"
+            f"Subject: {subject or 'No Subject'}\n"
+            f"From: {sender or 'unknown@example.com'}\n"
+            f"To: {current_user_email or 'me'}\n\n"
+            f"{email_text}"
         )
 
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_content},
-                ],
-                temperature=0.7,
-            )
-            return (response.choices[0].message.content or "").strip(), citations
+            from langchain_core.messages import HumanMessage, SystemMessage
+            response = client.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_content),
+            ])
+            return (response.content or "").strip(), citations
         except Exception as e:
             logger.error("Draft generation failed: %s", e)
             return self._generate_mock_draft(email_text, style, sender, subject), citations

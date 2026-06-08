@@ -1,6 +1,7 @@
 import React from 'react';
 import { Email } from '../../lib/types';
 import { EmailListItem } from './EmailListItem';
+import { EmailListSkeleton } from './EmailListSkeleton';
 import { SortMenu } from './SortMenu';
 import { FilterMenu } from './FilterMenu';
 import { SortKey, MailFilters } from '../../hooks/useEmails';
@@ -161,7 +162,9 @@ export function EmailList({
 
       {/* Email List container */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {emails.length === 0 ? (
+        {loading && emails.length === 0 ? (
+          <EmailListSkeleton />
+        ) : emails.length === 0 ? (
           <div className="p-8 text-center text-[var(--text-muted)] text-xs">
             No emails found
           </div>
@@ -179,6 +182,7 @@ export function EmailList({
               onSpam={showActions ? onReportSpam : undefined}
               onToggleRead={showActions ? onToggleRead : undefined}
               isFullWidth={isFullWidth}
+              triageApplies={['Inbox', 'Starred', 'Important'].includes(activeFolder)}
             />
           ))
         )}

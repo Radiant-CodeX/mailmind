@@ -11,15 +11,17 @@ import {
   archiveEmail as apiArchiveEmail,
   reportSpam as apiReportSpam,
 } from '../lib/api';
+import { userStorage } from '../lib/userStorage';
 
 // Persistent triage-score cache (by email id) so refreshes/page revisits don't
 // re-run the NLP classifier. Capped to avoid unbounded growth.
-const TRIAGE_CACHE_KEY = 'mailmind_triage_cache';
+// Keys are SCOPED to the current user via userStorage to prevent cross-account leaks.
+const TRIAGE_CACHE_KEY = 'triage_cache';
 type TriageLite = NonNullable<Email['triage']>;
 
 function readTriageCache(): Record<string, TriageLite> {
   if (typeof window === 'undefined') return {};
-  try { return JSON.parse(localStorage.getItem(TRIAGE_CACHE_KEY) || '{}'); } catch { return {}; }
+  try { return JSON.parse(userStorage.getItem(TRIAGE_CACHE_KEY) || '{}'); } catch { return {}; }
 }
 
 function writeTriageCache(entries: Record<string, { composite_score: number }>): void {
@@ -31,13 +33,13 @@ function writeTriageCache(entries: Record<string, { composite_score: number }>):
     const trimmed = keys.length > 1000
       ? Object.fromEntries(keys.slice(keys.length - 1000).map((k) => [k, merged[k]]))
       : merged;
-    localStorage.setItem(TRIAGE_CACHE_KEY, JSON.stringify(trimmed));
+    userStorage.setItem(TRIAGE_CACHE_KEY, JSON.stringify(trimmed));
   } catch {}
 }
 
 function readCachedEmails(folder: string): Email[] | null {
   if (typeof window === 'undefined') return null;
-  const raw = localStorage.getItem(`mailmind_emails_${folder}`);
+  const raw = userStorage.getItem(`emails_${folder}`);
   if (!raw) return null;
   try { return JSON.parse(raw) as Email[]; } catch { return null; }
 }
@@ -89,12 +91,12 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   // Lazy-init from the persisted preference (guarded for SSR).
   const [sortKey, setSortKeyState] = useState<SortKey>(() => {
     if (typeof window === 'undefined') return 'normal';
-    return (localStorage.getItem(SORT_STORAGE_KEY) as SortKey) || 'normal';
+    return (userStorage.getItem(SORT_STORAGE_KEY) as SortKey) || 'normal';
   });
 
   const setSortKey = useCallback((key: SortKey) => {
     setSortKeyState(key);
-    localStorage.setItem(SORT_STORAGE_KEY, key);
+    userStorage.setItem(SORT_STORAGE_KEY, key);
   }, []);
 
   const [filters, setFilters] = useState<MailFilters>(DEFAULT_FILTERS);
@@ -159,7 +161,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setTotal(page.total || mapped.length);
       nextTokenRef.current = page.next_page_token;
       if (token === null) {
-        localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(mapped));
+        userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(mapped));
       }
       setSelectedEmailId((prev) => (prev && mapped.some((e) => e.id === prev) ? prev : null));
 
@@ -196,8 +198,12 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     if (lastFolderRef.current !== activeFolder) {
       lastFolderRef.current = activeFolder;
       setSelectedEmailId(null);
+      // Paint this folder's cache instantly if present; otherwise CLEAR the list
+      // so the previous folder's emails don't linger under the new tab (this is
+      // what made Sent look like it "wasn't updating"). The skeleton shows until
+      // the fresh page arrives.
       const cached = readCachedEmails(activeFolder);
-      if (cached) setEmails(cached); // instant paint while page loads
+      setEmails(cached ?? []);
     }
     tokenStackRef.current = [null];
     setPageIndex(0);
@@ -287,11 +293,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       // Optimistic remove
       setEmails((prev) => {
         const next = prev.filter((e) => e.id !== emailId);
-        localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(next));
+        userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(next));
         return next;
       });
       setSelectedEmailId((prev) => (prev === emailId ? null : prev));
-      localStorage.removeItem('mailmind_emails_Trash');
+      userStorage.removeItem('emails_Trash');
 
       // Show toast with undo window
       setPendingTrash({ email: snapshot, startedAt: Date.now() });
@@ -322,7 +328,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     // Re-insert the email into the current list
     setEmails((prev) => {
       const next = [...prev, email];
-      localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(next));
+      userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(next));
       return next;
     });
   }, [pendingTrash, activeFolder, setEmails]);
@@ -339,11 +345,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     async (emailId: string) => {
       setEmails((prev) => {
         const next = prev.filter((e) => e.id !== emailId);
-        localStorage.setItem('mailmind_emails_Trash', JSON.stringify(next));
+        userStorage.setItem('emails_Trash', JSON.stringify(next));
         return next;
       });
       setSelectedEmailId((prev) => (prev === emailId ? null : prev));
-      localStorage.removeItem('mailmind_emails_Inbox');
+      userStorage.removeItem('emails_Inbox');
       try {
         await restoreEmailFromTrash(emailId);
       } catch (err) {
@@ -385,7 +391,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
 
   const archiveEmail = useCallback(async (emailId: string) => {
     removeFrom(emailId);
-    localStorage.removeItem('mailmind_emails_Archive');
+    userStorage.removeItem('emails_Archive');
     try {
       await apiArchiveEmail(emailId);
     } catch (err) {
@@ -396,7 +402,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
 
   const reportSpam = useCallback(async (emailId: string) => {
     removeFrom(emailId);
-    localStorage.removeItem('mailmind_emails_Spam');
+    userStorage.removeItem('emails_Spam');
     try {
       await apiReportSpam(emailId);
     } catch (err) {

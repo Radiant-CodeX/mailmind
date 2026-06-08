@@ -91,11 +91,24 @@ class CommitmentItem(BaseModel):
 
 
 class CommitmentExtractionRequest(BaseModel):
-    """Payload for extracting commitments from masked email body text."""
+    """Payload for extracting commitments from email body text.
 
-    masked_email_text: str
+    Accepts both ``body`` (raw frontend payload) and ``masked_email_text``
+    (pre-masked server-side payload) so the same schema works for both callers.
+    """
+
+    # Frontend sends "body"; internal callers send "masked_email_text"
+    body: Optional[str] = None
+    masked_email_text: Optional[str] = None
     thread_summary: Optional[str] = None
     email_id: Optional[str] = None
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    received_at: Optional[str] = None
+
+    def get_text(self) -> str:
+        """Return the email body, preferring masked_email_text over body."""
+        return self.masked_email_text or self.body or ""
 
 
 class CommitmentExtractionResponse(BaseModel):
@@ -119,6 +132,9 @@ class DraftRequest(BaseModel):
     style: str  # "standard" | "formal" | "indepth"
     sender: Optional[str] = None
     subject: Optional[str] = None
+    # The logged-in user's email — used to personalise the sign-off in the draft
+    # so it says "Best regards, Tarun" instead of a generic placeholder.
+    current_user_email: Optional[str] = None
 
 
 class DraftResponse(BaseModel):

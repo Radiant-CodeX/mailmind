@@ -25,7 +25,19 @@ export function Sidebar({
   onLogoutClick,
   onComposeClick,
 }: SidebarProps) {
-  const accountLabel = provider === 'google' ? 'Google Account' : 'Microsoft Account';
+  // Show the user's name (derived from their email local-part) rather than a
+  // generic "Microsoft Account" label. Falls back to the provider label when
+  // no email is known.
+  const accountLabel = React.useMemo(() => {
+    if (!userEmail) return provider === 'google' ? 'Google Account' : 'Microsoft Account';
+    const local = userEmail.split('@')[0];
+    const name = local
+      .split(/[._-]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+    return name || userEmail;
+  }, [userEmail, provider]);
   const [isMoreExpanded, setIsMoreExpanded] = React.useState(false);
 
   const primaryItems = [
@@ -127,16 +139,16 @@ export function Sidebar({
 
   return (
     <aside
-      className={`bg-[var(--bg-surface)] border-r border-[var(--border)] flex flex-col justify-between shrink-0 h-screen transition-all duration-300 ease-in-out ${
+      className={`bg-[var(--bg-surface)] border-r border-[var(--border)] flex flex-col shrink-0 h-screen transition-all duration-300 ease-in-out ${
         isCollapsed ? 'w-16' : 'w-64'
       }`}
       id="sidebar"
     >
-      <div>
+      <div className="flex flex-col flex-1 min-h-0">
         {/* Brand Header: Clickable logo toggle trigger (No hamburger menu button) */}
         <div
           onClick={onToggleCollapse}
-          className="h-16 flex items-center px-4 border-b border-[var(--border-subtle)] overflow-hidden cursor-pointer hover:bg-[var(--bg-elevated)]/20 transition-all"
+          className="h-16 shrink-0 flex items-center px-4 border-b border-[var(--border-subtle)] overflow-hidden cursor-pointer hover:bg-[var(--bg-elevated)]/20 transition-all"
           title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
           id="brand-header-toggle"
         >
@@ -175,7 +187,7 @@ export function Sidebar({
         )}
 
         {/* Navigation items */}
-        <nav className="p-3 space-y-1.5 max-h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">
+        <nav className="p-3 space-y-1.5 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           {/* Primary items */}
           {primaryItems.map((item) => {
             const isActive = activeTab === item.name;
@@ -273,7 +285,7 @@ export function Sidebar({
       </div>
 
       {/* User Footer Profile */}
-      <div className="p-3 border-t border-[var(--border-subtle)] flex flex-col justify-center bg-[var(--border-subtle)]/30 min-h-[68px] overflow-hidden text-left">
+      <div className="p-3 shrink-0 border-t border-[var(--border-subtle)] flex flex-col justify-center bg-[var(--border-subtle)]/30 min-h-[68px] overflow-hidden text-left">
         {isCollapsed ? (
           authenticated ? (
             <button

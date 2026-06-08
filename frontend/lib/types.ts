@@ -12,6 +12,9 @@ export interface TriageResult {
   composite_score: number;
   priority: Priority;
   approval_mode: ApprovalMode;
+  email_type?: string;
+  triage_reasoning?: string;
+  dynamic_weights?: Record<string, number>;
 }
 
 export interface ClassificationResult {
@@ -42,6 +45,8 @@ export interface CommitmentItem {
   confirmed?: boolean;
   task_url?: string;
   event_url?: string;
+  conflict_badge?: boolean;
+  conflict_detail?: string | null;
 }
 
 export interface PrecedentItem {

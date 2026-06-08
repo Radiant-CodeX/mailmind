@@ -13,10 +13,15 @@ interface EmailListItemProps {
   onSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
   isFullWidth: boolean;
+  /** Whether triage scoring applies to this folder (false for Sent/Drafts/etc). */
+  triageApplies?: boolean;
 }
 
-export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, isFullWidth }: EmailListItemProps) {
+export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, isFullWidth, triageApplies = true }: EmailListItemProps) {
   const isUnread = email.isRead === false;
+  // Triage score is still being computed when the folder uses triage but this
+  // email has no triage object yet — show a shimmer instead of a misleading 0.
+  const scorePending = triageApplies && email.triage === undefined;
 
   const ReadButton = onToggleRead ? (
     <button
@@ -171,7 +176,9 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
 
           {/* 3. Rightmost column: Score, Priority, Star */}
           <div className="flex items-center gap-4 shrink-0">
-            {email.composite_score !== undefined && (
+            {scorePending ? (
+              <span className="w-7 h-4 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+            ) : triageApplies && email.composite_score !== undefined && (
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
                 priority === 'CRITICAL' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
                 priority === 'HIGH' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' :
@@ -181,8 +188,8 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
                 {email.composite_score}
               </span>
             )}
-            
-            <PriorityBadge priority={priority} />
+
+            {triageApplies && <PriorityBadge priority={priority} />}
 
             <button
               onClick={(e) => {
@@ -240,7 +247,9 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
           {email.sender.split('@')[0]}
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
-          {email.composite_score !== undefined && (
+          {scorePending ? (
+            <span className="w-7 h-4 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+          ) : triageApplies && email.composite_score !== undefined && (
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
               priority === 'CRITICAL' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
               priority === 'HIGH' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' :
