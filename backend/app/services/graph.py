@@ -34,7 +34,6 @@ def _graph_html_to_text(html: str) -> str:
 # offline_access is required to receive a refresh token so sessions survive past 1 hour
 # without requiring the user to re-authenticate (Azure offline_access permission enabled).
 _DELEGATED_SCOPES = [
-    "offline_access",           # refresh token — keeps session alive indefinitely
     "User.Read",
     "Mail.ReadWrite", "Mail.Send",
     "Calendars.ReadWrite",
