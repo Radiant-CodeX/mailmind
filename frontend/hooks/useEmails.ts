@@ -585,10 +585,10 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       });
       setSelectedEmailId((prev) => (prev === emailId ? null : prev));
 
-      // Show toast with undo window
+      // Show toast with undo window (3 seconds)
       setPendingTrash({ email: snapshot, startedAt: Date.now() });
 
-      // Fire API after 5 s — cancelled if user hits Undo
+      // Fire API after 3 s — cancelled if user hits Undo
       trashTimerRef.current = setTimeout(async () => {
         trashTimerRef.current = null;
         setPendingTrash(null);
@@ -598,9 +598,10 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
           clearEmailCache(activeFolder);
           clearEmailCache('Trash'); // Email was moved to Trash
 
-          // Auto-fetch next email if page dropped below half size and more exist on server
+          // Auto-fetch next email in background (don't await — non-blocking)
+          // Only fetch if page dropped below half size and more exist on server
           if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
-            await nextPage();
+            nextPage().catch((err) => console.error('Failed to fetch next page', err));
           }
         } catch (err) {
           console.error(`Failed to move email ${emailId} to trash`, err);
@@ -608,7 +609,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
           clearEmailCache(activeFolder);
           await loadEmails();
         }
-      }, 5000);
+      }, 3000);
     },
     [activeFolder, setEmails, loadEmails, nextPage]
   );
@@ -653,9 +654,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
         clearEmailCache('Trash');
         clearEmailCache('Inbox');
 
-        // Auto-fetch next email if page dropped below half size and more exist on server
+        // Auto-fetch next email in background (non-blocking)
         if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
-          await nextPage();
+          nextPage().catch((err) => console.error('Failed to fetch next page', err));
         }
       } catch (err) {
         console.error(`Failed to restore email ${emailId}`, err);
@@ -711,9 +712,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       clearEmailCache(activeFolder);
       clearEmailCache('Archive');
 
-      // Auto-fetch next email if page dropped below half size and more exist on server
+      // Auto-fetch next email in background (non-blocking)
       if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
-        await nextPage();
+        nextPage().catch((err) => console.error('Failed to fetch next page', err));
       }
     } catch (err) {
       console.error(`Failed to archive ${emailId}`, err);
@@ -738,9 +739,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       clearEmailCache(activeFolder);
       clearEmailCache('Spam');
 
-      // Auto-fetch next email if page dropped below half size and more exist on server
+      // Auto-fetch next email in background (non-blocking)
       if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
-        await nextPage();
+        nextPage().catch((err) => console.error('Failed to fetch next page', err));
       }
     } catch (err) {
       console.error(`Failed to report spam ${emailId}`, err);
