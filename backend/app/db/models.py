@@ -48,6 +48,7 @@ class EmailEnrichment(Base):
     __tablename__ = "email_enrichment"
 
     email_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_email: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
     sender: Mapped[str] = mapped_column(String(320), nullable=False)
     subject: Mapped[str | None] = mapped_column(Text, nullable=True)
     masked_body: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -85,6 +86,7 @@ class EmailEnrichment(Base):
     __table_args__ = (
         Index("ix_enrichment_priority", "priority"),
         Index("ix_enrichment_created_at", "created_at"),
+        Index("ix_enrichment_user_email", "user_email"),
     )
 
 
@@ -102,6 +104,26 @@ class AuditLog(Base):
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
+class ToneProfile(Base):
+    """
+    Stylometric profile built from a user's sent-mail history (Tone DNA).
+
+    One row per user — upserted whenever the profile is rebuilt.
+    The ``profile`` JSON column stores the full feature dict produced by
+    ``tone_dna.build_profile()``.
+    """
+
+    __tablename__ = "tone_profile"
+
+    user_email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    profile: Mapped[dict] = mapped_column(JSON, nullable=False)
+    sample_size: Mapped[int] = mapped_column(Integer, default=0)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
 

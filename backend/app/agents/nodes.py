@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import uuid
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -269,8 +270,10 @@ def _validate_axes(raw_axes: Any) -> list[dict]:
             continue
         seen.add(axis)
 
-        # Accept both "score" (new slim format) and "raw_score" (legacy)
-        score_val = item.get("score") or item.get("raw_score", 0.0)
+        # Accept both "score" (new slim format) and "raw_score" (legacy).
+        # Explicit None check avoids the `0.0 or fallback` pitfall.
+        _s = item.get("score")
+        score_val = _s if _s is not None else item.get("raw_score", 0.0)
 
         cleaned.append({
             "axis": axis,
@@ -294,21 +297,22 @@ def _validate_axes(raw_axes: Any) -> list[dict]:
 _TRIAGE_SYSTEM_PROMPT = (
     "You are MailMind's Triage for an enterprise inbox. "
     "Assess the BUSINESS urgency of one email and respond with JSON ONLY.\n\n"
-    "Score these FIVE axes (0.0–1.0):\n"
+    "Score these FIVE axes from 0.0 (none) to 1.0 (maximum):\n"
     "  deadline: time pressure from any explicit/implied due date\n"
     "  authority: stakeholder power of sender/referenced people\n"
     "  sentiment: emotional urgency, frustration, or escalation\n"
     "  thread_risk: business/relationship risk if ignored or delayed\n"
     "  action: how strongly a direct response or action is required\n\n"
-    "Anchor relative dates to the email's received timestamp.\n\n"
-    'Respond with EXACTLY this JSON (no markdown):\n'
+    "Anchor relative dates to the email's received timestamp. "
+    "Use the full 0.0–1.0 range — reflect actual urgency, not a template.\n\n"
+    'Output format (no markdown, replace scores with real values):\n'
     '{"email_type":"<category>",'
     '"axes":['
-    '{"axis":"deadline","score":0.0,"explanation":"<1 sentence>"},'
-    '{"axis":"authority","score":0.0,"explanation":"<1 sentence>"},'
-    '{"axis":"sentiment","score":0.0,"explanation":"<1 sentence>"},'
-    '{"axis":"thread_risk","score":0.0,"explanation":"<1 sentence>"},'
-    '{"axis":"action","score":0.0,"explanation":"<1 sentence>"}'
+    '{"axis":"deadline","score":0.6,"explanation":"<1 sentence>"},'
+    '{"axis":"authority","score":0.5,"explanation":"<1 sentence>"},'
+    '{"axis":"sentiment","score":0.4,"explanation":"<1 sentence>"},'
+    '{"axis":"thread_risk","score":0.3,"explanation":"<1 sentence>"},'
+    '{"axis":"action","score":0.7,"explanation":"<1 sentence>"}'
     ']}'
 )
 
@@ -330,7 +334,7 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
     - Slimmed output schema: removed evidence, dynamic_weights, composite_score, overall_reasoning
     - Pre-built system prompt (module-level constant, not rebuilt per call)
     - Body truncated to 1500 chars (LLM doesn't need full body for triage scoring)
-    - max_tokens=200 cap (slimmed JSON is ~80-120 tokens; ~3x faster than previous 600)
+    - max_tokens=400 cap (5-axis JSON with explanations ~150-200 tokens; headroom for longer explanations)
     - Composite score + weights recomputed in Python (never trust LLM values)
     - Deterministic fallback unchanged
 
@@ -356,14 +360,15 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
                 f"Body:\n{body_for_triage}"
             )
 
-            # max_tokens cap: slimmed triage JSON averages ~80-120 tokens; 200 is generous.
-            # This is a 3x reduction from the previous 600, cutting inference time accordingly.
-            triage_llm = llm.bind(max_tokens=200)
+            # max_tokens cap: 5-axis JSON with explanations averages ~150-200 tokens;
+            # 400 is a safe ceiling that still keeps inference fast.
+            triage_llm = llm.bind(max_tokens=400)
             response: AIMessage = triage_llm.invoke([
                 SystemMessage(content=_TRIAGE_SYSTEM_PROMPT),
                 HumanMessage(content=user_prompt),
             ])
 
+            logger.debug("[TRIAGE] raw LLM response: %s", response.content[:300])
             data = _parse_triage_json(response.content)
 
             axes = _validate_axes(data.get("axes"))
@@ -482,7 +487,7 @@ def commitment_node(state: EmailAgentState) -> dict[str, Any]:
                 confidence = float(item.get("confidence", 0.5))
                 if confidence >= 0.80:  # Confidence gate
                     commitments.append({
-                        "id": str(_uuid.uuid4()),
+                        "id": str(uuid.uuid4()),
                         "commitment": item.get("commitment", ""),
                         "deadline": item.get("deadline"),
                         "confidence": confidence,

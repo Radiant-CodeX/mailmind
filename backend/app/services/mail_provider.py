@@ -47,10 +47,20 @@ _provider_session: dict[str, Any] = _load()
 
 def set_provider(provider: Provider, email: str | None = None) -> None:
     """Mark a session active for a provider (called on login / resume)."""
+    previous_email = _provider_session.get("email")
     _provider_session["provider"] = provider
     _provider_session["email"] = email
     _provider_session["active"] = True
     _save()
+
+    # Clear in-memory caches whenever the active user changes so the incoming
+    # user cannot see data cached for a previous user in the same process.
+    if email != previous_email:
+        try:
+            from app.services.cache import clear_all_user_caches
+            clear_all_user_caches()
+        except Exception:
+            pass
 
 
 def deactivate() -> None:

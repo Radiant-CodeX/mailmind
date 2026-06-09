@@ -28,14 +28,16 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr
 
+from app.api.deps import get_current_user
 from app.db import repository as repo
 from app.graph.pipeline import run_pipeline
 from app.monitoring.metrics import set_queue_depth, track_stage
 from app.queue.backends import get_queue_backend
+from app.services.mail_provider import active_email
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +252,7 @@ async def stream_pipeline(request: AgentProcessRequest) -> StreamingResponse:
     )
 
 
-def _run_triage_for_email(request: TriageOnlyRequest) -> dict[str, Any]:
+def _run_triage_for_email(request: TriageOnlyRequest, user_email: str = "") -> dict[str, Any]:
     """
     Core triage logic with 3-level cache: Redis → DB → LangGraph LLM.
     Used by both /triage (single) and /triage-page (batch).
@@ -258,30 +260,35 @@ def _run_triage_for_email(request: TriageOnlyRequest) -> dict[str, Any]:
     from app.services.cache import triage_cache_store
 
     # ── Level 1: Redis cache (sub-ms) ────────────────────────────────────────
-    cached = triage_cache_store.get(request.email_id)
+    cached = triage_cache_store.get(request.email_id, user_email=user_email)
     if cached and cached.get("priority"):
         logger.info("[triage] Redis hit for %s", request.email_id)
         return {**cached, "_cached": "redis"}
 
     # ── Level 2: DB cache (1-5ms) ────────────────────────────────────────────
-    existing = repo.get_enrichment(request.email_id)
+    existing = repo.get_enrichment(request.email_id, user_email=user_email)
     if existing and existing.get("priority"):
-        logger.info("[triage] DB hit for %s", request.email_id)
-        result = {
-            "email_id": request.email_id,
-            "email_type": existing.get("email_type"),
-            "composite_score": existing.get("composite_score", 0.0),
-            "priority": existing["priority"],
-            "approval_mode": existing.get("approval_mode", "SUGGEST"),
-            "axes": existing.get("axes") or [],
-            "dynamic_weights": existing.get("dynamic_weights") or {},
-            "triage_reasoning": existing.get("triage_reasoning"),
-            "errors": [],
-            "_cached": "db",
-        }
-        # Warm Redis so next call is even faster
-        triage_cache_store.set(request.email_id, result)
-        return result
+        cached_score = existing.get("composite_score") or 0.0
+        # Skip the DB hit if composite_score == 0.0 — this indicates a broken
+        # prior run (e.g. before the max_tokens fix). Re-triage to get real score.
+        if cached_score > 0.0:
+            logger.info("[triage] DB hit for %s (score=%.1f)", request.email_id, cached_score)
+            result = {
+                "email_id": request.email_id,
+                "email_type": existing.get("email_type"),
+                "composite_score": cached_score,
+                "priority": existing["priority"],
+                "approval_mode": existing.get("approval_mode", "SUGGEST"),
+                "axes": existing.get("axes") or [],
+                "dynamic_weights": existing.get("dynamic_weights") or {},
+                "triage_reasoning": existing.get("triage_reasoning"),
+                "errors": [],
+                "_cached": "db",
+            }
+            # Warm Redis so next call is even faster
+            triage_cache_store.set(request.email_id, result, user_email=user_email)
+            return result
+        logger.info("[triage] DB hit for %s has score=0 — re-triaging", request.email_id)
 
     # ── Level 3: LangGraph LLM (fresh triage) ────────────────────────────────
     received = request.received_at or datetime.now(tz=timezone.utc).isoformat()
@@ -297,44 +304,50 @@ def _run_triage_for_email(request: TriageOnlyRequest) -> dict[str, Any]:
         "draft_prompt": None, "draft_reply": None,
         "current_step": "pending", "errors": [], "approved": False,
     }
-    state.update(ingest_node(state))
-    state.update(triage_node(state))
+    try:
+        state.update(ingest_node(state))
+        state.update(triage_node(state))
 
-    mapping = state.get("mask_mapping")
-    if mapping:
-        from app.services.pii import pii_sanitizer
-        if state.get("triage_reasoning"):
-            state["triage_reasoning"] = pii_sanitizer.restore_text(state["triage_reasoning"], mapping)
+        mapping = state.get("mask_mapping")
+        if mapping:
+            from app.services.pii import pii_sanitizer
+            if state.get("triage_reasoning"):
+                state["triage_reasoning"] = pii_sanitizer.restore_text(state["triage_reasoning"], mapping)
 
-    result = {
-        "email_id": state["email_id"],
-        "email_type": state.get("email_type"),
-        "composite_score": state["composite_score"],
-        "priority": state["priority"],
-        "approval_mode": state["approval_mode"],
-        "axes": state["axes"],
-        "dynamic_weights": state.get("dynamic_weights", {}),
-        "triage_reasoning": state.get("triage_reasoning"),
-        "errors": state.get("errors", []),
-        "_cached": False,
-    }
+        result = {
+            "email_id": state["email_id"],
+            "email_type": state.get("email_type"),
+            "composite_score": state["composite_score"],
+            "priority": state["priority"],
+            "approval_mode": state["approval_mode"],
+            "axes": state["axes"],
+            "dynamic_weights": state.get("dynamic_weights", {}),
+            "triage_reasoning": state.get("triage_reasoning"),
+            "errors": state.get("errors", []),
+            "_cached": False,
+        }
 
-    # Persist to DB + Redis so next call is instant
-    repo.upsert_enrichment(request.email_id, state, status="triaged", enrichment_source="fast_triage")
-    repo.write_audit(request.email_id, "triaged", details={"priority": state.get("priority")})
-    triage_cache_store.set(request.email_id, result)
-    logger.info("[triage] LLM triage complete for %s → %s", request.email_id, state.get("priority"))
-    return result
+        # Persist to DB + Redis so next call is instant
+        repo.upsert_enrichment(request.email_id, state, user_email=user_email, status="triaged", enrichment_source="fast_triage")
+        repo.write_audit(request.email_id, "triaged", details={"priority": state.get("priority")})
+        triage_cache_store.set(request.email_id, result, user_email=user_email)
+        logger.info("[triage] LLM triage complete for %s → %s (score=%.1f)",
+                    request.email_id, state.get("priority"), state.get("composite_score", 0.0))
+        return result
+
+    except Exception as exc:
+        logger.error("[triage] Unexpected error for %s: %s", request.email_id, exc, exc_info=True)
+        raise
 
 
 @router.post("/triage")
-def triage_only(request: TriageOnlyRequest) -> dict[str, Any]:
+def triage_only(request: TriageOnlyRequest, current_user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Single email triage — Redis → DB → LLM (3-level cache)."""
-    return _run_triage_for_email(request)
+    return _run_triage_for_email(request, user_email=current_user)
 
 
 @router.post("/triage-page")
-def triage_page(requests: list[TriageOnlyRequest]) -> list[dict[str, Any]]:
+def triage_page(requests: list[TriageOnlyRequest], current_user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """
     Batch triage for a single inbox page (up to 10 emails).
 
@@ -354,16 +367,17 @@ def triage_page(requests: list[TriageOnlyRequest]) -> list[dict[str, Any]]:
     from app.services.cache import triage_cache_store
 
     for i, req in enumerate(requests):
-        cached = triage_cache_store.get(req.email_id)
+        cached = triage_cache_store.get(req.email_id, user_email=current_user)
         if cached and cached.get("priority"):
             results[i] = {**cached, "_cached": "redis"}
             continue
-        existing = repo.get_enrichment(req.email_id)
-        if existing and existing.get("priority"):
+        existing = repo.get_enrichment(req.email_id, user_email=current_user)
+        cached_score = (existing.get("composite_score") or 0.0) if existing else 0.0
+        if existing and existing.get("priority") and cached_score > 0.0:
             r = {
                 "email_id": req.email_id,
                 "email_type": existing.get("email_type"),
-                "composite_score": existing.get("composite_score", 0.0),
+                "composite_score": cached_score,
                 "priority": existing["priority"],
                 "approval_mode": existing.get("approval_mode", "SUGGEST"),
                 "axes": existing.get("axes") or [],
@@ -372,7 +386,7 @@ def triage_page(requests: list[TriageOnlyRequest]) -> list[dict[str, Any]]:
                 "errors": [],
                 "_cached": "db",
             }
-            triage_cache_store.set(req.email_id, r)
+            triage_cache_store.set(req.email_id, r, user_email=current_user)
             results[i] = r
         else:
             misses.append((i, req))
@@ -383,7 +397,7 @@ def triage_page(requests: list[TriageOnlyRequest]) -> list[dict[str, Any]]:
     # Run LLM only for misses, 2 at a time
     if misses:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {executor.submit(_run_triage_for_email, req): idx for idx, req in misses}
+            futures = {executor.submit(_run_triage_for_email, req, current_user): idx for idx, req in misses}
             for future, idx in futures.items():
                 try:
                     results[idx] = future.result(timeout=30)
@@ -414,7 +428,7 @@ def _fresh_state(email_id: str, sender: str, subject: str, body: str, received_a
 
 
 @router.post("/triage-async")
-def triage_async(request: TriageOnlyRequest) -> dict[str, Any]:
+def triage_async(request: TriageOnlyRequest, current_user: str = Depends(get_current_user)) -> dict[str, Any]:
     """
     Production critical path: synchronous triage + deferred enrichment.
 
@@ -431,6 +445,7 @@ def triage_async(request: TriageOnlyRequest) -> dict[str, Any]:
     state = _fresh_state(
         request.email_id, request.sender, request.subject, request.body, received
     )
+    state["user_email"] = current_user
 
     with track_stage("triage", request.email_id):
         state.update(ingest_node(state))
@@ -438,7 +453,7 @@ def triage_async(request: TriageOnlyRequest) -> dict[str, Any]:
 
     # Persist the triage result immediately so the inbox can render it.
     repo.upsert_enrichment(
-        request.email_id, state, status="enriching", enrichment_source="fast_triage"
+        request.email_id, state, user_email=current_user, status="enriching", enrichment_source="fast_triage"
     )
     repo.write_audit(request.email_id, "triaged", details={"priority": state.get("priority")})
 
@@ -611,14 +626,14 @@ def enrich_email(request: EnrichRequest) -> dict[str, Any]:
 
 
 @router.get("/result/{email_id}")
-def get_result(email_id: str) -> dict[str, Any]:
+def get_result(email_id: str, current_user: str = Depends(get_current_user)) -> dict[str, Any]:
     """
     Fetch the persisted enrichment result for a previously-triaged email.
 
     Returns 404 while still enriching (or if persistence is disabled). Clients
     poll this after ``/triage-async`` until ``status == "complete"``.
     """
-    record = repo.get_enrichment(email_id)
+    record = repo.get_enrichment(email_id, user_email=current_user)
     if record is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

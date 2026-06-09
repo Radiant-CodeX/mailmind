@@ -39,14 +39,8 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logging.warning(f"Database init skipped: {_e}")
 
-    # DNA-01: Build Tone DNA profile on startup if not yet present
-    from app.services.graph import GraphClient
-    from app.services.tone_dna import ToneDNAService, load_profile
-    if not load_profile():
-        try:
-            ToneDNAService(GraphClient()).ingest_and_build()
-        except Exception as _e:
-            logging.warning(f"Tone DNA build skipped on startup: {_e}")
+    # Tone DNA profiles are built on demand via POST /api/tone-dna/build — not
+    # on startup — because we don't have a user identity at boot time.
     try:
         import spacy
         spacy.load("en_core_web_sm")

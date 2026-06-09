@@ -1,9 +1,24 @@
 """
 MailMind v2 — Tone DNA Service (DNA-01 to DNA-05)
-Builds a stylometric profile from sent mail history.
+
+How it works
+------------
+1. **Ingest**: fetch up to 180 days of the user's *sent* mail via the active
+   mail provider (Microsoft Graph or Gmail).
+2. **Analyse**: run 8 pure-Python stylometric measures over the combined body
+   text — no ML model required (see `build_profile` for the feature list).
+3. **Persist**: write the resulting dict to the DB (`tone_profile` table keyed
+   by `user_email`) AND to a per-user JSON file under `data/tone_dna/` as a
+   fast fallback for when the DB is unreachable or not configured.
+4. **Inject**: `get_system_prefix()` converts the profile into a Tone DNA
+   system-prompt prefix that DraftService prepends before every LLM call so
+   the generated reply sounds like the user wrote it.
+5. **Refresh**: a background thread re-runs the ingest 7 days after every
+   successful build so the profile tracks how the user's style evolves.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -14,7 +29,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-PROFILE_PATH = Path("data/tone_dna_profile.json")
+# ── Per-user file path (fallback / dev-mode cache) ───────────────────────────
+
+def _profile_path(user_email: str) -> Path:
+    """Deterministic per-user path that avoids special chars in filenames."""
+    slug = hashlib.md5(user_email.strip().lower().encode()).hexdigest()
+    return Path("data/tone_dna") / f"{slug}.json"
+
+
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 CONTEXT_OVERRIDES = {
     "complaint":      {"formality_delta": +0.15},
@@ -32,9 +55,10 @@ INFORMAL_MARKERS = [
 ]
 
 
+# ── Feature extractors ────────────────────────────────────────────────────────
+
 def _avg_sentence_length(text: str) -> float:
-    sentences = re.split(r"[.!?]+", text)
-    sentences = [s.strip() for s in sentences if s.strip()]
+    sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
     if not sentences:
         return 0.0
     return sum(len(s.split()) for s in sentences) / len(sentences)
@@ -47,8 +71,7 @@ def _formality_score(text: str) -> float:
         return 0.5
     formal = sum(1 for m in FORMALITY_MARKERS if m in lower)
     informal = sum(1 for m in INFORMAL_MARKERS if m in lower)
-    score = 0.5 + (formal - informal) * 0.05
-    return round(max(0.0, min(1.0, score)), 3)
+    return round(max(0.0, min(1.0, 0.5 + (formal - informal) * 0.05)), 3)
 
 
 def _greeting_patterns(texts: list[str]) -> list[str]:
@@ -74,9 +97,7 @@ def _signoff_patterns(texts: list[str]) -> list[str]:
 def _contraction_rate(text: str) -> float:
     contractions = re.findall(r"\b\w+'\w+\b", text)
     words = text.split()
-    if not words:
-        return 0.0
-    return round(len(contractions) / len(words), 3)
+    return round(len(contractions) / len(words), 3) if words else 0.0
 
 
 def _bullet_preference(text: str) -> float:
@@ -91,9 +112,7 @@ def _emoji_rate(text: str) -> float:
     )
     emojis = emoji_pattern.findall(text)
     words = text.split()
-    if not words:
-        return 0.0
-    return round(len(emojis) / len(words), 4)
+    return round(len(emojis) / len(words), 4) if words else 0.0
 
 
 def _top_vocabulary(texts: list[str], n: int = 100) -> list[str]:
@@ -110,59 +129,109 @@ def _top_vocabulary(texts: list[str], n: int = 100) -> list[str]:
     return [w for w, _ in sorted(freq.items(), key=lambda x: -x[1])[:n]]
 
 
+# ── Profile build / load / save ───────────────────────────────────────────────
+
 def build_profile(emails: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build a Tone DNA profile from a list of sent email dicts."""
+    """
+    Compute the 8 stylometric features from a list of sent-email dicts.
+
+    Each dict must have at least a ``"body"`` key.  Returns the full profile
+    dict (does NOT write to disk or DB — callers do that).
+    """
     bodies = [str(e.get("body", "")) for e in emails if e.get("body")]
     all_text = "\n\n".join(bodies)
 
-    profile = {
-        "profile_version": 2,
+    return {
+        "profile_version": 3,
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "sample_size": len(bodies),
         "features": {
-            "avg_sentence_length": round(_avg_sentence_length(all_text), 2),
-            "formality_score": _formality_score(all_text),
-            "greeting_patterns": _greeting_patterns(bodies),
-            "signoff_patterns": _signoff_patterns(bodies),
-            "contraction_rate": _contraction_rate(all_text),
+            "avg_sentence_length":    round(_avg_sentence_length(all_text), 2),
+            "formality_score":        _formality_score(all_text),
+            "greeting_patterns":      _greeting_patterns(bodies),
+            "signoff_patterns":       _signoff_patterns(bodies),
+            "contraction_rate":       _contraction_rate(all_text),
             "bullet_point_preference": _bullet_preference(all_text),
-            "vocabulary_top_100": _top_vocabulary(bodies),
-            "emoji_rate": _emoji_rate(all_text),
+            "vocabulary_top_100":     _top_vocabulary(bodies),
+            "emoji_rate":             _emoji_rate(all_text),
         },
         "context_overrides": CONTEXT_OVERRIDES,
     }
-    PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PROFILE_PATH.write_text(json.dumps(profile, indent=2))
-    logger.info(f"Tone DNA profile built from {len(bodies)} emails.")
-    return profile
 
 
-def load_profile() -> dict[str, Any] | None:
-    if PROFILE_PATH.exists():
-        return json.loads(PROFILE_PATH.read_text())
+def load_profile(user_email: str) -> dict[str, Any] | None:
+    """
+    Load the profile for *user_email*.
+
+    Priority:
+      1. Database (authoritative — persists across deploys / container restarts)
+      2. Local JSON file under ``data/tone_dna/`` (dev-mode fallback)
+    """
+    # 1. DB
+    try:
+        from app.db.repository import get_tone_profile
+        profile = get_tone_profile(user_email)
+        if profile:
+            return profile
+    except Exception as exc:
+        logger.debug("[ToneDNA] DB load skipped: %s", exc)
+
+    # 2. File fallback
+    path = _profile_path(user_email)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning("[ToneDNA] File load failed for %s: %s", user_email, exc)
+
     return None
 
 
-def needs_refresh(profile: dict[str, Any]) -> bool:
-    generated = datetime.fromisoformat(profile["generated_at"].replace("Z", ""))
-    return datetime.utcnow() - generated > timedelta(days=7)
+def save_profile(user_email: str, profile: dict[str, Any]) -> None:
+    """
+    Persist the profile for *user_email* to DB (primary) and local file (fallback).
 
+    Both writes are best-effort — a failure in one does not abort the other.
+    """
+    # 1. DB
+    try:
+        from app.db.repository import save_tone_profile
+        save_tone_profile(user_email, profile)
+        logger.info("[ToneDNA] Profile saved to DB for %s", user_email)
+    except Exception as exc:
+        logger.warning("[ToneDNA] DB save failed for %s: %s", user_email, exc)
+
+    # 2. File fallback
+    try:
+        path = _profile_path(user_email)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[ToneDNA] File save failed for %s: %s", user_email, exc)
+
+
+def needs_refresh(profile: dict[str, Any]) -> bool:
+    try:
+        generated = datetime.fromisoformat(profile["generated_at"].replace("Z", ""))
+        return datetime.utcnow() - generated > timedelta(days=7)
+    except Exception:
+        return True
+
+
+# ── System-prompt builder ─────────────────────────────────────────────────────
 
 def build_system_prefix(profile: dict[str, Any], context: str = "") -> str:
-    """DNA-04: Build the system prompt prefix from the profile."""
+    """DNA-04: Convert a profile into a Tone DNA system-prompt prefix."""
     f = profile["features"]
     overrides = profile.get("context_overrides", {})
 
-    # Apply context-aware formality delta
     formality = f["formality_score"]
     for key, delta_dict in overrides.items():
         if key in context.lower():
-            formality = round(
-                max(0.0, min(1.0, formality + delta_dict.get("formality_delta", 0))), 3
-            )
+            formality = round(max(0.0, min(1.0, formality + delta_dict.get("formality_delta", 0))), 3)
 
-    greetings = ", ".join(f['greeting_patterns'][:3]) or "Hi {name}"
-    signoffs = ", ".join(f['signoff_patterns'][:3]) or "Best,"
+    greetings = ", ".join(f["greeting_patterns"][:3]) or "Hi {name}"
+    signoffs = ", ".join(f["signoff_patterns"][:3]) or "Best,"
 
     return (
         f"You are drafting an email that must sound exactly like the user wrote it.\n"
@@ -180,45 +249,101 @@ def build_system_prefix(profile: dict[str, Any], context: str = "") -> str:
     )
 
 
-class ToneDNAService:
-    """DNA-01–05: Ingestion, profiling, caching, injection, weekly refresh."""
+# ── Service class ─────────────────────────────────────────────────────────────
 
-    def __init__(self, graph_client: Any) -> None:
-        self.graph_client = graph_client
+class ToneDNAService:
+    """
+    DNA-01–05: Ingestion, profiling, DB persistence, injection, weekly refresh.
+
+    Parameters
+    ----------
+    mail_client:
+        An active GraphClient or GmailClient instance for the current user.
+        Used to fetch sent mail.  Pass ``get_mail_client()`` at call time —
+        never hard-code ``GraphClient()``.
+    user_email:
+        The current user's email address.  Used to scope storage so different
+        users' profiles never overwrite each other.
+    """
+
+    def __init__(self, mail_client: Any, user_email: str) -> None:
+        self.mail_client = mail_client
+        self.user_email = user_email
         self._profile: dict[str, Any] | None = None
 
     def get_profile(self) -> dict[str, Any] | None:
         if self._profile is None:
-            self._profile = load_profile()
+            self._profile = load_profile(self.user_email)
         if self._profile and needs_refresh(self._profile):
             self._schedule_refresh()
         return self._profile
 
     def ingest_and_build(self) -> dict[str, Any]:
-        """DNA-01: Fetch 180 days of sent mail and build profile."""
-        logger.info("Tone DNA: ingesting sent mail...")
-        emails = self.graph_client.fetch_sent_emails(days=180)
-        self._profile = build_profile(emails)
+        """
+        DNA-01: Fetch 30 days of sent mail, build + persist the Tone DNA
+        profile, then index the same emails into the RAG vector store.
+
+        Both operations share one mail-provider fetch so there is no second
+        round-trip to Microsoft Graph / Gmail.
+        """
+        logger.info("[ToneDNA] Ingesting sent mail for %s…", self.user_email)
+        emails = self.mail_client.fetch_sent_emails(days=30)
+
+        # ── 1. Stylometric profile ────────────────────────────────────────────
+        profile = build_profile(emails)
+        save_profile(self.user_email, profile)
+        self._profile = profile
+        logger.info(
+            "[ToneDNA] Profile built for %s — %d emails, formality=%.2f",
+            self.user_email,
+            profile["sample_size"],
+            profile["features"]["formality_score"],
+        )
+
+        # ── 2. RAG vector index (same emails, no second fetch) ────────────────
+        try:
+            from app.services.rag import EmbeddingProvider, RAGIndexFactory, mask_pii
+            index = RAGIndexFactory()()
+            embedder = EmbeddingProvider()
+            documents = []
+            for email in emails:
+                body = email.get("body", "")
+                if isinstance(body, dict):
+                    body = body.get("content", "")
+                masked = mask_pii(str(body or email.get("bodyPreview", "")))
+                if not masked.strip():
+                    continue
+                documents.append({
+                    "email_id": email.get("id") or email.get("email_id", ""),
+                    "subject": email.get("subject", "No Subject"),
+                    "masked_body": masked[:1000],
+                    "embedding": embedder.embed(masked),
+                })
+            if documents:
+                index.index(documents)
+                logger.info("[ToneDNA] Indexed %d sent emails into RAG for %s", len(documents), self.user_email)
+        except Exception as exc:
+            logger.warning("[ToneDNA] RAG indexing failed for %s: %s", self.user_email, exc)
+
         self._schedule_refresh()
-        return self._profile
+        return profile
 
     def get_system_prefix(self, context: str = "") -> str:
-        """DNA-04: Return Tone DNA system prompt prefix."""
+        """DNA-04: Return Tone DNA system-prompt prefix, or empty string if no profile."""
         profile = self.get_profile()
         if not profile:
             return ""
         return build_system_prefix(profile, context)
 
     def _schedule_refresh(self) -> None:
-        """DNA-03: Schedule weekly refresh in background."""
-        def _refresh():
+        """DNA-03: Re-build the profile 7 days from now in a background thread."""
+        def _refresh() -> None:
             try:
                 self.ingest_and_build()
-            except Exception as e:
-                logger.warning(f"Tone DNA weekly refresh failed: {e}")
+            except Exception as exc:
+                logger.warning("[ToneDNA] Weekly refresh failed for %s: %s", self.user_email, exc)
 
-        delay = timedelta(days=7).total_seconds()
-        t = threading.Timer(delay, _refresh)
+        t = threading.Timer(timedelta(days=7).total_seconds(), _refresh)
         t.daemon = True
         t.start()
-        logger.info("Tone DNA weekly refresh scheduled.")
+        logger.info("[ToneDNA] Weekly refresh scheduled for %s.", self.user_email)

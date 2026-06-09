@@ -51,13 +51,16 @@ from app.services.scorers import (
     SentimentScorer,
     ThreadAgeDecayScorer,
 )
-from app.services.tone_dna import ToneDNAService
+from app.services.tone_dna import ToneDNAService, load_profile as _load_tone_profile
 from app.services.tools import CalendarFetcher, ThreadFetcher
 
 router = APIRouter(prefix="/api")
 
 # In-memory rate limit store keyed by client IP address.
 rate_limit_store: dict[str, list[datetime]] = {}
+
+
+from app.api.deps import get_current_user
 
 # Cache of evaluation predictions keyed by email text — the golden dataset is
 # fixed, so after the first run every re-run is instant.
@@ -132,13 +135,10 @@ def ready() -> dict[str, Any]:
 
 @router.get("/mailbox", response_model=EmailPage)
 def get_mailbox(
-    folder: str = "inbox", limit: int = 50, page_token: str | None = None, q: str | None = None
+    folder: str = "inbox", limit: int = 50, page_token: str | None = None, q: str | None = None,
+    _user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Paginated listing for any folder, with optional server-side search.
-
-    Works for inbox/sent/drafts/spam/trash on the active provider (Outlook/Gmail).
-    Returns up to `limit` (default 50) emails plus a cursor + total count.
-    """
+    """Paginated listing for any folder, with optional server-side search."""
     client = get_mail_client()
     try:
         return client.list_emails(folder=folder, limit=limit, page_token=page_token, query=q)
@@ -147,7 +147,7 @@ def get_mailbox(
 
 
 @router.get("/inbox/poll")
-def poll_new_email() -> dict[str, Any]:
+def poll_new_email(_user: str = Depends(get_current_user)) -> dict[str, Any]:
     """
     Lightweight new-email check for both Microsoft and Google accounts.
 
@@ -177,7 +177,8 @@ def poll_new_email() -> dict[str, Any]:
 
 
 @router.get("/emails/{email_id}/attachments/{attachment_id}")
-def download_attachment(email_id: str, attachment_id: str, filename: str = "attachment"):
+def download_attachment(email_id: str, attachment_id: str, filename: str = "attachment",
+                        _user: str = Depends(get_current_user)):
     """Stream an email attachment for download (Gmail or Microsoft Graph)."""
     import base64
     from fastapi.responses import Response
@@ -206,14 +207,14 @@ def download_attachment(email_id: str, attachment_id: str, filename: str = "atta
 
 
 @router.get("/emails", response_model=list[EmailPayload])
-def get_emails(limit: int = 10) -> list[dict[str, Any]]:
+def get_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """Fetch recent inbox messages from the active provider (Outlook or Gmail)."""
     client = get_mail_client()
     return client.get_inbox_emails(limit=limit)
 
 
 @router.get("/emails/sent", response_model=list[EmailPayload])
-def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
+def get_sent_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """Fetch recent sent messages from the active provider (Outlook or Gmail)."""
     client = get_mail_client()
     raw_emails = client.fetch_sent_emails(days=30)
@@ -248,28 +249,28 @@ def get_sent_emails(limit: int = 10) -> list[dict[str, Any]]:
 
 
 @router.get("/emails/drafts", response_model=list[EmailPayload])
-def get_draft_emails(limit: int = 10) -> list[dict[str, Any]]:
+def get_draft_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """Fetch emails from the Drafts folder."""
     client = get_mail_client()
     return client.get_draft_emails(limit=limit)
 
 
 @router.get("/emails/spam", response_model=list[EmailPayload])
-def get_spam_emails(limit: int = 10) -> list[dict[str, Any]]:
+def get_spam_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """Fetch emails from the Junk/Spam folder."""
     client = get_mail_client()
     return client.get_spam_emails(limit=limit)
 
 
 @router.get("/emails/trash", response_model=list[EmailPayload])
-def get_trash_emails(limit: int = 10) -> list[dict[str, Any]]:
+def get_trash_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """Fetch emails from the Deleted Items folder."""
     client = get_mail_client()
     return client.get_trash_emails(limit=limit)
 
 
 @router.post("/emails/{email_id}/reply")
-def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
+def send_email_reply(email_id: str, payload: ReplyRequest, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Send a reply to the specified email via the active provider."""
     client = get_mail_client()
     try:
@@ -280,7 +281,7 @@ def send_email_reply(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
 
 
 @router.post("/emails/{email_id}/read")
-def set_read_status(email_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def set_read_status(email_id: str, payload: dict[str, Any] | None = None, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Mark an email read or unread (default: read)."""
     read = True if payload is None else bool(payload.get("read", True))
     try:
@@ -291,7 +292,7 @@ def set_read_status(email_id: str, payload: dict[str, Any] | None = None) -> dic
 
 
 @router.post("/emails/{email_id}/archive")
-def archive_email(email_id: str) -> dict[str, Any]:
+def archive_email(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Archive an email (out of Inbox, not deleted)."""
     try:
         get_mail_client().archive(email_id)
@@ -301,7 +302,7 @@ def archive_email(email_id: str) -> dict[str, Any]:
 
 
 @router.post("/emails/{email_id}/spam")
-def report_spam(email_id: str) -> dict[str, Any]:
+def report_spam(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Report an email as spam (move to Junk/Spam)."""
     try:
         get_mail_client().report_spam(email_id)
@@ -311,7 +312,7 @@ def report_spam(email_id: str) -> dict[str, Any]:
 
 
 @router.post("/emails/{email_id}/forward")
-def forward_email(email_id: str, payload: dict[str, str]) -> dict[str, Any]:
+def forward_email(email_id: str, payload: dict[str, str], _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Forward an email to another recipient."""
     to = (payload or {}).get("to", "").strip()
     if not to:
@@ -324,7 +325,7 @@ def forward_email(email_id: str, payload: dict[str, str]) -> dict[str, Any]:
 
 
 @router.post("/emails/{email_id}/reply-all")
-def reply_all_email(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
+def reply_all_email(email_id: str, payload: ReplyRequest, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Reply to everyone on an email thread."""
     try:
         get_mail_client().reply_all(email_id, payload.comment)
@@ -334,7 +335,7 @@ def reply_all_email(email_id: str, payload: ReplyRequest) -> dict[str, Any]:
 
 
 @router.post("/emails/{email_id}/restore")
-def restore_email_from_trash(email_id: str) -> dict[str, Any]:
+def restore_email_from_trash(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Restore the specified email from Trash back to Inbox."""
     client = get_mail_client()
     try:
@@ -345,7 +346,7 @@ def restore_email_from_trash(email_id: str) -> dict[str, Any]:
 
 
 @router.post("/emails/{email_id}/trash")
-def move_email_to_trash(email_id: str) -> dict[str, Any]:
+def move_email_to_trash(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Move the specified email to the Deleted Items (Trash) folder."""
     client = get_mail_client()
     try:
@@ -356,7 +357,7 @@ def move_email_to_trash(email_id: str) -> dict[str, Any]:
 
 
 @router.post("/emails/compose")
-def compose_email(payload: ComposeRequest) -> dict[str, Any]:
+def compose_email(payload: ComposeRequest, _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Compose and send a new email via the active provider."""
     client = get_mail_client()
     try:
@@ -492,10 +493,40 @@ def microsoft_login_initiate() -> dict[str, Any]:
     return {"status": "pending", "auth_url": auth_url, "state": state}
 
 
-def _connected_screen(email: str, dashboard_url: str) -> str:
+def _connected_screen(email: str, dashboard_url: str, provider: str = "microsoft") -> str:
     """Branded 'account connected' screen shown after a successful OAuth redirect."""
     safe_email = (email or "").replace("<", "&lt;").replace(">", "&gt;")
     who = f"<p class='email'>{safe_email}</p>" if safe_email else ""
+
+    if provider == "google":
+        gradient = "linear-gradient(135deg, #1a73e8 0%, #0d9488 100%)"
+        shadow_color = "rgba(26, 115, 232, .30)"
+        email_color = "#1a73e8"
+        spin_color = "#1a73e8"
+        provider_label = "Google"
+        provider_logo = """<div class="provider-logo">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
+        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+      </svg>
+    </div>"""
+    else:
+        gradient = "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
+        shadow_color = "rgba(49, 46, 129, .35)"
+        email_color = "#6366F1"
+        spin_color = "#6366F1"
+        provider_label = "Microsoft"
+        provider_logo = """<div class="provider-logo">
+      <svg viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
+        <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+        <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+        <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+        <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+      </svg>
+    </div>"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -507,31 +538,36 @@ def _connected_screen(email: str, dashboard_url: str) -> str:
     body {{
       margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%); color: #1e1b2e;
+      background: {gradient}; color: #1e1b2e;
     }}
     .card {{
       background: #fff; border-radius: 20px; padding: 40px 36px; width: 380px; max-width: 90vw;
-      text-align: center; box-shadow: 0 24px 60px rgba(49, 46, 129, .35); animation: rise .45s ease-out;
+      text-align: center; box-shadow: 0 24px 60px {shadow_color}; animation: rise .45s ease-out;
     }}
     @keyframes rise {{ from {{ opacity: 0; transform: translateY(14px); }} to {{ opacity: 1; transform: none; }} }}
-    .logo {{ width: 56px; height: 56px; margin: 0 auto 18px; display: block; }}
+    .provider-logo {{
+      width: 64px; height: 64px; margin: 0 auto 4px; border-radius: 16px;
+      background: #f8f9fa; border: 1px solid #e8eaed;
+      display: flex; align-items: center; justify-content: center;
+    }}
     .check {{
-      width: 64px; height: 64px; margin: 0 auto 20px; border-radius: 50%;
+      width: 32px; height: 32px; margin: 8px auto 16px; border-radius: 50%;
       background: #ecfdf5; display: flex; align-items: center; justify-content: center;
     }}
-    .check svg {{ width: 34px; height: 34px; stroke: #10b981; }}
+    .check svg {{ width: 18px; height: 18px; stroke: #10b981; }}
     h2 {{ margin: 0 0 6px; font-size: 20px; font-weight: 700; }}
-    .email {{ margin: 0 0 14px; font-size: 13px; font-weight: 600; color: #6366F1; }}
+    .email {{ margin: 0 0 14px; font-size: 13px; font-weight: 600; color: {email_color}; }}
     p.sub {{ margin: 0; font-size: 13px; color: #6b7280; line-height: 1.5; }}
     .spin {{
       margin: 22px auto 0; width: 20px; height: 20px; border-radius: 50%;
-      border: 3px solid #e5e7eb; border-top-color: #6366F1; animation: spin .8s linear infinite;
+      border: 3px solid #e5e7eb; border-top-color: {spin_color}; animation: spin .8s linear infinite;
     }}
     @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
   </style>
 </head>
 <body>
   <div class="card">
+    {provider_logo}
     <div class="check">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 13l4 4L19 7" />
@@ -539,7 +575,7 @@ def _connected_screen(email: str, dashboard_url: str) -> str:
     </div>
     <h2>You're connected to MailMind</h2>
     {who}
-    <p class="sub">Your Microsoft account is securely linked.<br/>Returning you to your workspace…</p>
+    <p class="sub">Your {provider_label} account is securely linked.<br/>Returning you to your workspace…</p>
     <div class="spin"></div>
   </div>
   <script>
@@ -632,17 +668,8 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
         set_provider("google", info.get("email"))
         google_auth_status[state] = {"status": "success", "email": info.get("email")}
         dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
-        # Close the popup (the opener polls and navigates). If this is a full-page
-        # flow instead, window.close() is a no-op, so redirect to the app.
-        return (
-            "<html><body style='font-family:sans-serif;text-align:center;padding-top:60px'>"
-            "<h2>✅ Google account connected</h2>"
-            "<p>You can close this window and return to MailMind.</p>"
-            "<script>"
-            "setTimeout(function(){window.close();"
-            f"setTimeout(function(){{window.location.href='{dashboard}';}},400);}},800);"
-            "</script></body></html>"
-        )
+        email = info.get("email") or ""
+        return _connected_screen(email, dashboard, provider="google")
     except Exception as e:
         google_auth_status[state] = {"status": "error", "error": str(e)}
         return f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>"
@@ -810,12 +837,12 @@ def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rat
 
 
 @router.post("/classify", response_model=ClassificationResult)
-def classify_text(payload: RAGQuery) -> ClassificationResult:
+def classify_text(payload: RAGQuery, current_user: str = Depends(get_current_user)) -> ClassificationResult:
     """Classify email text to assign priority, category, and confidence."""
     import hashlib
 
     from app.services.cache import classification_cache
-    key = f"classify:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"classify:{current_user}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = classification_cache.get(key)
     if cached is not None:
         return cached
@@ -828,26 +855,25 @@ def classify_text(payload: RAGQuery) -> ClassificationResult:
 
 
 @router.get("/thread/{thread_id}")
-def fetch_thread(thread_id: str) -> list[dict[str, Any]]:
+def fetch_thread(thread_id: str, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """Fetch recent messages for a given thread from the Graph stub client."""
     fetcher = ThreadFetcher(GraphClient())
     return fetcher.fetch(thread_id)
 
 
 @router.get("/calendar", response_model=list[CalendarEvent])
-def fetch_calendar(days: int = 7) -> list[CalendarEvent]:
+def fetch_calendar(days: int = 7, _user: str = Depends(get_current_user)) -> list[CalendarEvent]:
     """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
     try:
         fetcher = CalendarFetcher(get_mail_client())
         return fetcher.fetch_next_events(days=days)
     except Exception as e:
-        # Return empty list on any error (not authenticated, network issues, etc.)
         logger.warning(f"Calendar fetch failed: {str(e)}")
         return []
 
 
 @router.post("/calendar/event")
-def create_calendar_event(payload: dict[str, Any]) -> dict[str, Any]:
+def create_calendar_event(payload: dict[str, Any], _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Create a calendar event in the user's Outlook or Google calendar."""
     title = (payload.get("title") or "").strip()
     start = (payload.get("start_time") or "").strip()
@@ -881,13 +907,13 @@ def create_calendar_event(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/tasks")
-def list_tasks(limit: int = 20) -> list[dict[str, Any]]:
+def list_tasks(limit: int = 20, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
     """List the user's tasks from the active provider (Microsoft To Do or Google Tasks)."""
     return get_mail_client().list_tasks(limit=limit)
 
 
 @router.post("/tasks")
-def create_task(payload: dict[str, str]) -> dict[str, Any]:
+def create_task(payload: dict[str, str], _user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Create a task in the active provider's task list."""
     title = (payload or {}).get("title", "").strip()
     if not title:
@@ -900,12 +926,12 @@ def create_task(payload: dict[str, str]) -> dict[str, Any]:
 
 
 @router.post("/rag/retrieve", response_model=list[PrecedentItem])
-def rag_retrieve(query: RAGQuery) -> list[PrecedentItem]:
+def rag_retrieve(query: RAGQuery, current_user: str = Depends(get_current_user)) -> list[PrecedentItem]:
     """Retrieve precedent emails similar to the provided email text."""
     import hashlib
 
     from app.services.cache import precedents_cache
-    key = f"retrieve:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"retrieve:{current_user}:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
         return cached
@@ -918,12 +944,12 @@ def rag_retrieve(query: RAGQuery) -> list[PrecedentItem]:
 
 
 @router.post("/rag/inject")
-def rag_inject(query: RAGQuery) -> dict[str, Any]:
+def rag_inject(query: RAGQuery, current_user: str = Depends(get_current_user)) -> dict[str, Any]:
     """Create a prompt that injects precedent email context for response drafting."""
     import hashlib
 
     from app.services.cache import precedents_cache
-    key = f"inject:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"inject:{current_user}:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
         return cached
@@ -937,7 +963,7 @@ def rag_inject(query: RAGQuery) -> dict[str, Any]:
 
 
 @router.post("/rag/draft", response_model=DraftResponse)
-def generate_draft(payload: DraftRequest) -> DraftResponse:
+def generate_draft(payload: DraftRequest, _user: str = Depends(get_current_user)) -> DraftResponse:
     """Generate an email response draft using a selected style (standard, formal, or indepth) and context precedents."""
     import hashlib
 
@@ -969,6 +995,77 @@ def extract_commitments(payload: CommitmentExtractionRequest) -> CommitmentExtra
     service = CommitmentService(get_mail_client())
     commitments = service.extract(payload.get_text(), payload.thread_summary or "", payload.email_id)
     return CommitmentExtractionResponse(commitments=commitments)
+
+
+@router.get("/rag/stats")
+def rag_stats(_user: str = Depends(get_current_user)) -> dict[str, Any]:
+    """Return real index statistics: document count, storage size, last indexed time."""
+    import os
+    from app.config.settings import settings as _s
+
+    index_dir = os.path.abspath(_s.chroma_storage_path)
+    index_file = os.path.join(index_dir, "index.json")
+
+    doc_count = 0
+    storage_bytes = 0
+    last_modified: str | None = None
+
+    if os.path.exists(index_file):
+        try:
+            import json as _json
+            with open(index_file, "r", encoding="utf-8") as fh:
+                docs = _json.load(fh)
+            doc_count = len(docs)
+            storage_bytes = os.path.getsize(index_file)
+            ts = os.path.getmtime(index_file)
+            from datetime import datetime as _dt, timezone as _tz
+            last_modified = _dt.fromtimestamp(ts, tz=_tz.utc).isoformat()
+        except Exception as exc:
+            logger.warning("[rag/stats] Failed to read index: %s", exc)
+
+    storage_mb = round(storage_bytes / (1024 * 1024), 2)
+    return {
+        "indexed_emails": doc_count,
+        "storage_mb": storage_mb,
+        "storage_label": f"{storage_mb} MB" if storage_mb >= 0.01 else f"{round(storage_bytes / 1024, 1)} KB",
+        "last_indexed": last_modified,
+        "index_path": index_file,
+        "similarity_threshold": _s.rag_similarity_threshold,
+        "max_index_size": _s.index_max_size,
+    }
+
+
+@router.post("/rag/settings")
+def update_rag_settings(payload: dict[str, Any], _user: str = Depends(get_current_user)) -> dict[str, Any]:
+    """
+    Update retrieval settings at runtime.
+
+    Accepted keys: ``similarity_threshold`` (float 0.0–1.0), ``max_index_size`` (int).
+    Changes apply immediately to all subsequent retrieve calls in this process.
+    They are not persisted across restarts — set the corresponding env vars
+    (RAG_SIMILARITY_THRESHOLD, RAG_INDEX_MAX_SIZE) for durable configuration.
+    """
+    from app.config.settings import settings as _s
+
+    updated: dict[str, Any] = {}
+
+    threshold = payload.get("similarity_threshold")
+    if threshold is not None:
+        val = float(threshold)
+        if not 0.0 <= val <= 1.0:
+            raise HTTPException(status_code=400, detail="similarity_threshold must be between 0.0 and 1.0")
+        _s.rag_similarity_threshold = val
+        updated["similarity_threshold"] = val
+
+    max_size = payload.get("max_index_size")
+    if max_size is not None:
+        val_i = int(max_size)
+        if val_i < 1:
+            raise HTTPException(status_code=400, detail="max_index_size must be at least 1")
+        _s.index_max_size = val_i
+        updated["max_index_size"] = val_i
+
+    return {"status": "ok", "updated": updated}
 
 
 @router.post("/commitments/confirm", response_model=CommitmentConfirmResponse)
@@ -1044,9 +1141,9 @@ def _make_scorers() -> dict[str, Any]:
     }
 
 
-def _compute_triage(payload: EmailPayload, scorers: dict[str, Any]) -> TriageResult:
+def _compute_triage(payload: EmailPayload, scorers: dict[str, Any], user_email: str = "") -> TriageResult:
     from app.services.cache import triage_cache
-    key = f"id:{payload.email_id}"
+    key = f"id:{user_email}:{payload.email_id}"
     cached = triage_cache.get(key)
     if cached is not None:
         return cached
@@ -1064,28 +1161,28 @@ def _compute_triage(payload: EmailPayload, scorers: dict[str, Any]) -> TriageRes
 
 
 @router.post("/triage", response_model=TriageResult)
-def triage_email(payload: EmailPayload) -> TriageResult:
+def triage_email(payload: EmailPayload, current_user: str = Depends(get_current_user)) -> TriageResult:
     """Calculate the five-axis triage score for an email."""
-    return _compute_triage(payload, _make_scorers())
+    return _compute_triage(payload, _make_scorers(), current_user)
 
 
 @router.post("/triage/batch", response_model=list[TriageResult])
-def triage_batch(payloads: list[EmailPayload]) -> list[TriageResult]:
+def triage_batch(payloads: list[EmailPayload], current_user: str = Depends(get_current_user)) -> list[TriageResult]:
     """Score many emails in one request (reuses scorers + cache).
 
     Replaces N separate /triage calls with a single round-trip — drastically
     cutting the number of API calls the client makes per page.
     """
     scorers = _make_scorers()
-    return [_compute_triage(p, scorers) for p in payloads]
+    return [_compute_triage(p, scorers, current_user) for p in payloads]
 
 # ── Tone DNA routes ───────────────────────────────────────────────────────────
 
 
 @router.post("/tone-dna/build")
-def build_tone_dna() -> dict:
-    """DNA-01: Trigger Tone DNA ingestion from sent mail."""
-    svc = ToneDNAService(GraphClient())
+def build_tone_dna(current_user: str = Depends(get_current_user)) -> dict:
+    """DNA-01: Trigger Tone DNA ingestion from sent mail (current provider)."""
+    svc = ToneDNAService(get_mail_client(), current_user)
     profile = svc.ingest_and_build()
     return {
         "status": "built",
@@ -1095,12 +1192,9 @@ def build_tone_dna() -> dict:
     }
 
 @router.get("/tone-dna/profile")
-def get_tone_dna_profile() -> dict:
-    """Return current Tone DNA profile (or 404 if not yet built)."""
-    from fastapi import HTTPException
-
-    from app.services.tone_dna import load_profile
-    profile = load_profile()
+def get_tone_dna_profile(current_user: str = Depends(get_current_user)) -> dict:
+    """Return the current user's Tone DNA profile (or 404 if not yet built)."""
+    profile = _load_tone_profile(current_user)
     if not profile:
         raise HTTPException(status_code=404, detail="Tone DNA profile not built yet. POST /api/tone-dna/build first.")
     return profile

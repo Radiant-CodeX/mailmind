@@ -18,7 +18,7 @@ import contextlib
 import logging
 from typing import Iterator, Optional
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -75,6 +75,7 @@ def init_db(create_tables: bool = True) -> bool:
     if create_tables and _engine is not None:
         try:
             Base.metadata.create_all(_engine)
+            _run_migrations(_engine)
             logger.info("Database tables ensured.")
         except Exception as exc:
             logger.error("Failed to create tables: %s", exc)
@@ -110,6 +111,22 @@ def get_session() -> Iterator[Optional[Session]]:
         raise
     finally:
         session.close()
+
+
+def _run_migrations(engine: Engine) -> None:
+    """Apply additive schema migrations that create_all() won't handle."""
+    migrations = [
+        "ALTER TABLE email_enrichment ADD COLUMN user_email VARCHAR(320)",
+        "CREATE INDEX IF NOT EXISTS ix_enrichment_user_email ON email_enrichment(user_email)",
+        # tone_profile is created by create_all; no ALTER needed — it's a new table
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(text(sql))
+                conn.commit()
+            except Exception:
+                pass  # Column / index already exists — safe to ignore
 
 
 def reset_engine() -> None:

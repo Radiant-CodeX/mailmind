@@ -77,41 +77,52 @@ class TriageCache:
             logger.info("[TriageCache] Redis not available (%s) — using memory-only cache", e)
             self._redis_ok = False
 
-    def _rkey(self, email_id: str) -> str:
-        return f"{self.KEY_PREFIX}{email_id}"
+    def _rkey(self, email_id: str, user_email: str = "") -> str:
+        prefix = user_email.lower() if user_email else "_global"
+        return f"{self.KEY_PREFIX}{prefix}:{email_id}"
 
-    def get(self, email_id: str) -> dict[str, Any] | None:
+    def _mkey(self, email_id: str, user_email: str = "") -> str:
+        prefix = user_email.lower() if user_email else "_global"
+        return f"{prefix}:{email_id}"
+
+    def get(self, email_id: str, user_email: str = "") -> dict[str, Any] | None:
+        mkey = self._mkey(email_id, user_email)
         # 1. In-memory
-        hit = self._memory.get(email_id)
+        hit = self._memory.get(mkey)
         if hit is not None:
             return hit
         # 2. Redis
         if self._redis_ok:
             try:
-                raw = self._redis.get(self._rkey(email_id))
+                raw = self._redis.get(self._rkey(email_id, user_email))
                 if raw:
                     data = json.loads(raw)
-                    self._memory.set(email_id, data, ttl=self.TRIAGE_TTL)
+                    self._memory.set(mkey, data, ttl=self.TRIAGE_TTL)
                     return data
             except Exception as e:
                 logger.warning("[TriageCache] Redis get error: %s", e)
         return None
 
-    def set(self, email_id: str, data: dict[str, Any]) -> None:
-        self._memory.set(email_id, data, ttl=self.TRIAGE_TTL)
+    def set(self, email_id: str, data: dict[str, Any], user_email: str = "") -> None:
+        self._memory.set(self._mkey(email_id, user_email), data, ttl=self.TRIAGE_TTL)
         if self._redis_ok:
             try:
-                self._redis.setex(self._rkey(email_id), self.TRIAGE_TTL, json.dumps(data))
+                self._redis.setex(self._rkey(email_id, user_email), self.TRIAGE_TTL, json.dumps(data))
             except Exception as e:
                 logger.warning("[TriageCache] Redis set error: %s", e)
 
-    def delete(self, email_id: str) -> None:
-        self._memory._store.pop(email_id, None)
+    def delete(self, email_id: str, user_email: str = "") -> None:
+        mkey = self._mkey(email_id, user_email)
+        self._memory._store.pop(mkey, None)
         if self._redis_ok:
             try:
-                self._redis.delete(self._rkey(email_id))
+                self._redis.delete(self._rkey(email_id, user_email))
             except Exception:
                 pass
+
+    def clear_memory(self) -> None:
+        """Clear the in-memory layer (called on user switch to prevent cross-user hits)."""
+        self._memory.clear()
 
 
 # Global cache instances
@@ -122,3 +133,19 @@ commitments_cache = TTLCache(default_ttl=86400)
 
 # Keep legacy name working
 triage_cache = TTLCache(default_ttl=86400)
+
+
+def clear_all_user_caches() -> None:
+    """
+    Wipe all in-memory caches.
+
+    Call this when a new user logs in so stale data from the previous session
+    cannot bleed through to the incoming user.  Redis keys are user-scoped by
+    email prefix, so they are safe without a full flush.
+    """
+    classification_cache.clear()
+    triage_cache_store.clear_memory()
+    precedents_cache.clear()
+    commitments_cache.clear()
+    triage_cache.clear()
+    logger.info("[cache] All in-memory user caches cleared on session change.")

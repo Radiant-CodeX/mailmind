@@ -287,6 +287,7 @@ export default function Home() {
               loading={calendarLoading}
               error={calendarError}
               onRefresh={loadCalendar}
+              provider={provider}
               onCreateEvent={async (event: Partial<CalendarEvent>) => {
                 await createCalendarEvent({
                   title: event.title || '',

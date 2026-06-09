@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -12,6 +13,8 @@ from typing import Any, Iterable
 from app.config.settings import settings
 from app.models.schemas import PrecedentItem
 
+logger = logging.getLogger(__name__)
+
 
 def mask_pii(text: str) -> str:
     """Redact common personally identifiable information from text."""
@@ -22,10 +25,16 @@ def mask_pii(text: str) -> str:
 
 
 class EmbeddingProvider:
-    """Embedder using OpenAI's text-embedding-ada-002, with deterministic fallback."""
+    """Embedder using Azure/OpenAI embeddings, with deterministic fallback.
+
+    After the first permanent failure (404 DeploymentNotFound, bad credentials,
+    etc.) the class-level flag ``_api_unavailable`` is set so all subsequent
+    calls skip the network round-trip entirely.
+    """
+
+    _api_unavailable: bool = False  # shared across all instances in the process
 
     def _get_llm_client(self) -> tuple[Any, str]:
-        """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
         if settings.use_mock_graph:
             return None, ""
         try:
@@ -34,23 +43,29 @@ class EmbeddingProvider:
                 return AzureOpenAI(
                     api_key=settings.azure_openai_api_key,
                     api_version="2024-02-01",
-                    azure_endpoint=settings.azure_openai_endpoint
+                    azure_endpoint=settings.azure_openai_endpoint,
+                    max_retries=0,  # 404s are permanent — don't retry
                 ), settings.azure_openai_embedding_deployment
             elif settings.openai_api_key:
-                return OpenAI(api_key=settings.openai_api_key), "text-embedding-ada-002"
+                return OpenAI(
+                    api_key=settings.openai_api_key,
+                    max_retries=0,
+                ), "text-embedding-ada-002"
         except Exception:
-            return None, ""
-        # No LLM credentials in live mode — return None so callers fall back to
-        # the deterministic local embedding instead of raising a 500.
+            pass
         return None, ""
 
+    @staticmethod
+    def _deterministic(text: str) -> list[float]:
+        normalized = text.lower().strip()
+        vector = [0.0] * 64
+        for idx, char in enumerate(normalized[:64]):
+            vector[idx] = (ord(char) % 32) / 31.0
+        return vector
+
     def embed(self, text: str) -> list[float]:
-        if settings.use_mock_graph:
-            normalized = text.lower().strip()
-            vector = [0.0] * 64
-            for idx, char in enumerate(normalized[:64]):
-                vector[idx] = (ord(char) % 32) / 31.0
-            return vector
+        if settings.use_mock_graph or EmbeddingProvider._api_unavailable:
+            return self._deterministic(text)
 
         client, model = self._get_llm_client()
         if client:
@@ -58,17 +73,20 @@ class EmbeddingProvider:
                 response = client.embeddings.create(
                     input=[text.replace("\n", " ")],
                     model=model,
-                    timeout=5.0
+                    timeout=5.0,
                 )
                 return response.data[0].embedding
-            except Exception:
-                pass
+            except Exception as exc:
+                err = str(exc)
+                # Permanent failures — no point hitting the API again this session.
+                if any(k in err for k in ("DeploymentNotFound", "404", "AuthenticationError", "invalid_api_key")):
+                    EmbeddingProvider._api_unavailable = True
+                    logger.warning(
+                        "[RAG] Embedding API unavailable (%s) — switching to deterministic fallback for this session.",
+                        err[:120],
+                    )
 
-        normalized = text.lower().strip()
-        vector = [0.0] * 64
-        for idx, char in enumerate(normalized[:64]):
-            vector[idx] = (ord(char) % 32) / 31.0
-        return vector
+        return self._deterministic(text)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:

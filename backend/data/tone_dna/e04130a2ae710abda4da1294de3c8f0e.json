@@ -1,0 +1,26 @@
+{
+  "profile_version": 3,
+  "generated_at": "2026-06-09T19:14:29.369857Z",
+  "sample_size": 0,
+  "features": {
+    "avg_sentence_length": 0.0,
+    "formality_score": 0.5,
+    "greeting_patterns": [],
+    "signoff_patterns": [],
+    "contraction_rate": 0.0,
+    "bullet_point_preference": 0.0,
+    "vocabulary_top_100": [],
+    "emoji_rate": 0.0
+  },
+  "context_overrides": {
+    "complaint": {
+      "formality_delta": 0.15
+    },
+    "congratulation": {
+      "formality_delta": -0.1
+    },
+    "urgent": {
+      "formality_delta": 0.1
+    }
+  }
+}

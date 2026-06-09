@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MailMind Studio v2",
+  title: "MailMind Studio",
   description: "AI-powered enterprise email co-pilot",
 };
 

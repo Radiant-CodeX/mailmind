@@ -115,17 +115,28 @@ _REGEX_DETECTORS: List[Tuple[str, Pattern[str], int]] = [
     ("FINANCIAL_ID", re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), 0),            # US SSN
     ("FINANCIAL_ID", re.compile(r"\b\d{2}-\d{7}\b"), 0),                  # US EIN
     ("FINANCIAL_ID", re.compile(r"\b[A-Z]{4}0[A-Z0-9]{6}\b"), 0),        # IFSC (Indian bank branch)
-    ("FINANCIAL_ID", re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), 0),  # IBAN
+    # IBAN: must have at least one letter in the BBAN (rules out all-digit DL/account numbers)
+    ("FINANCIAL_ID", re.compile(r"\b[A-Z]{2}\d{2}(?=[A-Z0-9]*[A-Z])[A-Z0-9]{11,30}\b"), 0),  # IBAN
     ("FINANCIAL_ID", re.compile(
         r"(?i)\b(?:a/?c|account)\s*(?:no\.?|number|#)?\s*[:=]?\s*(\d{9,18})\b"
     ), 1),                                                                # bank account
+    # UPI Virtual Payment Address (handle@psp) — not caught by the email regex
+    ("FINANCIAL_ID", re.compile(
+        r"\b[a-zA-Z0-9._-]{3,}@(?:oksbi|ybl|okhdfcbank|okaxis|okicici|paytm|"
+        r"upi|axl|ibl|icici|hdfc|kotak|sbi|pnb|boi|bom|canara|union|idbi|yes|"
+        r"rblbank|airtel|freecharge|razer|indus|aubank|equitas|apb|apl|"
+        r"timecosmos|waicici|wahdfcbank|wasbi)\b"
+    ), 0),
 
     # ── GOVERNMENT IDs (incl. Indian identifiers) ──────────────────────────
     ("GOVERNMENT_ID", re.compile(r"\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b"), 0),  # GSTIN
-    ("GOVERNMENT_ID", re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"), 0),          # PAN
-    ("GOVERNMENT_ID", re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"), 0),  # Aadhaar
+    ("GOVERNMENT_ID", re.compile(r"\b[A-Z]{5}\d{4}[A-Z]\b"), 0),          # PAN (5L+4D+1L)
+    ("GOVERNMENT_ID", re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"), 0),  # Aadhaar (12 digits)
+    ("GOVERNMENT_ID", re.compile(r"\b[A-Z]{3}\d{7}\b"), 0),               # Voter ID (ECI format)
+    ("GOVERNMENT_ID", re.compile(r"\b[A-Z]{2}\d{2}[- ]?\d{4}[- ]?\d{7}\b"), 0),  # Driving Licence
+    ("GOVERNMENT_ID", re.compile(r"\b[A-Z]\d{7}\b"), 0),                  # Passport (India)
     ("GOVERNMENT_ID", re.compile(
-        r"(?i)\b(?:passport|driver'?s?\s*licen[cs]e|licen[cs]e\s*no|dl\s*no)\b"
+        r"(?i)\b(?:passport|driver'?s?\s*licen[cs]e|licen[cs]e\s*no|dl\s*no|voter\s*id|epic\s*no)\b"
         r"\s*(?:no\.?|number|#)?\s*[:=]?\s*([A-Z0-9\-]{6,})"
     ), 1),
 
@@ -204,6 +215,26 @@ _COMMON_PLACES = {
 
 _DEMOGRAPHIC_RE = re.compile(r"\b\d{1,3}[-\s]?year[-\s]?old\b", re.IGNORECASE)
 
+# Phone-like content inside a spaCy PERSON span → reject (e.g. "mobile +91-9876543210").
+_CONTAINS_PHONE_RE = re.compile(r"(?:\+?\d[\d\s\-\.]{6,}|\d{7,})")
+
+# Patterns that look like names to spaCy's NER but are actually structured IDs.
+# If a spaCy PERSON/LOCATION span matches one of these, reject the detection.
+_LOOKS_LIKE_ID_RE = re.compile(
+    r"^(?:"
+    r"\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]"   # GSTIN
+    r"|[A-Z]{5}\d{4}[A-Z]"                           # PAN
+    r"|\d{4}[\s-]?\d{4}[\s-]?\d{4}"                 # Aadhaar
+    r"|[A-Z]{3}\d{7}"                                # Voter ID
+    r"|[A-Z]{2}\d{2}[- ]?\d{4}[- ]?\d{7}"           # DL
+    r"|[A-Z]\d{7}"                                   # Passport
+    r"|[A-Z]{4}0[A-Z0-9]{6}"                         # IFSC
+    r"|GSTIN\s+\S+"                                  # labelled GSTIN
+    r"|PAN\s+\S+"                                    # labelled PAN
+    r")$",
+    re.IGNORECASE,
+)
+
 
 def _passes_golden_rule(entity_type: str, value: str) -> bool:
     """
@@ -226,6 +257,12 @@ def _passes_golden_rule(entity_type: str, value: str) -> bool:
             return False
         # Require an actual name token (a capitalised word), not a bare noun.
         if not re.search(r"[A-Za-z]{2,}", value):
+            return False
+        # Reject spaCy false positives where a structured ID is mis-tagged as PERSON.
+        if _LOOKS_LIKE_ID_RE.match(value.strip()):
+            return False
+        # Reject spans that contain a phone number (e.g. "mobile +91-9876543210").
+        if _CONTAINS_PHONE_RE.search(value):
             return False
         return True
 
@@ -354,18 +391,20 @@ class PIISanitizer:
                     if not category:
                         continue
                     value = text[res.start:res.end]
-                    if category in ("PERSON_NAME", "ADDRESS") and not _passes_golden_rule(category, value):
+                    if not _passes_golden_rule(category, value):
                         continue
                     candidates.append(PIIEntity(category, res.start, res.end, value, res.score))
             except Exception as e:
                 logger.error(f"NLP PII analysis failed ({type(e).__name__}); regex names only.")
-        else:
-            for name_re in _NAME_CONTEXT_PATTERNS:
-                for m in name_re.finditer(text):
-                    value = m.group(1)
-                    if not _passes_golden_rule("PERSON_NAME", value):
-                        continue
-                    candidates.append(PIIEntity("PERSON_NAME", m.start(1), m.end(1), value, 0.6))
+
+        # Always run context patterns for names — en_core_web_sm misses many
+        # Indian names, so these greetings/sign-off heuristics act as a supplement.
+        for name_re in _NAME_CONTEXT_PATTERNS:
+            for m in name_re.finditer(text):
+                value = m.group(1)
+                if not _passes_golden_rule("PERSON_NAME", value):
+                    continue
+                candidates.append(PIIEntity("PERSON_NAME", m.start(1), m.end(1), value, 0.6))
 
         # Resolve overlaps: longest span first, then earliest; stable on ties.
         candidates.sort(key=lambda c: (-(c.end - c.start), c.start))

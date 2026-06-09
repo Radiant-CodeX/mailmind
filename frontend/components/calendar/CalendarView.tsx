@@ -9,6 +9,7 @@ interface CalendarViewProps {
   error: string | null;
   onRefresh: () => void;
   onCreateEvent?: (event: Partial<CalendarEvent>) => Promise<void>;
+  provider?: "google" | "microsoft"; // Calendar provider
 }
 
 type ViewMode = "month" | "week" | "agenda";
@@ -77,6 +78,7 @@ export function CalendarView({
   error,
   onRefresh,
   onCreateEvent,
+  provider = "microsoft", // default to microsoft for backwards compatibility
 }: CalendarViewProps) {
   const today = new Date();
   const [view, setView] = useState<ViewMode>("month");
@@ -90,6 +92,16 @@ export function CalendarView({
   const [newEnd, setNewEnd] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [creating, setCreating] = useState(false);
+
+  // Provider-specific labels and messaging
+  const providerLabel = provider === "google" ? "Google Calendar" : "Microsoft Outlook";
+  const providerSource = provider === "google" ? "Google Calendar" : "Microsoft Graph / Outlook";
+  const fetchingMessage = provider === "google"
+    ? "Fetching calendar from Google Calendar…"
+    : "Fetching calendar from Microsoft Graph…";
+  const signInMessage = provider === "google"
+    ? "Sign in with a Google account to sync Google Calendar."
+    : "Sign in with a Microsoft account to sync Outlook calendar.";
 
   // ── Month grid ───────────────────────────────────────────────────────────
   const monthDays = useMemo(() => {
@@ -228,7 +240,7 @@ export function CalendarView({
             Calendar
           </h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Synchronized with Microsoft Graph / Outlook
+            Synchronized with {providerSource}
           </p>
         </div>
 
@@ -349,7 +361,7 @@ export function CalendarView({
               <div className="text-center">
                 <div className="w-8 h-8 border-2 border-[var(--border)] border-t-[var(--accent-primary)] rounded-full animate-spin mx-auto mb-3" />
                 <p className="text-xs text-[var(--text-muted)]">
-                  Fetching calendar from Microsoft Graph…
+                  {fetchingMessage}
                 </p>
               </div>
             </div>
@@ -362,7 +374,7 @@ export function CalendarView({
                 </p>
                 <p className="text-xs text-[var(--text-muted)]">{error}</p>
                 <p className="text-xs text-[var(--text-muted)]">
-                  Sign in with a Microsoft account to sync Outlook calendar.
+                  {signInMessage}
                 </p>
                 <button
                   onClick={onRefresh}
@@ -631,17 +643,22 @@ export function CalendarView({
               <div className="p-3 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)]">
                 <div className="text-[var(--text-muted)] mb-1">Source</div>
                 <div className="flex items-center gap-1.5 font-semibold text-[var(--text-primary)]">
-                  <svg
-                    className="w-3.5 h-3.5 shrink-0"
-                    viewBox="0 0 21 21"
-                    fill="none"
-                  >
-                    <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-                    <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-                    <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-                    <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-                  </svg>
-                  Microsoft Outlook
+                  {provider === "google" ? (
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 48 48" fill="none">
+                      <path d="M43.611 20.083H42V20H24v8h11.303C33.978 31.996 29.427 35 24 35c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" fill="#FFC107"/>
+                      <path d="M6.306 14.691l6.571 4.819C14.655 16.108 19.001 13 24 13c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" fill="#FF3D00"/>
+                      <path d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.408 0-9.945-3.674-11.566-8.618l-6.527 5.026C9.505 39.556 16.227 44 24 44z" fill="#4CAF50"/>
+                      <path d="M43.611 20.083H42V20H24v8h11.303c-.792 2.237-2.231 4.166-4.087 5.571l6.19 5.238C42.021 35.596 44 30.138 44 24c0-1.341-.138-2.65-.389-3.917z" fill="#1976D2"/>
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 21 21" fill="none">
+                      <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                      <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                      <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+                    </svg>
+                  )}
+                  {providerLabel}
                 </div>
               </div>
 

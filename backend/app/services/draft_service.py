@@ -8,7 +8,6 @@ import logging
 from typing import Any
 
 from app.config.settings import settings
-from app.services.graph import GraphClient
 from app.services.rag import RAGIndexFactory, RetrievalService, mask_pii
 from app.services.tone_dna import ToneDNAService
 
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class DraftService:
     def __init__(self) -> None:
-        self._tone_dna = ToneDNAService(GraphClient())
+        pass  # ToneDNA is built on demand so it uses the correct user + provider
 
     def _get_llm_client(self):
         """
@@ -92,8 +91,15 @@ class DraftService:
         sender_name = self._get_clean_name(sender) if sender else "there"
         user_name = self._get_user_display_name(current_user_email)
 
-        # DNA-04: inject Tone DNA prefix
-        tone_prefix = self._tone_dna.get_system_prefix(context=email_text)
+        # DNA-04: inject Tone DNA prefix — use the active provider client and current user
+        tone_prefix = ""
+        if current_user_email:
+            try:
+                from app.services.mail_provider import get_mail_client
+                tone_dna = ToneDNAService(get_mail_client(), current_user_email)
+                tone_prefix = tone_dna.get_system_prefix(context=email_text)
+            except Exception as _e:
+                logger.debug("[DraftService] Tone DNA unavailable: %s", _e)
 
         rag_context = ""
         if precedents:

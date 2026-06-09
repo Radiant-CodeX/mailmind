@@ -24,8 +24,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.deps import get_current_user
 from app.config.settings import settings
 from app.db import repository as repo
 from app.db.base import is_persistence_enabled
@@ -54,14 +55,14 @@ def _db_error_to_503(exc: Exception) -> HTTPException:
 
 
 @router.get("/email/{email_id}/export")
-def export_email_data(email_id: str) -> dict:
+def export_email_data(email_id: str, current_user: str = Depends(get_current_user)) -> dict:
     """
     Data-subject access / portability: return everything stored for an email,
     including its processing audit trail. Also records the export in the audit log.
     """
     _require_persistence()
     try:
-        record = repo.get_enrichment(email_id)
+        record = repo.get_enrichment(email_id, user_email=current_user)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No data for this email_id.")
         audit = repo.get_audit_log(email_id)
@@ -79,7 +80,7 @@ def export_email_data(email_id: str) -> dict:
 
 
 @router.delete("/email/{email_id}")
-def erase_email_data(email_id: str) -> dict:
+def erase_email_data(email_id: str, current_user: str = Depends(get_current_user)) -> dict:
     """
     Right to erasure: hard-delete the stored enrichment for an email.
 
@@ -88,7 +89,7 @@ def erase_email_data(email_id: str) -> dict:
     """
     _require_persistence()
     try:
-        deleted = repo.delete_enrichment(email_id)
+        deleted = repo.delete_enrichment(email_id, user_email=current_user)
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No data for this email_id.")
         return {

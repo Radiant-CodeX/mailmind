@@ -91,6 +91,7 @@ class EnrichmentWorker:
         """
         email_id = job["email_id"]
         state = job["state"]
+        user_email: str = state.get("user_email") or ""
 
         with track_stage("enrichment", email_id):
             state.update(commitment_node(state))
@@ -102,7 +103,7 @@ class EnrichmentWorker:
         # stores restored business text; masked_body remains masked).
         _restore_pii(state)
 
-        repo.upsert_enrichment(email_id, state, status="complete", enrichment_source="agentic")
+        repo.upsert_enrichment(email_id, state, user_email=user_email or None, status="complete", enrichment_source="agentic")
         repo.write_audit(email_id, "enriched", details={
             "priority": state.get("priority"),
             "commitments": len(state.get("commitments") or []),
@@ -129,9 +130,10 @@ class EnrichmentWorker:
         else:
             logger.error("[WORKER] email_id=%s exhausted retries: %s", email_id, exc)
             try:
+                _state = job.get("state", {})
                 repo.upsert_enrichment(
-                    email_id, job.get("state", {}), status="failed",
-                    enrichment_source="agentic", error=str(exc),
+                    email_id, _state, user_email=_state.get("user_email") or None,
+                    status="failed", enrichment_source="agentic", error=str(exc),
                 )
                 repo.write_audit(email_id, "enrich_failed", details={"error": type(exc).__name__})
             except Exception:
