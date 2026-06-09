@@ -2,17 +2,17 @@
 
 **Intelligent Enterprise Email Co-Pilot**
 
-MailMind v2 is an AI-powered email productivity platform that helps knowledge workers prioritize emails, draft context-aware responses, extract commitments, and reduce inbox overload while maintaining full human control over every outgoing message.
+MailMind is an AI-powered email productivity platform that helps knowledge workers prioritize emails, draft context-aware responses, extract commitments, and reduce inbox overload while maintaining full human control over every outgoing message.
 
 Built for the **Capgemini AI Buildathon** by **Team RadiantCodeX**.
 
 ---
 
-## 🚀 Problem Statement
+##  Problem Statement
 
 Enterprise employees spend a significant portion of their workday managing email instead of performing high-value work.
 
-MailMind v2 addresses:
+MailMind addresses:
 
 * Inbox overload and attention fragmentation
 * Missed commitments and deadlines
@@ -22,7 +22,7 @@ MailMind v2 addresses:
 
 ---
 
-## 🎯 Key Features
+##  Key Features
 
 ### U1 — Tone DNA
 
@@ -60,7 +60,7 @@ Retrieves semantically similar historical email threads to provide organizationa
 
 ---
 
-## 🏗️ Architecture Overview
+##  Architecture Overview
 
 ```text
 Email Ingestion
@@ -92,7 +92,7 @@ There is no automatic send path.
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 ### Frontend
 
@@ -136,7 +136,7 @@ There is no automatic send path.
 
 ---
 
-## 📂 Repository Structure
+##  Repository Structure
 
 ```text
 mailmind-v2/
@@ -151,7 +151,7 @@ mailmind-v2/
 
 ---
 
-## 👥 Team RadiantCodeX
+##  Team RadiantCodeX
 
 | Member           | Role                               |
 | ---------------- | ---------------------------------- |
@@ -163,7 +163,7 @@ mailmind-v2/
 
 ---
 
-## 🌳 Git Workflow
+##  Git Workflow
 
 ### Main Branches
 
@@ -189,7 +189,7 @@ Direct pushes to `main` are not allowed.
 
 ---
 
-## ⚙️ Local Development
+##  Local Development
 
 ### Frontend
 
@@ -247,7 +247,7 @@ http://localhost:8000/docs
 
 ---
 
-## 🧪 Quality Gates
+##  Quality Gates
 
 Every Pull Request must pass:
 
@@ -259,7 +259,7 @@ Every Pull Request must pass:
 
 ---
 
-## 🔒 Security Principles
+##  Security Principles
 
 * No secrets committed to source control
 * PII masked before any LLM call
@@ -269,7 +269,7 @@ Every Pull Request must pass:
 
 ---
 
-## 📈 Project Status
+##  Project Status
 
 Current Phase:
 
