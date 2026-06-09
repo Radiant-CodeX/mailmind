@@ -64,6 +64,8 @@ class Settings:
     azure_openai_api_key: str = os.getenv("AZURE_OPENAI_API_KEY", "")
     azure_openai_api_version: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
     azure_openai_chat_deployment: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o")
+    # Triage uses gpt-4o-mini by default (faster, cheaper); heavier nodes (commitments, RAG) use gpt-4o
+    azure_openai_triage_deployment: str = os.getenv("AZURE_OPENAI_TRIAGE_DEPLOYMENT", "gpt-4o-mini")
     azure_openai_embedding_deployment: str = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 

@@ -21,7 +21,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   const isUnread = email.isRead === false;
   // Triage score is still being computed when the folder uses triage but this
   // email has no triage object yet — show a shimmer instead of a misleading 0.
-  const scorePending = triageApplies && email.triage === undefined;
+  const scorePending = triageApplies && !email.triage;
 
   const ReadButton = onToggleRead ? (
     <button
@@ -189,7 +189,11 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
               </span>
             )}
 
-            {triageApplies && <PriorityBadge priority={priority} />}
+            {scorePending ? (
+              <span className="px-2 py-0.5 w-12 h-5 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+            ) : triageApplies && (
+              <PriorityBadge priority={priority} />
+            )}
 
             <button
               onClick={(e) => {
@@ -270,7 +274,11 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
       </h4>
 
       <div className="flex items-center justify-between gap-2">
-        <PriorityBadge priority={priority} />
+        {scorePending ? (
+          <span className="px-2 py-0.5 w-12 h-5 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+        ) : triageApplies ? (
+          <PriorityBadge priority={priority} />
+        ) : null}
         <button
           onClick={(e) => {
             e.stopPropagation();

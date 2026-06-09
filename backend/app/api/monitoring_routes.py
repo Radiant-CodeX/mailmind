@@ -18,7 +18,7 @@ from fastapi import APIRouter, Response
 
 from app.config.settings import settings
 from app.db.base import is_persistence_enabled
-from app.monitoring.metrics import render_latest_metrics, set_queue_depth
+from app.monitoring.metrics import metrics_content_type, generate_metrics, set_queue_depth
 from app.queue.backends import get_queue_backend
 
 router = APIRouter(tags=["monitoring"])
@@ -26,12 +26,13 @@ router = APIRouter(tags=["monitoring"])
 
 @router.get("/metrics")
 def metrics() -> Response:
-    """Expose Prometheus metrics. Also refreshes the queue-depth gauge."""
+    """Metrics endpoint (disabled — Prometheus removed)."""
     try:
         set_queue_depth(get_queue_backend().depth())
     except Exception:
         pass
-    body, content_type = render_latest_metrics()
+    body = generate_metrics()
+    content_type = metrics_content_type()
     return Response(content=body, media_type=content_type)
 
 

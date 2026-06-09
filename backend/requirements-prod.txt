@@ -1,5 +1,5 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# MailMind — production layer dependencies (Option 2 architecture)
+﻿# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# MailMind â€” production layer dependencies (Option 2 architecture)
 #
 # Install on top of the base requirements:
 #     pip install -r requirements.txt -r requirements-prod.txt
@@ -7,12 +7,11 @@
 # These power the durable queue, persistence, and metrics. The application
 # degrades gracefully without them (in-memory queue, no persistence), so they
 # are only required for staging/production deployments.
-# ─────────────────────────────────────────────────────────────────────────────
+# â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 redis>=5.0                 # durable enrichment queue (RedisQueueBackend)
 SQLAlchemy>=2.0            # ORM for the persistence layer (app/db)
 psycopg2-binary>=2.9       # PostgreSQL / Supabase driver
-prometheus-client>=0.20    # /metrics exposition + SLA counters
 
-# ── Test-only (CI) ───────────────────────────────────────────────────────────
+# â”€â”€ Test-only (CI) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 fakeredis>=2.20            # in-memory Redis for queue tests
