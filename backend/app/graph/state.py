@@ -52,7 +52,7 @@ class EmailAgentState(TypedDict):
     body: str
     received_at: str                          # ISO 8601 datetime string
 
-    # ── Triage Agent outputs ─────────────────────────────────────────────────
+    # ── Triage outputs ───────────────────────────────────────────────────────
     masked_body: Optional[str]                # PII-scrubbed body
     mask_mapping: Optional[dict[str, str]]    # Mapping to restore PII
     axes: list[AxisScore]                     # Five individual axis scores
@@ -61,17 +61,17 @@ class EmailAgentState(TypedDict):
     composite_score: float                    # 0–100 weighted aggregate
     priority: Optional[Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]]
     approval_mode: Optional[Literal["GATE", "SUGGEST"]]
-    triage_reasoning: Optional[str]           # Agent chain-of-thought
+    triage_reasoning: Optional[str]           # Triage reasoning chain-of-thought
 
-    # ── Commitment Agent outputs ─────────────────────────────────────────────
+    # ── Commitment Extraction outputs ────────────────────────────────────────
     commitments: list[CommitmentItem]         # Extracted action items
     commitment_reasoning: Optional[str]
 
-    # ── Calendar Conflict Agent outputs ──────────────────────────────────────
+    # ── Calendar Conflict Detection outputs ──────────────────────────────────
     calendar_events: list[dict[str, Any]]     # Raw events from Graph API
     conflict_summary: Optional[str]           # Human-readable conflict overview
 
-    # ── RAG Agent outputs ────────────────────────────────────────────────────
+    # ── RAG Precedent Retrieval + Draft outputs ───────────────────────────────
     precedents: list[PrecedentItem]           # Top-3 similar sent emails
     draft_prompt: Optional[str]               # Injected precedent prompt
     draft_reply: Optional[str]                # GPT-4o generated draft reply

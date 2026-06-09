@@ -30,7 +30,6 @@ export default function Home() {
 
   const [authenticated, setAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [isMockMode, setIsMockMode] = useState(false);
   const [provider, setProvider] = useState<Provider>('microsoft');
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
@@ -43,7 +42,6 @@ export default function Home() {
         if (data.authenticated) {
           setAuthenticated(true);
           setUserEmail(data.user_principal_name);
-          setIsMockMode(data.status === 'mock' || data.status === 'mock_unauthenticated');
           if (data.provider === 'google' || data.provider === 'microsoft') setProvider(data.provider);
           // Scope all localStorage data to this user — prevents cross-account leaks.
           if (data.user_principal_name) userStorage.setUser(data.user_principal_name);
@@ -168,7 +166,7 @@ export default function Home() {
       // Remember this account for one-tap Quick Login (valid for 1 week) —
       // only when "Remember me" was checked, and only on sign-out.
       if (userEmail && getRememberMe()) {
-        rememberLogin(isMockMode ? 'mock' : 'live', userEmail, provider);
+        rememberLogin('live', userEmail, provider);
       }
       await logoutUser();
     } catch (err) {
@@ -208,7 +206,7 @@ export default function Home() {
       {/* Main Workspace Frame */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Header toolbar with Light/Dark Mode toggle */}
-        <Header themeMode={themeMode} onToggleTheme={toggleTheme} isMockMode={isMockMode} />
+        <Header themeMode={themeMode} onToggleTheme={toggleTheme} />
 
         {/* Dynamic View rendering depending on activeTab */}
         <div className="flex-1 flex overflow-hidden">

@@ -95,43 +95,74 @@ export async function triageEmail(payload: { email_id: string; sender: string; s
 }
 
 /**
- * Score many emails — fans out to /api/agent/triage in parallel (capped at 5
- * concurrent) so every call goes through LangGraph and appears in LangSmith.
- * Falls back to the fast deterministic /api/triage/batch if the agent route fails.
+ * Triage a single email with exponential backoff on 429 rate-limit responses.
+ * Retries up to maxRetries times, doubling the delay each attempt.
+ */
+async function triageWithRetry(
+  payload: { email_id: string; sender: string; subject: string; body: string; received_at: string },
+  maxRetries = 4,
+): Promise<unknown> {
+  let delay = 2000; // start at 2s
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(`${BASE}/api/agent/triage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (res.status === 429) {
+      // Respect Retry-After header if provided, otherwise exponential backoff
+      const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+      const wait = retryAfter > 0 ? retryAfter * 1000 : delay;
+      console.warn(`[triage] 429 rate-limited for ${payload.email_id}, waiting ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
+      if (attempt < maxRetries) {
+        await new Promise((r) => setTimeout(r, wait));
+        delay = Math.min(delay * 2, 30000); // cap at 30s
+        continue;
+      }
+      return null; // exhausted retries → fallback handles it
+    }
+
+    if (res.ok) return res.json();
+    return null; // non-429 error → fallback handles it
+  }
+  return null;
+}
+
+/**
+ * Score many emails — fans out to /api/agent/triage in parallel (capped at 2
+ * concurrent) with exponential backoff on 429 so we don't hammer Azure OpenAI.
+ * Falls back to the fast deterministic /api/triage/batch for any that fail.
  */
 export async function triageEmailsBatch(
   payloads: Array<{ email_id: string; sender: string; subject: string; body: string; received_at: string }>,
 ) {
   if (payloads.length === 0) return [];
 
-  const CONCURRENCY = 5;
+  // Low concurrency — Azure OpenAI TPM limits hit fast with 5+ parallel calls.
+  const CONCURRENCY = 2;
   const results: unknown[] = new Array(payloads.length);
 
   // Process in windows of CONCURRENCY to avoid hammering the LLM.
   for (let i = 0; i < payloads.length; i += CONCURRENCY) {
-    const window = payloads.slice(i, i + CONCURRENCY);
+    const chunk = payloads.slice(i, i + CONCURRENCY);
     const settled = await Promise.allSettled(
-      window.map((p) =>
-        fetch(`${BASE}/api/agent/triage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(p),
-        }).then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      )
+      chunk.map((p) => triageWithRetry(p))
     );
     settled.forEach((s, j) => {
       results[i + j] = s.status === 'fulfilled' ? s.value : null;
     });
   }
 
-  // Any nulls (agent failures) are filled with a deterministic fallback.
-  const failed = payloads.filter((_, i) => !results[i]);
-  if (failed.length > 0) {
+  // Any nulls (agent failures / exhausted retries) fall back to deterministic triage.
+  const failedPayloads = payloads.filter((_, i) => !results[i]);
+  if (failedPayloads.length > 0) {
+    console.warn(`[triage] ${failedPayloads.length} emails falling back to deterministic triage`);
     try {
       const fallback = await fetch(`${BASE}/api/triage/batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(failed),
+        body: JSON.stringify(failedPayloads),
       });
       if (fallback.ok) {
         const fallbackData = await fallback.json();
@@ -223,6 +254,50 @@ export async function generateEmailDraft(
   return res.json();
 }
 
+
+/** Trigger a browser download of an email attachment. */
+export function downloadAttachment(emailId: string, attachmentId: string, filename: string): void {
+  const url = `${BASE}/api/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}?filename=${encodeURIComponent(filename)}`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+/** Check if a new email has arrived — returns latest email id + received_at. */
+export async function pollNewEmail(): Promise<{
+  has_new: boolean;
+  latest_id: string | null;
+  received_at: string | null;
+  subject?: string;
+}> {
+  try {
+    const res = await fetch(`${BASE}/api/inbox/poll`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return { has_new: false, latest_id: null, received_at: null };
+    return res.json();
+  } catch {
+    return { has_new: false, latest_id: null, received_at: null };
+  }
+}
+
+/** Triage up to 10 emails in one batch call — Redis → DB → LLM (3-level cache). */
+export async function triagePageBatch(
+  payloads: Array<{ email_id: string; sender: string; subject: string; body: string; received_at: string }>,
+): Promise<unknown[]> {
+  if (payloads.length === 0) return [];
+  try {
+    const res = await fetch(`${BASE}/api/agent/triage-page`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payloads),
+    });
+    if (res.ok) return res.json();
+  } catch { /* fall through to per-email fallback */ }
+  // Fallback: individual calls with retry
+  return triageEmailsBatch(payloads);
+}
 
 export async function fetchCalendar(days = 7) {
   const res = await fetch(`${BASE}/api/calendar?days=${days}`);
@@ -438,11 +513,7 @@ export async function logoutUser() {
   return res.json();
 }
 
-export async function loginMock() {
-  const res = await fetch(`${BASE}/api/auth/login-mock`, { method: 'POST' });
-  if (!res.ok) throw new Error('Mock login failed');
-  return res.json();
-}
+
 
 export async function microsoftLoginInitiate() {
   const res = await fetch(`${BASE}/api/auth/microsoft/login-initiate`, { method: 'POST' });

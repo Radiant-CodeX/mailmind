@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   checkAuthStatus,
   quickLogin,
@@ -9,7 +9,7 @@ import {
   googleLoginPoll,
   microsoftLoginInitiate,
   microsoftLoginPoll,
-} from '../lib/api';
+} from "../lib/api";
 import {
   getRememberedLogin,
   clearRememberedLogin,
@@ -18,21 +18,22 @@ import {
   setRememberMe as persistRememberMe,
   RememberedLogin,
   Provider,
-} from '../lib/session';
+} from "../lib/session";
 
 /** Pick the provider for a typed email address. */
 function providerForEmail(email: string): Provider {
-  const domain = email.split('@')[1]?.toLowerCase() || '';
-  if (domain.includes('gmail') || domain.includes('googlemail')) return 'google';
-  return 'microsoft';
+  const domain = email.split("@")[1]?.toLowerCase() || "";
+  if (domain.includes("gmail") || domain.includes("googlemail"))
+    return "google";
+  return "microsoft";
 }
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [authStatus, setAuthStatus] = useState<string>('checking');
+  const [authStatus, setAuthStatus] = useState<string>("checking");
   const [remembered, setRemembered] = useState<RememberedLogin | null>(null);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [googleWaiting, setGoogleWaiting] = useState(false);
   const [msWaiting, setMsWaiting] = useState(false);
@@ -46,16 +47,16 @@ export default function LoginPage() {
       try {
         const data = await checkAuthStatus();
         if (data.authenticated) {
-          router.replace('/dashboard');
+          router.replace("/dashboard");
           return;
         }
         setRemembered(getRememberedLogin());
         setRememberMe(getRememberMe());
-        setAuthStatus('ready');
+        setAuthStatus("ready");
       } catch (err) {
-        console.error('Failed to query status', err);
+        console.error("Failed to query status", err);
         setRemembered(getRememberedLogin());
-        setAuthStatus('ready');
+        setAuthStatus("ready");
       }
     }
     init();
@@ -74,22 +75,24 @@ export default function LoginPage() {
     persistRememberMe(rememberMe);
     setError(null);
     // Open the popup SYNCHRONOUSLY to preserve the click gesture.
-    msPopupRef.current = window.open('', 'ms-login', 'width=520,height=680');
+    msPopupRef.current = window.open("", "ms-login", "width=520,height=680");
     setLoading(true);
     // Saved Microsoft account → resume silently and go straight to the dashboard.
-    if (!forceOAuth && remembered?.provider === 'microsoft') {
+    if (!forceOAuth && remembered?.provider === "microsoft") {
       try {
-        await quickLogin(remembered.email, 'microsoft');
+        await quickLogin(remembered.email, "microsoft");
         msPopupRef.current?.close();
-        router.push('/dashboard');
+        router.push("/dashboard");
         return;
-      } catch { /* fall through to the OAuth popup */ }
+      } catch {
+        /* fall through to the OAuth popup */
+      }
     }
     try {
       const data = await microsoftLoginInitiate();
-      if (data.authenticated || data.status === 'mock') {
+      if (data.authenticated) {
         msPopupRef.current?.close();
-        router.push('/dashboard');
+        router.push("/dashboard");
         return;
       }
       if (msPopupRef.current && data.auth_url) {
@@ -101,7 +104,7 @@ export default function LoginPage() {
       }
     } catch (err: unknown) {
       msPopupRef.current?.close();
-      setError(err instanceof Error ? err.message : 'Microsoft sign-in failed');
+      setError(err instanceof Error ? err.message : "Microsoft sign-in failed");
       setLoading(false);
       setMsWaiting(false);
     }
@@ -112,16 +115,20 @@ export default function LoginPage() {
     pollingIntervalRef.current = setInterval(async () => {
       try {
         const data = await microsoftLoginPoll(state);
-        if (data.status === 'success') {
-          if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        if (data.status === "success") {
+          if (pollingIntervalRef.current)
+            clearInterval(pollingIntervalRef.current);
           popup?.close();
-          router.push('/dashboard');
+          router.push("/dashboard");
         }
       } catch (err) {
-        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        if (pollingIntervalRef.current)
+          clearInterval(pollingIntervalRef.current);
         setLoading(false);
         setMsWaiting(false);
-        setError(err instanceof Error ? err.message : 'Microsoft sign-in failed');
+        setError(
+          err instanceof Error ? err.message : "Microsoft sign-in failed",
+        );
       }
     }, 2500);
   };
@@ -132,23 +139,29 @@ export default function LoginPage() {
     setError(null);
     // Open the popup SYNCHRONOUSLY (inside the click) so the browser keeps the
     // user-gesture and doesn't block it. We navigate it once we have the URL.
-    googlePopupRef.current = window.open('', 'google-login', 'width=500,height=680');
+    googlePopupRef.current = window.open(
+      "",
+      "google-login",
+      "width=500,height=680",
+    );
     setLoading(true);
     // Saved Google account → resume silently; if it works, close the popup and
     // go straight to the dashboard (no consent screen).
-    if (!forceOAuth && remembered?.provider === 'google') {
+    if (!forceOAuth && remembered?.provider === "google") {
       try {
-        await quickLogin(remembered.email, 'google');
+        await quickLogin(remembered.email, "google");
         googlePopupRef.current?.close();
-        router.push('/dashboard');
+        router.push("/dashboard");
         return;
-      } catch { /* session can't resume — use the open popup for full OAuth */ }
+      } catch {
+        /* session can't resume — use the open popup for full OAuth */
+      }
     }
     try {
       const data = await googleLoginInitiate(emailHint);
-      if (data.authenticated || data.status === 'mock') {
+      if (data.authenticated) {
         googlePopupRef.current?.close();
-        router.push('/dashboard');
+        router.push("/dashboard");
         return;
       }
       if (googlePopupRef.current && data.auth_url) {
@@ -162,7 +175,7 @@ export default function LoginPage() {
       }
     } catch (err: unknown) {
       googlePopupRef.current?.close();
-      setError(err instanceof Error ? err.message : 'Google sign-in failed');
+      setError(err instanceof Error ? err.message : "Google sign-in failed");
       setLoading(false);
       setGoogleWaiting(false);
     }
@@ -173,16 +186,18 @@ export default function LoginPage() {
     pollingIntervalRef.current = setInterval(async () => {
       try {
         const data = await googleLoginPoll(state);
-        if (data.status === 'success') {
-          if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        if (data.status === "success") {
+          if (pollingIntervalRef.current)
+            clearInterval(pollingIntervalRef.current);
           popup?.close();
-          router.push('/dashboard');
+          router.push("/dashboard");
         }
       } catch (err) {
-        if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
+        if (pollingIntervalRef.current)
+          clearInterval(pollingIntervalRef.current);
         setLoading(false);
         setGoogleWaiting(false);
-        setError(err instanceof Error ? err.message : 'Google sign-in failed');
+        setError(err instanceof Error ? err.message : "Google sign-in failed");
       }
     }, 2500);
   };
@@ -200,11 +215,11 @@ export default function LoginPage() {
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) {
-      setError('Please enter your email address.');
+      setError("Please enter your email address.");
       return;
     }
     // Email-first sign-in respects the typed address → force a fresh OAuth.
-    if (providerForEmail(email) === 'google') {
+    if (providerForEmail(email) === "google") {
       handleGoogle(email, true);
     } else {
       handleMicrosoft(true);
@@ -218,12 +233,12 @@ export default function LoginPage() {
     setError(null);
     try {
       await quickLogin(remembered.email, remembered.provider);
-      router.push('/dashboard');
+      router.push("/dashboard");
     } catch {
       // Session can't be resumed silently (token expired/cleared) — fall back to
       // a full sign-in for the remembered provider instead of showing an error.
       setLoading(false);
-      if (remembered.provider === 'google') {
+      if (remembered.provider === "google") {
         handleGoogle(remembered.email, true);
       } else {
         handleMicrosoft(true);
@@ -236,12 +251,17 @@ export default function LoginPage() {
     setRemembered(null);
   };
 
-  if (authStatus === 'checking') {
+  if (authStatus === "checking") {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary" id="login-checking">
+      <div
+        className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary"
+        id="login-checking"
+      >
         <div className="text-center">
           <div className="w-8 h-8 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mx-auto mb-4" />
-          <p className="text-xs text-[var(--text-muted)] font-medium">Checking authorization status...</p>
+          <p className="text-xs text-[var(--text-muted)] font-medium">
+            Checking authorization status...
+          </p>
         </div>
       </div>
     );
@@ -250,7 +270,10 @@ export default function LoginPage() {
   const showMainForm = !googleWaiting && !msWaiting;
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary px-4" id="login-workspace">
+    <div
+      className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary px-4"
+      id="login-workspace"
+    >
       <div className="relative w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-8 overflow-hidden">
         <div className="absolute -right-16 -top-16 w-36 h-36 rounded-full bg-[var(--accent-primary)]/10 blur-2xl" />
 
@@ -264,8 +287,12 @@ export default function LoginPage() {
             height={48}
             className="w-12 h-12 rounded-xl shadow mb-4"
           />
-          <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">MailMind</h1>
-          <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest mt-0.5">Co-pilot Studio</p>
+          <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">
+            MailMind
+          </h1>
+          <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest mt-0.5">
+            Co-pilot Studio
+          </p>
         </div>
 
         {error && (
@@ -291,17 +318,33 @@ export default function LoginPage() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
-                      Quick Login · {remembered.provider === 'google' ? 'Google' : 'Microsoft'}
+                      Quick Login ·{" "}
+                      {remembered.provider === "google"
+                        ? "Google"
+                        : "Microsoft"}
                     </p>
-                    <p className="text-sm font-bold text-[var(--text-primary)] truncate" title={remembered.email}>
+                    <p
+                      className="text-sm font-bold text-[var(--text-primary)] truncate"
+                      title={remembered.email}
+                    >
                       {remembered.email}
                     </p>
                   </div>
                   {loading ? (
                     <div className="w-4 h-4 border-2 border-[var(--accent-primary)] border-t-transparent animate-spin rounded-full shrink-0" />
                   ) : (
-                    <svg className="w-5 h-5 text-[var(--text-muted)] group-hover:text-[var(--accent-primary)] transition-colors shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                    <svg
+                      className="w-5 h-5 text-[var(--text-muted)] group-hover:text-[var(--accent-primary)] transition-colors shrink-0"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2.5}
+                        d="M9 5l7 7-7 7"
+                      />
                     </svg>
                   )}
                 </button>
@@ -314,7 +357,9 @@ export default function LoginPage() {
                 </button>
                 <div className="flex items-center gap-3 my-5">
                   <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">or</span>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
+                    or
+                  </span>
                   <div className="flex-1 h-px bg-[var(--border-subtle)]" />
                 </div>
               </div>
@@ -323,11 +368,23 @@ export default function LoginPage() {
             {/* Email + Remember me + Next */}
             <form onSubmit={handleNext} className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">Email</label>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
+                  Email
+                </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    <svg
+                      className="w-4 h-4"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+                      />
                     </svg>
                   </span>
                   <input
@@ -349,7 +406,9 @@ export default function LoginPage() {
                   className="w-4 h-4 accent-[var(--accent-primary)] cursor-pointer"
                   id="login-remember"
                 />
-                <span className="text-xs font-medium text-[var(--text-muted)]">Remember me</span>
+                <span className="text-xs font-medium text-[var(--text-muted)]">
+                  Remember me
+                </span>
               </label>
 
               <button
@@ -358,14 +417,20 @@ export default function LoginPage() {
                 className="w-full flex items-center justify-center gap-2 py-3 bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 disabled:opacity-50 text-[var(--bg-surface)] font-extrabold text-sm rounded-xl cursor-pointer shadow hover:shadow-lg transition-all duration-200 active:scale-95"
                 id="btn-login-next"
               >
-                {loading ? <div className="w-4 h-4 border-2 border-[var(--bg-surface)] border-t-transparent animate-spin rounded-full" /> : 'Next'}
+                {loading ? (
+                  <div className="w-4 h-4 border-2 border-[var(--bg-surface)] border-t-transparent animate-spin rounded-full" />
+                ) : (
+                  "Next"
+                )}
               </button>
             </form>
 
             {/* OR divider */}
             <div className="flex items-center gap-3 py-1">
               <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">or</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
+                or
+              </span>
               <div className="flex-1 h-px bg-[var(--border-subtle)]" />
             </div>
 
@@ -376,11 +441,27 @@ export default function LoginPage() {
               className="w-full flex items-center justify-center gap-2.5 py-2.5 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-bold text-sm rounded-xl cursor-pointer border border-[var(--border)] transition-all active:scale-95"
               id="btn-login-google"
             >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                />
               </svg>
               Continue with Google
             </button>
@@ -391,7 +472,11 @@ export default function LoginPage() {
               className="w-full flex items-center justify-center gap-2.5 py-2.5 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-bold text-sm rounded-xl cursor-pointer border border-[var(--border)] transition-all active:scale-95"
               id="btn-login-microsoft"
             >
-              <svg className="w-4 h-4" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+              <svg
+                className="w-4 h-4"
+                viewBox="0 0 21 21"
+                xmlns="http://www.w3.org/2000/svg"
+              >
                 <rect x="1" y="1" width="9" height="9" fill="#F25022" />
                 <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
                 <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
@@ -408,10 +493,11 @@ export default function LoginPage() {
             <div className="w-10 h-10 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mx-auto" />
             <div>
               <p className="text-sm font-bold text-[var(--text-primary)]">
-                Waiting for {googleWaiting ? 'Google' : 'Microsoft'} sign-in…
+                Waiting for {googleWaiting ? "Google" : "Microsoft"} sign-in…
               </p>
               <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">
-                Complete the sign-in in the popup window. If it didn’t open, check your popup blocker.
+                Complete the sign-in in the popup window. If it didn’t open,
+                check your popup blocker.
               </p>
             </div>
             <button

@@ -5,6 +5,8 @@ import { Email } from '../lib/types';
 import {
   fetchMailbox,
   triageEmailsBatch,
+  triagePageBatch,
+  pollNewEmail,
   moveEmailToTrash,
   restoreEmailFromTrash,
   markEmailRead,
@@ -16,7 +18,12 @@ import { userStorage } from '../lib/userStorage';
 // Persistent triage-score cache (by email id) so refreshes/page revisits don't
 // re-run the NLP classifier. Capped to avoid unbounded growth.
 // Keys are SCOPED to the current user via userStorage to prevent cross-account leaks.
-const TRIAGE_CACHE_KEY = 'triage_cache';
+//
+// Cache versioning: bump TRIAGE_CACHE_VERSION to invalidate all clients and
+// force a fresh triage + DB write on next load. Do this after backend changes
+// that affect triage scoring.
+const TRIAGE_CACHE_VERSION = 'v2';
+const TRIAGE_CACHE_KEY = `triage_cache_${TRIAGE_CACHE_VERSION}`;
 type TriageLite = NonNullable<Email['triage']>;
 
 function readTriageCache(): Record<string, TriageLite> {
@@ -37,11 +44,54 @@ function writeTriageCache(entries: Record<string, { composite_score: number }>):
   } catch {}
 }
 
-function readCachedEmails(folder: string): Email[] | null {
+/** Clear localStorage triage cache — forces re-triage + DB writes on next load. */
+export function clearTriageCache(): void {
+  if (typeof window === 'undefined') return;
+  userStorage.removeItem(TRIAGE_CACHE_KEY);
+}
+
+// Email cache TTL — how long to trust cached emails before re-fetching from API.
+// On reload within this window, emails are shown from cache instantly with zero
+// Gmail/Graph API calls. The SSE poll still runs and will notify if a new email
+// arrives, at which point only that one email is prepended (no full re-fetch).
+const EMAIL_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Bump this when the Email shape changes (e.g. added html_body).
+// Old cache entries with a different version are silently discarded,
+// forcing a fresh API fetch on next load.
+const EMAIL_CACHE_VERSION = 'v3'; // v3 = added html_body + attachments fields
+
+type EmailCacheEntry = {
+  v: string;
+  emails: Email[];
+  cachedAt: number;
+  nextPageToken: string | null;
+};
+
+function _cacheKey(folder: string) { return `emails_${EMAIL_CACHE_VERSION}_${folder}`; }
+
+function readEmailCache(folder: string): EmailCacheEntry | null {
   if (typeof window === 'undefined') return null;
-  const raw = userStorage.getItem(`emails_${folder}`);
-  if (!raw) return null;
-  try { return JSON.parse(raw) as Email[]; } catch { return null; }
+  try {
+    const raw = userStorage.getItem(_cacheKey(folder));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Discard old plain-array format or wrong version — forces fresh fetch
+    if (Array.isArray(parsed) || parsed.v !== EMAIL_CACHE_VERSION) return null;
+    return parsed as EmailCacheEntry;
+  } catch { return null; }
+}
+
+function writeEmailCache(folder: string, emails: Email[], nextPageToken: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const entry: EmailCacheEntry = { v: EMAIL_CACHE_VERSION, emails, cachedAt: Date.now(), nextPageToken };
+    userStorage.setItem(_cacheKey(folder), JSON.stringify(entry));
+  } catch {}
+}
+
+function isCacheFresh(entry: EmailCacheEntry): boolean {
+  return Date.now() - entry.cachedAt < EMAIL_CACHE_TTL_MS;
 }
 
 interface RawEmail {
@@ -50,6 +100,8 @@ interface RawEmail {
   sender: string;
   subject: string;
   body: string;
+  html_body?: string;
+  attachments?: Email['attachments'];
   received_at: string;
   composite_score?: number;
   triage?: Email['triage'];
@@ -116,13 +168,23 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   }, []);
 
   // --------------------------------------------------------------------------
-  // Pagination state (50 per page, cursor-based via next_page_token).
+  // Pagination — fetch exactly 10 emails per page directly from Graph/Gmail.
+  // Triage fires only for the current page's emails using the 3-level cache
+  // (localStorage → Redis → DB → LLM). Previous pages stay in allEmails so
+  // navigating back is instant with no extra API calls.
   // --------------------------------------------------------------------------
-  const PAGE_SIZE = 50;
+  const PAGE_SIZE = 10;
+
+  const [allEmails, setAllEmails] = useState<Email[]>([]);
   const [total, setTotal] = useState(0);
-  const [pageIndex, setPageIndex] = useState(0); // 0-based
-  const nextTokenRef = useRef<string | null>(null);
-  const tokenStackRef = useRef<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
+  const [fetchOffset, setFetchOffset] = useState(0);
+  const [hasMoreOnServer, setHasMoreOnServer] = useState(true);
+  // nextPageTokenRef: stores the actual cursor token returned by the API.
+  // For Microsoft Graph: a numeric skip string e.g. "10"
+  // For Gmail: an opaque cursor string e.g. "AqBCdef..."
+  // MUST use this instead of a computed offset — Gmail ignores numeric offsets.
+  const nextPageTokenRef = useRef<string | null>(null);
   const lastFolderRef = useRef<string | null>(null);
   const searchRef = useRef('');
   useEffect(() => { searchRef.current = searchQuery; }, [searchQuery]);
@@ -130,126 +192,343 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   const folderParam = (f: string) =>
     (['Inbox', 'Starred', 'Important'].includes(f) ? 'inbox' : f.toLowerCase());
 
-  // Fetch a single page (token=null → first page). `silent` skips the spinner
-  // for background auto-refresh.
-  const loadPage = useCallback(async (token: string | null, silent = false) => {
-    if (!enabled) return;
-    if (!silent) setLoading(true);
-    setError(null);
-    try {
-      const page = await fetchMailbox(folderParam(activeFolder), PAGE_SIZE, token, searchRef.current);
-      const raw = (page.emails || []) as unknown as RawEmail[];
-      // Reuse any triage scores we've already computed (avoids re-scoring on
-      // every refresh / page revisit).
-      const tcache = readTriageCache();
-      const mapped: Email[] = raw.map((e) => {
-        const id = e.email_id || e.id || '';
-        const cachedT = tcache[id];
-        return {
-          id,
-          sender: e.sender,
-          subject: e.subject,
-          body: e.body,
-          received_at: e.received_at,
-          composite_score: cachedT ? Math.round(cachedT.composite_score) : (e.composite_score || 0),
-          triage: e.triage || cachedT,
-          isRead: e.is_read ?? true,
-          hasAttachments: e.has_attachments ?? false,
-        };
-      });
-      setEmails(mapped);
-      setTotal(page.total || mapped.length);
-      nextTokenRef.current = page.next_page_token;
-      if (token === null) {
-        userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(mapped));
-      }
-      setSelectedEmailId((prev) => (prev && mapped.some((e) => e.id === prev) ? prev : null));
+  // Map raw API response to Email objects, reusing localStorage triage cache.
+  const mapRaw = useCallback((raw: RawEmail[]): Email[] => {
+    const tcache = readTriageCache();
+    return raw.map((e) => {
+      const id = e.email_id || e.id || '';
+      const cachedT = tcache[id];
+      return {
+        id,
+        sender: e.sender,
+        subject: e.subject,
+        body: e.body,
+        received_at: e.received_at,
+        composite_score: cachedT ? Math.round(cachedT.composite_score) : (e.composite_score || 0),
+        triage: e.triage || cachedT || null,
+        html_body: e.html_body || undefined,
+        attachments: e.attachments || undefined,
+        isRead: e.is_read ?? true,
+        hasAttachments: e.has_attachments ?? false,
+      };
+    });
+  }, []);
 
-      // Triage only the un-scored emails — in ONE batch request, not N.
-      if (['Inbox', 'Starred', 'Important'].includes(activeFolder)) {
-        const todo = mapped.filter((e) => !e.triage);
-        if (todo.length > 0) {
-          try {
-            const scores = (await triageEmailsBatch(todo.map((e) => ({
-              email_id: e.id, sender: e.sender, subject: e.subject,
-              body: e.body, received_at: e.received_at,
-            })))) as TriageLite[];
-            const byId: Record<string, TriageLite> = {};
-            todo.forEach((e, i) => { if (scores[i]) byId[e.id] = scores[i]; });
-            writeTriageCache(byId);
-            setEmails((prev) => prev.map((e) =>
-              byId[e.id] ? { ...e, composite_score: Math.round(byId[e.id].composite_score), triage: byId[e.id] } : e));
-          } catch (e) {
-            console.warn('Batch triage failed', e);
-          }
-        }
-      }
+  // Stable refs so triage/load callbacks never go stale without triggering re-renders.
+  const activeFolderRef = useRef(activeFolder);
+  const enabledRef = useRef(enabled);
+  const allEmailsRef = useRef<Email[]>([]);
+  const fetchOffsetRef = useRef(0);
+  const hasMoreOnServerRef = useRef(true);
+  const pageIndexRef = useRef(0);
+  useEffect(() => { activeFolderRef.current = activeFolder; }, [activeFolder]);
+  useEffect(() => { enabledRef.current = enabled; }, [enabled]);
+
+  // Triage a slice of emails — uses stable refs, no state in deps.
+  // This avoids triageSlice changing on every pageIndex change which would
+  // cascade into loadEmails re-creating → useEffects firing → repeated GETs.
+  const triageSlice = useCallback(async (slice: Email[]) => {
+    if (!['Inbox', 'Starred', 'Important'].includes(activeFolderRef.current)) return;
+    const todo = slice.filter((e) => !e.triage);
+    if (todo.length === 0) return;
+
+    console.info(`[triage] Scoring ${todo.length} emails`);
+    try {
+      const scores = (await triagePageBatch(todo.map((e) => ({
+        email_id: e.id, sender: e.sender, subject: e.subject,
+        body: e.body, received_at: e.received_at,
+      })))) as TriageLite[];
+
+      const byId: Record<string, TriageLite> = {};
+      todo.forEach((e, i) => { if (scores[i]) byId[e.id] = scores[i]; });
+      writeTriageCache(byId);
+
+      const apply = (e: Email) =>
+        byId[e.id] ? { ...e, composite_score: Math.round(byId[e.id].composite_score), triage: byId[e.id] } : e;
+
+      allEmailsRef.current = allEmailsRef.current.map(apply);
+      emailsRef.current = emailsRef.current.map(apply);
+      setAllEmails((prev) => prev.map(apply));
+      setEmailsRaw((prev) => prev.map(apply));
+    } catch (err) {
+      console.warn('[triage] Page triage failed', err);
+    }
+  }, []); // stable — zero deps, reads only from refs
+
+  const mapRawEmails = (rawList: RawEmail[]): Email[] => {
+    const tcache = readTriageCache();
+    return rawList.map((e) => {
+      const id = e.email_id || e.id || '';
+      const cachedT = tcache[id];
+      return {
+        id, sender: e.sender, subject: e.subject, body: e.body,
+        received_at: e.received_at,
+        composite_score: cachedT ? Math.round(cachedT.composite_score) : (e.composite_score || 0),
+        triage: e.triage || cachedT || null,
+        html_body: e.html_body || undefined,
+        attachments: e.attachments || undefined,
+        isRead: e.is_read ?? true,
+        hasAttachments: e.has_attachments ?? false,
+      };
+    });
+  };
+
+  // loadEmails — ZERO deps, reads everything from refs.
+  //
+  // Cache-first strategy:
+  //   1. On reload within EMAIL_CACHE_TTL_MS (5 min): show cached emails instantly,
+  //      skip all Gmail/Graph API calls. SSE poll still runs for new emails.
+  //   2. On cache miss OR stale cache: fetch from API, update cache.
+  //   3. On explicit refresh (refresh button): always re-fetch (silent=false, force=true).
+  const loadEmails = useCallback(async (silent = false, force = false) => {
+    if (!enabledRef.current) return;
+    setError(null);
+
+    const folder = activeFolderRef.current;
+    const folderChanged = lastFolderRef.current !== folder;
+
+    if (folderChanged) {
+      lastFolderRef.current = folder;
+      pageIndexRef.current = 0;
+      fetchOffsetRef.current = 0;
+      hasMoreOnServerRef.current = true;
+      nextPageTokenRef.current = null;
+      setPageIndex(0);
+      setSelectedEmailId(null);
+    }
+
+    // ── Cache-first: serve from localStorage if fresh and not forced ─────────
+    const cached = readEmailCache(folder);
+    if (!force && cached && isCacheFresh(cached) && cached.emails.length > 0) {
+      console.info('[inbox] Serving %s from cache (%ds old) — skipping API call',
+        folder, Math.round((Date.now() - cached.cachedAt) / 1000));
+
+      // Restore pagination cursor from cache
+      nextPageTokenRef.current = cached.nextPageToken;
+      const hasMore = !!cached.nextPageToken;
+
+      allEmailsRef.current = cached.emails;
+      emailsRef.current = cached.emails.slice(0, PAGE_SIZE);
+      fetchOffsetRef.current = cached.emails.length;
+      hasMoreOnServerRef.current = hasMore;
+      pageIndexRef.current = 0;
+
+      setAllEmails(cached.emails);
+      setTotal(cached.emails.length);
+      setFetchOffset(cached.emails.length);
+      setHasMoreOnServer(hasMore);
+      setPageIndex(0);
+      setEmailsRaw(cached.emails.slice(0, PAGE_SIZE));
+      // Triage only un-scored emails (likely already scored and in cache)
+      triageSlice(cached.emails.slice(0, PAGE_SIZE));
+      return;
+    }
+
+    // ── Cache miss or stale — fetch from API ──────────────────────────────────
+    if (!silent) setLoading(true);
+
+    // Show stale cache instantly while fresh data loads in background
+    if (cached && cached.emails.length > 0) {
+      allEmailsRef.current = cached.emails;
+      setAllEmails(cached.emails);
+      setEmailsRaw(cached.emails.slice(0, PAGE_SIZE));
+      emailsRef.current = cached.emails.slice(0, PAGE_SIZE);
+    }
+
+    try {
+      const page = await fetchMailbox(
+        folderParam(folder), PAGE_SIZE, null, searchRef.current,
+      );
+      const mapped = mapRawEmails((page.emails || []) as unknown as RawEmail[]);
+      const newToken = page.next_page_token || null;
+      const hasMore = !!newToken;
+
+      // Write refs before setState
+      nextPageTokenRef.current = newToken;
+      allEmailsRef.current = mapped;
+      emailsRef.current = mapped;
+      fetchOffsetRef.current = mapped.length;
+      hasMoreOnServerRef.current = hasMore;
+      pageIndexRef.current = 0;
+
+      // Persist with timestamp + cursor so next reload is instant
+      writeEmailCache(folder, mapped, newToken);
+
+      setAllEmails(mapped);
+      setTotal(page.total || mapped.length);
+      setFetchOffset(mapped.length);
+      setHasMoreOnServer(hasMore);
+      setPageIndex(0);
+      setEmailsRaw(mapped);
+      setSelectedEmailId((prev) => (prev && mapped.some((e) => e.id === prev) ? prev : null));
+      triageSlice(mapped);
     } catch (err: unknown) {
-      console.error('Failed to sync emails from backend', err);
-      setError(err instanceof Error ? err.message : 'Failed to sync emails');
+      console.error('Failed to load emails', err);
+      setError(err instanceof Error ? err.message : 'Failed to load emails');
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [activeFolder, enabled, setEmails]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reload from page 0 (used on folder switch, refresh, and search).
-  const loadEmails = useCallback(async () => {
-    if (!enabled) return;
-    if (lastFolderRef.current !== activeFolder) {
-      lastFolderRef.current = activeFolder;
+  // nextPage — reads/writes refs first, then flushes to React state in one batch.
+  // Doing ref writes before setState prevents any intermediate re-render from
+  // reading stale ref values and overwriting the new page.
+  const nextPage = useCallback(async () => {
+    const next = pageIndexRef.current + 1;
+
+    // ── Cached page (already fetched) ──────────────────────────────────────
+    if (next * PAGE_SIZE < allEmailsRef.current.length) {
+      const slice = allEmailsRef.current.slice(next * PAGE_SIZE, (next + 1) * PAGE_SIZE);
+      pageIndexRef.current = next;
+      emailsRef.current = slice;
+      setPageIndex(next);
+      setEmailsRaw(slice);   // direct set — no functional updater, no stale-prev risk
       setSelectedEmailId(null);
-      // Paint this folder's cache instantly if present; otherwise CLEAR the list
-      // so the previous folder's emails don't linger under the new tab (this is
-      // what made Sent look like it "wasn't updating"). The skeleton shows until
-      // the fresh page arrives.
-      const cached = readCachedEmails(activeFolder);
-      setEmails(cached ?? []);
+      triageSlice(slice);
+      return;
     }
-    tokenStackRef.current = [null];
-    setPageIndex(0);
-    await loadPage(null);
-  }, [activeFolder, enabled, loadPage, setEmails]);
 
-  const nextPage = useCallback(() => {
-    const t = nextTokenRef.current;
-    if (!t) return;
-    tokenStackRef.current.push(t);
-    setPageIndex((i) => i + 1);
-    loadPage(t);
-  }, [loadPage]);
+    // ── Fetch next 10 from server ───────────────────────────────────────────
+    if (!hasMoreOnServerRef.current) return;
+    // Must have a valid cursor token — Gmail needs its own opaque cursor,
+    // Graph uses numeric skip. Never compute "10", "20" manually.
+    const token = nextPageTokenRef.current;
+    if (!token) {
+      hasMoreOnServerRef.current = false;
+      setHasMoreOnServer(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const page = await fetchMailbox(
+        folderParam(activeFolderRef.current), PAGE_SIZE, token, searchRef.current,
+      );
+      const newEmails = mapRaw((page.emails || []) as unknown as RawEmail[]);
+      if (newEmails.length === 0) {
+        hasMoreOnServerRef.current = false;
+        nextPageTokenRef.current = null;
+        setHasMoreOnServer(false);
+        return;
+      }
+
+      const combined = [...allEmailsRef.current, ...newEmails];
+      const newOffset = fetchOffsetRef.current + newEmails.length;
+      const newToken = page.next_page_token || null;
+      const hasMore = !!newToken;
+
+      // Write refs before any setState
+      nextPageTokenRef.current = newToken;
+      allEmailsRef.current = combined;
+      fetchOffsetRef.current = newOffset;
+      hasMoreOnServerRef.current = hasMore;
+      pageIndexRef.current = next;
+
+      // Persist combined list with updated cursor so next reload restores full state
+      writeEmailCache(activeFolderRef.current, combined, newToken);
+
+      emailsRef.current = newEmails;
+      setAllEmails(combined);
+      setFetchOffset(newOffset);
+      setHasMoreOnServer(hasMore);
+      setPageIndex(next);
+      setEmailsRaw(newEmails);
+      setSelectedEmailId(null);
+
+      triageSlice(newEmails);
+    } catch (err) {
+      console.error('Failed to fetch next page', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [mapRaw, triageSlice]);
 
   const prevPage = useCallback(() => {
-    if (tokenStackRef.current.length <= 1) return;
-    tokenStackRef.current.pop();
-    const t = tokenStackRef.current[tokenStackRef.current.length - 1];
-    setPageIndex((i) => Math.max(0, i - 1));
-    loadPage(t);
-  }, [loadPage]);
+    if (pageIndexRef.current === 0) return;
+    const prev = pageIndexRef.current - 1;
+    const slice = allEmailsRef.current.slice(prev * PAGE_SIZE, (prev + 1) * PAGE_SIZE);
+    pageIndexRef.current = prev;
+    emailsRef.current = slice;
+    setPageIndex(prev);
+    setEmailsRaw(slice);   // direct set — no functional updater
+    setSelectedEmailId(null);
+    triageSlice(slice);
+  }, [triageSlice]);
 
-  const hasNextPage = (pageIndex + 1) * PAGE_SIZE < total;
+  const hasNextPage = (pageIndex + 1) * PAGE_SIZE < allEmails.length || hasMoreOnServer;
   const hasPrevPage = pageIndex > 0;
 
-  // Reload on folder change.
-  useEffect(() => {
-    const id = setTimeout(loadEmails, 0);
-    return () => clearTimeout(id);
-  }, [loadEmails]);
-
-  // Debounced server-side search: reload page 0 when the query changes.
-  useEffect(() => {
-    const id = setTimeout(() => { if (enabled) loadEmails(); }, 400);
-    return () => clearTimeout(id);
-  }, [searchQuery, enabled, loadEmails]);
-
-  // Auto-refresh the CURRENT page every 30s (silent — no spinner, no page jump).
+  // Single effect that owns ALL loadEmails triggers.
+  // Tracks folder + enabled + searchQuery together so exactly one load fires
+  // per change — no double-fire, no stale-closure reset after nextPage.
+  const prevTriggerRef = useRef<string | null>(null);
   useEffect(() => {
     if (!enabled) return;
-    const id = setInterval(() => {
-      const token = tokenStackRef.current[tokenStackRef.current.length - 1];
-      loadPage(token, true);
-    }, 30000);
+    const trigger = `${activeFolder}|${searchQuery}`;
+    const isSearch = prevTriggerRef.current !== null &&
+      prevTriggerRef.current.split('|')[0] === activeFolder &&
+      prevTriggerRef.current.split('|')[1] !== searchQuery;
+
+    prevTriggerRef.current = trigger;
+
+    // Debounce search changes by 400ms; folder changes and initial load are immediate.
+    const delay = isSearch ? 400 : 0;
+    const id = setTimeout(() => loadEmails(), delay);
+    return () => clearTimeout(id);
+  }, [activeFolder, enabled, searchQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Smart new-email polling — uses lightweight /api/inbox/poll (1 API call,
+  // no body fetching). Only triggers a full reload when a new email arrives.
+  // Uses refs only so this interval never restarts on re-renders.
+  const latestEmailIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (allEmails.length > 0) latestEmailIdRef.current = allEmails[0]?.id || null;
+  }, [allEmails]);
+
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (!enabledRef.current || !['Inbox', 'Starred', 'Important'].includes(activeFolderRef.current)) return;
+      const result = await pollNewEmail();
+      if (!result.latest_id || result.latest_id === latestEmailIdRef.current) return;
+
+      console.info('[inbox] New email detected (%s) — fetching and prepending', result.latest_id);
+      latestEmailIdRef.current = result.latest_id;
+
+      // Fetch only the 1 newest email and prepend it — no full reload needed.
+      // This keeps the cache valid and avoids re-fetching all 10+ emails.
+      try {
+        const { fetchMailbox: fm } = await import('../lib/api');
+        const page = await fm(folderParam(activeFolderRef.current), 1, null, '');
+        const newOnes = mapRawEmails((page.emails || []).slice(0, 1) as unknown as RawEmail[]);
+        if (newOnes.length === 0 || newOnes[0].id === allEmailsRef.current[0]?.id) return;
+
+        // Prepend new email at top, keep existing list
+        const updated = [newOnes[0], ...allEmailsRef.current];
+        const currentToken = nextPageTokenRef.current;
+        allEmailsRef.current = updated;
+
+        // Update cache with new email prepended
+        writeEmailCache(activeFolderRef.current, updated, currentToken);
+
+        // If on page 0, show it at the top immediately
+        if (pageIndexRef.current === 0) {
+          const newPage0 = updated.slice(0, PAGE_SIZE);
+          emailsRef.current = newPage0;
+          setAllEmails(updated);
+          setEmailsRaw(newPage0);
+          setTotal((prev) => prev + 1);
+          triageSlice([newOnes[0]]);
+        } else {
+          // User is on a later page — just update allEmails silently
+          setAllEmails(updated);
+          setTotal((prev) => prev + 1);
+        }
+      } catch (err) {
+        console.warn('[inbox] Failed to fetch new email, falling back to full reload', err);
+        loadEmails(true, true); // force=true bypasses cache
+      }
+    }, 60000);
     return () => clearInterval(id);
-  }, [enabled, loadPage]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --------------------------------------------------------------------------
   // Starred
@@ -364,7 +643,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   // Mark read / unread, archive, report spam
   // --------------------------------------------------------------------------
   const persist = useCallback((list: Email[]) => {
-    localStorage.setItem(`mailmind_emails_${activeFolder}`, JSON.stringify(list));
+    userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(list));
   }, [activeFolder]);
 
   const markRead = useCallback(async (emailId: string, read: boolean) => {
@@ -491,7 +770,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     prevPage,
     loading,
     error,
-    refresh: loadEmails,
+    refresh: () => loadEmails(false, false), // manual refresh respects cache
     toggleStar,
     trashEmail,
     undoTrash,

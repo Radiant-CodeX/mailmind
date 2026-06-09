@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
+import logging
 import time
 from threading import Lock
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 
 class TTLCache:
-    """A thread-safe time-to-live cache for ephemeral lookups."""
+    """A thread-safe time-to-live in-memory cache for ephemeral lookups."""
 
     def __init__(self, default_ttl: int = 300) -> None:
         self.default_ttl = default_ttl
@@ -14,13 +18,11 @@ class TTLCache:
         self._lock = Lock()
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
-        """Store a value with an expiration time."""
         expiry = time.time() + (ttl or self.default_ttl)
         with self._lock:
             self._store[key] = (expiry, value)
 
     def get(self, key: str) -> Any | None:
-        """Return a cached value if it is still valid, otherwise remove and return None."""
         with self._lock:
             item = self._store.get(key)
             if not item:
@@ -32,13 +34,91 @@ class TTLCache:
             return value
 
     def clear(self) -> None:
-        """Remove all entries from the cache."""
         with self._lock:
             self._store.clear()
 
 
-# Global cache instances with 24-hour default TTL (86400 seconds)
+class TriageCache:
+    """
+    Two-level triage cache: Redis (fast, shared) → in-memory TTLCache (local).
+
+    Cache hierarchy on GET:
+      1. In-memory TTLCache (sub-ms)
+      2. Redis (1-5ms, shared across workers)
+      3. PostgreSQL DB (caller's responsibility)
+
+    On SET, writes to both Redis and in-memory so the next call is instant.
+    Falls back gracefully to memory-only when Redis is not configured/reachable.
+    TTL: 7 days (triage scores are stable; only invalidated on explicit delete).
+    """
+
+    TRIAGE_TTL = 7 * 24 * 3600  # 7 days in seconds
+    KEY_PREFIX = "mailmind:triage:"
+
+    def __init__(self) -> None:
+        self._memory = TTLCache(default_ttl=self.TRIAGE_TTL)
+        self._redis: Any = None
+        self._redis_ok = False
+        self._init_redis()
+
+    def _init_redis(self) -> None:
+        try:
+            import os
+            redis_url = os.getenv("REDIS_URL", "")
+            if not redis_url:
+                return
+            import redis as redis_lib
+            client = redis_lib.from_url(redis_url, decode_responses=True, socket_connect_timeout=2)
+            client.ping()
+            self._redis = client
+            self._redis_ok = True
+            logger.info("[TriageCache] Redis connected at %s", redis_url)
+        except Exception as e:
+            logger.info("[TriageCache] Redis not available (%s) — using memory-only cache", e)
+            self._redis_ok = False
+
+    def _rkey(self, email_id: str) -> str:
+        return f"{self.KEY_PREFIX}{email_id}"
+
+    def get(self, email_id: str) -> dict[str, Any] | None:
+        # 1. In-memory
+        hit = self._memory.get(email_id)
+        if hit is not None:
+            return hit
+        # 2. Redis
+        if self._redis_ok:
+            try:
+                raw = self._redis.get(self._rkey(email_id))
+                if raw:
+                    data = json.loads(raw)
+                    self._memory.set(email_id, data, ttl=self.TRIAGE_TTL)
+                    return data
+            except Exception as e:
+                logger.warning("[TriageCache] Redis get error: %s", e)
+        return None
+
+    def set(self, email_id: str, data: dict[str, Any]) -> None:
+        self._memory.set(email_id, data, ttl=self.TRIAGE_TTL)
+        if self._redis_ok:
+            try:
+                self._redis.setex(self._rkey(email_id), self.TRIAGE_TTL, json.dumps(data))
+            except Exception as e:
+                logger.warning("[TriageCache] Redis set error: %s", e)
+
+    def delete(self, email_id: str) -> None:
+        self._memory._store.pop(email_id, None)
+        if self._redis_ok:
+            try:
+                self._redis.delete(self._rkey(email_id))
+            except Exception:
+                pass
+
+
+# Global cache instances
 classification_cache = TTLCache(default_ttl=86400)
-triage_cache = TTLCache(default_ttl=86400)
+triage_cache_store = TriageCache()          # Redis-backed triage cache
 precedents_cache = TTLCache(default_ttl=86400)
 commitments_cache = TTLCache(default_ttl=86400)
+
+# Keep legacy name working
+triage_cache = TTLCache(default_ttl=86400)

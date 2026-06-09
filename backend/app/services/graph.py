@@ -16,11 +16,35 @@ except Exception:  # pragma: no cover - imported at runtime when available
     msal = None
 
 
+def _graph_html_to_text(html: str) -> str:
+    """Strip HTML to clean plain text for agent processing (Outlook bodies)."""
+    html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.IGNORECASE | re.DOTALL)
+    html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.IGNORECASE | re.DOTALL)
+    html = re.sub(r'<br\s*/?>', '\n', html, flags=re.IGNORECASE)
+    html = re.sub(r'</(p|div|li|tr|h[1-6]|blockquote|table)>', '\n', html, flags=re.IGNORECASE)
+    html = re.sub(r'<li[^>]*>', '• ', html, flags=re.IGNORECASE)
+    html = re.sub(r'<[^>]+>', '', html)
+    html = (html.replace('&nbsp;', ' ').replace('&amp;', '&').replace('&lt;', '<')
+                .replace('&gt;', '>').replace('&quot;', '"').replace('&#39;', "'"))
+    html = re.sub(r'\n{3,}', '\n\n', html)
+    return html.strip()
+
+
 # Delegated scopes requested for the signed-in user (email, calendar, tasks, profile).
+# offline_access is required to receive a refresh token so sessions survive past 1 hour
+# without requiring the user to re-authenticate (Azure offline_access permission enabled).
 _DELEGATED_SCOPES = [
-    "User.Read", "Mail.ReadWrite", "Mail.Send", "Calendars.ReadWrite", "Tasks.ReadWrite",
+    "offline_access",           # refresh token — keeps session alive indefinitely
+    "User.Read",
+    "Mail.ReadWrite", "Mail.Send",
+    "Calendars.ReadWrite",
+    "Tasks.ReadWrite",
     "ChannelMessage.Send", "OnlineMeetings.ReadWrite", "Team.ReadBasic.All",
 ]
+
+# Proactive token refresh: refresh the access token this many seconds before expiry.
+# Prevents any 401 mid-request by keeping the token always fresh.
+_TOKEN_REFRESH_BUFFER = 300  # 5 minutes
 
 # Persistent MSAL token cache. Holds the refresh token from the delegated login
 # so Quick Login can acquire fresh access tokens silently (no code/password).
@@ -87,7 +111,14 @@ def build_ms_auth_url() -> tuple[str, str]:
 
 
 def exchange_ms_code(state: str, query_params: dict[str, str]) -> dict[str, Any]:
-    """Complete the auth-code flow from the redirect query params; store the session."""
+    """Complete the auth-code flow from the redirect query params; store the session.
+
+    With offline_access in scope, MSAL returns a refresh token alongside the
+    access token. MSAL's SerializableTokenCache persists it to disk so future
+    calls to _silent_acquire() can obtain new access tokens without any user
+    interaction — the session survives indefinitely as long as the refresh token
+    is not revoked.
+    """
     rec = ms_auth_status.get(state)
     if not rec or "flow" not in rec:
         raise RuntimeError("Unknown or expired sign-in state. Please try again.")
@@ -101,30 +132,48 @@ def exchange_ms_code(state: str, query_params: dict[str, str]) -> dict[str, Any]
     _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
     _user_token_cache["user_principal_name"] = upn
     _user_token_cache["tenant_id"] = claims.get("tid")
+    # refresh_token is persisted inside the MSAL cache (not in _user_token_cache)
+    # so it survives process restarts via the msal_cache.bin file.
     _save_token_cache(cache)
+    import logging
+    logging.getLogger(__name__).info(
+        "[auth] Token exchange complete for %s — refresh token persisted (offline_access)", upn
+    )
     return {"email": upn}
 
 
 def _silent_acquire(username: str | None = None) -> dict[str, Any] | None:
     """Silently acquire a delegated access token from the persisted refresh token.
 
+    Tries the confidential client first (auth-code flow stores tokens there),
+    then falls back to the public client (device-code flow). Both write to the
+    same cache file but MSAL separates accounts by client type, so both must
+    be checked for Quick Login to work regardless of which flow was used.
+
     Returns the MSAL result dict on success, or None if no usable account /
     refresh token is available (caller should fall back to interactive login).
     """
     if msal is None:
         return None
-    app, cache = _build_public_client()
-    accounts = app.get_accounts(username=username) if username else app.get_accounts()
-    if not accounts:
-        return None
-    result = app.acquire_token_silent(_DELEGATED_SCOPES, account=accounts[0])
-    _save_token_cache(cache)
-    if not result or "access_token" not in result:
-        return None
-    _user_token_cache["access_token"] = result["access_token"]
-    _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
-    _user_token_cache["user_principal_name"] = accounts[0].get("username")
-    return result
+
+    # Try confidential client first (auth-code flow), then public (device-code).
+    for build_fn in (_build_confidential_client, _build_public_client):
+        try:
+            app, cache = build_fn()
+            accounts = app.get_accounts(username=username) if username else app.get_accounts()
+            if not accounts:
+                continue
+            result = app.acquire_token_silent(_DELEGATED_SCOPES, account=accounts[0])
+            _save_token_cache(cache)
+            if result and "access_token" in result:
+                _user_token_cache["access_token"] = result["access_token"]
+                _user_token_cache["expires_at"] = time.time() + int(result.get("expires_in", 3600))
+                _user_token_cache["user_principal_name"] = accounts[0].get("username")
+                return result
+        except Exception:
+            continue
+
+    return None
 
 
 _user_token_cache: dict[str, Any] = {
@@ -186,25 +235,31 @@ class GraphClient:
     def _get_token(self) -> str | None:
         if self.use_mock:
             return None
-        
+
         now = time.time()
-        # 1. Prioritize active user session token if set and valid
+        # 1. Active user session — proactively refresh _TOKEN_REFRESH_BUFFER seconds
+        #    before expiry so no API call ever hits a stale token mid-flight.
         if _user_token_cache["access_token"]:
-            if now < (_user_token_cache["expires_at"] - 60):
+            if now < (_user_token_cache["expires_at"] - _TOKEN_REFRESH_BUFFER):
                 return _user_token_cache["access_token"]
-            # Access token expired — try a silent refresh from the persisted
-            # refresh token before giving up (keeps the session alive for days).
+            # Token within refresh window (or expired) — silently acquire a new one
+            # using the offline_access refresh token persisted in msal_cache.bin.
             refreshed = _silent_acquire(_user_token_cache.get("user_principal_name"))
             if refreshed and refreshed.get("access_token"):
+                import logging
+                logging.getLogger(__name__).debug(
+                    "[auth] Access token proactively refreshed for %s",
+                    _user_token_cache.get("user_principal_name"),
+                )
                 return refreshed["access_token"]
-            # No valid refresh token — clear the session and require re-login.
+            # Refresh token revoked or expired — clear and require re-login.
             _user_token_cache["access_token"] = None
             _user_token_cache["expires_at"] = 0.0
             _user_token_cache["user_principal_name"] = None
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=401,
-                detail="Active user session has expired. Please log in again."
+                detail="Session expired. Please sign in again.",
             )
 
         # 2. If no active user session, check if we have daemon config (azure_user_upn)
@@ -435,8 +490,9 @@ class GraphClient:
             path = f'{base}&$search="{quote(query)}"'
         else:
             path = f"{base}&$orderby=receivedDateTime desc"
+        # Request HTML body so the frontend can render rich formatting like Gmail.
         data = self._request("GET", path, headers={
-            "Prefer": 'outlook.body-content-type="text"', "ConsistencyLevel": "eventual"})
+            "Prefer": 'outlook.body-content-type="html"', "ConsistencyLevel": "eventual"})
         raw = data.get("value", [])
         emails = []
         for msg in raw:
@@ -444,20 +500,64 @@ class GraphClient:
             sender = "unknown@example.com"
             if from_obj and "emailAddress" in from_obj:
                 sender = from_obj["emailAddress"].get("address", sender)
-            body_obj = msg.get("body")
-            body = body_obj.get("content", "") if body_obj else msg.get("bodyPreview", "")
+            body_obj = msg.get("body") or {}
+            content = body_obj.get("content", "")
+            content_type = (body_obj.get("contentType") or "").lower()
+            if content_type == "html" and content:
+                html_body = content
+                plain_body = _graph_html_to_text(content)
+            else:
+                html_body = None
+                plain_body = content or msg.get("bodyPreview", "")
             emails.append({
                 "email_id": msg.get("id"),
                 "sender": sender,
                 "subject": msg.get("subject", ""),
-                "body": body,
+                "body": plain_body,         # plain text for agents
+                "html_body": html_body,     # rich HTML for display
                 "received_at": msg.get("receivedDateTime"),
                 "is_read": bool(msg.get("isRead", True)),
                 "has_attachments": bool(msg.get("hasAttachments", False)),
+                # Attachment metadata is fetched lazily on demand via list_attachments
+                "attachments": [],
             })
         total = int(data.get("@odata.count", skip + len(emails)))
         next_token = str(skip + limit) if len(emails) == limit and (skip + limit) < total else None
         return {"emails": emails, "next_page_token": next_token, "total": total}
+
+    def list_attachments(self, message_id: str) -> list[dict[str, Any]]:
+        """List attachment metadata for a Graph message."""
+        if self.use_mock:
+            return []
+        prefix = self._get_prefix()
+        data = self._request("GET", f"{prefix}/messages/{message_id}/attachments?$select=id,name,contentType,size")
+        out = []
+        for att in (data or {}).get("value", []):
+            out.append({
+                "attachment_id": att.get("id"),
+                "filename": att.get("name", "attachment"),
+                "mime_type": att.get("contentType", "application/octet-stream"),
+                "size": att.get("size", 0),
+            })
+        return out
+
+    def get_attachment(self, message_id: str, attachment_id: str) -> dict[str, Any] | None:
+        """Fetch a Graph attachment; returns {data: base64url} to match Gmail's shape."""
+        if self.use_mock:
+            return None
+        prefix = self._get_prefix()
+        att = self._request("GET", f"{prefix}/messages/{message_id}/attachments/{attachment_id}")
+        if not att:
+            return None
+        # Graph returns standard base64 in contentBytes; convert to base64url for the
+        # shared download endpoint (which uses urlsafe_b64decode).
+        import base64
+        content_b64 = att.get("contentBytes", "")
+        try:
+            raw = base64.b64decode(content_b64)
+            return {"data": base64.urlsafe_b64encode(raw).decode("ascii")}
+        except Exception:
+            return {"data": content_b64}
 
     # ── Mail actions ─────────────────────────────────────────────────────────
     def mark_read(self, email_id: str, read: bool = True) -> None:

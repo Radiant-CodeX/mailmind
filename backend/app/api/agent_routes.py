@@ -250,44 +250,53 @@ async def stream_pipeline(request: AgentProcessRequest) -> StreamingResponse:
     )
 
 
-@router.post("/triage")
-def triage_only(request: TriageOnlyRequest) -> dict[str, Any]:
+def _run_triage_for_email(request: TriageOnlyRequest) -> dict[str, Any]:
     """
-    Run only the triage sub-pipeline (ingest + triage nodes).
+    Core triage logic with 3-level cache: Redis → DB → LangGraph LLM.
+    Used by both /triage (single) and /triage-page (batch).
+    """
+    from app.services.cache import triage_cache_store
 
-    Lightweight alternative to /process when commitment extraction and
-    draft generation are not needed — e.g., for bulk inbox scoring.
-    """
+    # ── Level 1: Redis cache (sub-ms) ────────────────────────────────────────
+    cached = triage_cache_store.get(request.email_id)
+    if cached and cached.get("priority"):
+        logger.info("[triage] Redis hit for %s", request.email_id)
+        return {**cached, "_cached": "redis"}
+
+    # ── Level 2: DB cache (1-5ms) ────────────────────────────────────────────
+    existing = repo.get_enrichment(request.email_id)
+    if existing and existing.get("priority"):
+        logger.info("[triage] DB hit for %s", request.email_id)
+        result = {
+            "email_id": request.email_id,
+            "email_type": existing.get("email_type"),
+            "composite_score": existing.get("composite_score", 0.0),
+            "priority": existing["priority"],
+            "approval_mode": existing.get("approval_mode", "SUGGEST"),
+            "axes": existing.get("axes") or [],
+            "dynamic_weights": existing.get("dynamic_weights") or {},
+            "triage_reasoning": existing.get("triage_reasoning"),
+            "errors": [],
+            "_cached": "db",
+        }
+        # Warm Redis so next call is even faster
+        triage_cache_store.set(request.email_id, result)
+        return result
+
+    # ── Level 3: LangGraph LLM (fresh triage) ────────────────────────────────
     received = request.received_at or datetime.now(tz=timezone.utc).isoformat()
-
     from app.agents.nodes import ingest_node, triage_node
 
-    state = {
-        "email_id": request.email_id,
-        "sender": request.sender,
-        "subject": request.subject,
-        "body": request.body,
-        "received_at": received,
-        "masked_body": None,
-        "axes": [],
-        "dynamic_weights": {},
-        "email_type": None,
-        "composite_score": 0.0,
-        "priority": None,
-        "approval_mode": None,
-        "triage_reasoning": None,
-        "commitments": [],
-        "commitment_reasoning": None,
-        "calendar_events": [],
-        "conflict_summary": None,
-        "precedents": [],
-        "draft_prompt": None,
-        "draft_reply": None,
-        "current_step": "pending",
-        "errors": [],
-        "approved": False,
+    state: dict[str, Any] = {
+        "email_id": request.email_id, "sender": request.sender,
+        "subject": request.subject, "body": request.body, "received_at": received,
+        "masked_body": None, "axes": [], "dynamic_weights": {}, "email_type": None,
+        "composite_score": 0.0, "priority": None, "approval_mode": None,
+        "triage_reasoning": None, "commitments": [], "commitment_reasoning": None,
+        "calendar_events": [], "conflict_summary": None, "precedents": [],
+        "draft_prompt": None, "draft_reply": None,
+        "current_step": "pending", "errors": [], "approved": False,
     }
-
     state.update(ingest_node(state))
     state.update(triage_node(state))
 
@@ -297,7 +306,7 @@ def triage_only(request: TriageOnlyRequest) -> dict[str, Any]:
         if state.get("triage_reasoning"):
             state["triage_reasoning"] = pii_sanitizer.restore_text(state["triage_reasoning"], mapping)
 
-    return {
+    result = {
         "email_id": state["email_id"],
         "email_type": state.get("email_type"),
         "composite_score": state["composite_score"],
@@ -307,7 +316,83 @@ def triage_only(request: TriageOnlyRequest) -> dict[str, Any]:
         "dynamic_weights": state.get("dynamic_weights", {}),
         "triage_reasoning": state.get("triage_reasoning"),
         "errors": state.get("errors", []),
+        "_cached": False,
     }
+
+    # Persist to DB + Redis so next call is instant
+    repo.upsert_enrichment(request.email_id, state, status="triaged", enrichment_source="fast_triage")
+    repo.write_audit(request.email_id, "triaged", details={"priority": state.get("priority")})
+    triage_cache_store.set(request.email_id, result)
+    logger.info("[triage] LLM triage complete for %s → %s", request.email_id, state.get("priority"))
+    return result
+
+
+@router.post("/triage")
+def triage_only(request: TriageOnlyRequest) -> dict[str, Any]:
+    """Single email triage — Redis → DB → LLM (3-level cache)."""
+    return _run_triage_for_email(request)
+
+
+@router.post("/triage-page")
+def triage_page(requests: list[TriageOnlyRequest]) -> list[dict[str, Any]]:
+    """
+    Batch triage for a single inbox page (up to 10 emails).
+
+    Cache hits (Redis/DB) return instantly with no LLM call.
+    Only cache misses go to LangGraph — at most 10 LLM calls,
+    run 2-at-a-time so we stay under Azure OpenAI rate limits.
+    """
+    import concurrent.futures
+
+    if not requests:
+        return []
+
+    # Separate cache hits from misses in one pass
+    results: list[dict[str, Any] | None] = [None] * len(requests)
+    misses: list[tuple[int, TriageOnlyRequest]] = []
+
+    from app.services.cache import triage_cache_store
+
+    for i, req in enumerate(requests):
+        cached = triage_cache_store.get(req.email_id)
+        if cached and cached.get("priority"):
+            results[i] = {**cached, "_cached": "redis"}
+            continue
+        existing = repo.get_enrichment(req.email_id)
+        if existing and existing.get("priority"):
+            r = {
+                "email_id": req.email_id,
+                "email_type": existing.get("email_type"),
+                "composite_score": existing.get("composite_score", 0.0),
+                "priority": existing["priority"],
+                "approval_mode": existing.get("approval_mode", "SUGGEST"),
+                "axes": existing.get("axes") or [],
+                "dynamic_weights": existing.get("dynamic_weights") or {},
+                "triage_reasoning": existing.get("triage_reasoning"),
+                "errors": [],
+                "_cached": "db",
+            }
+            triage_cache_store.set(req.email_id, r)
+            results[i] = r
+        else:
+            misses.append((i, req))
+
+    cache_hits = len(requests) - len(misses)
+    logger.info("[triage-page] %d cache hits, %d LLM calls needed", cache_hits, len(misses))
+
+    # Run LLM only for misses, 2 at a time
+    if misses:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {executor.submit(_run_triage_for_email, req): idx for idx, req in misses}
+            for future, idx in futures.items():
+                try:
+                    results[idx] = future.result(timeout=30)
+                except Exception as e:
+                    logger.warning("[triage-page] LLM triage failed for index %d: %s", idx, e)
+                    results[idx] = {"email_id": requests[idx].email_id, "priority": "MEDIUM",
+                                    "composite_score": 0.0, "axes": [], "errors": [str(e)]}
+
+    return [r for r in results if r is not None]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1,9 +1,12 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from app.config.settings import settings
@@ -141,6 +144,65 @@ def get_mailbox(
         return client.list_emails(folder=folder, limit=limit, page_token=page_token, query=q)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to list {folder}: {str(e)}")
+
+
+@router.get("/inbox/poll")
+def poll_new_email() -> dict[str, Any]:
+    """
+    Lightweight new-email check for both Microsoft and Google accounts.
+
+    Fetches only the single most recent email and returns its id + received_at.
+    The frontend compares this id against what it currently shows — if different,
+    a new email has arrived and the inbox should refresh.
+
+    Cost: 1 Graph/Gmail API call, no LLM, no DB write.
+    """
+    try:
+        client = get_mail_client()
+        # Fetch only 1 email — just the header fields, no body needed
+        page = client.list_emails(folder="inbox", limit=1)
+        emails = page.get("emails") or []
+        if not emails:
+            return {"has_new": False, "latest_id": None, "received_at": None}
+        latest = emails[0]
+        return {
+            "has_new": True,
+            "latest_id": latest.get("email_id") or latest.get("id"),
+            "received_at": latest.get("received_at"),
+            "subject": latest.get("subject", ""),
+        }
+    except Exception as e:
+        logger.warning("[poll] New email check failed: %s", e)
+        return {"has_new": False, "latest_id": None, "error": str(e)}
+
+
+@router.get("/emails/{email_id}/attachments/{attachment_id}")
+def download_attachment(email_id: str, attachment_id: str, filename: str = "attachment"):
+    """Stream an email attachment for download (Gmail or Microsoft Graph)."""
+    import base64
+    from fastapi.responses import Response
+
+    client = get_mail_client()
+    if not hasattr(client, "get_attachment"):
+        raise HTTPException(status_code=501, detail="Attachments not supported for this provider")
+
+    try:
+        att = client.get_attachment(email_id, attachment_id)
+        if not att:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        # Gmail returns base64url-encoded data
+        data_b64 = att.get("data") or ""
+        raw = base64.urlsafe_b64decode(data_b64 + "=" * (-len(data_b64) % 4))
+        return Response(
+            content=raw,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("[attachment] Download failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Failed to fetch attachment: {str(e)}")
 
 
 @router.get("/emails", response_model=list[EmailPayload])
@@ -414,39 +476,15 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
     return {"status": "pending", "authenticated": False}
 
 
-# Track mock logged-out state globally
-_mock_logged_out = True
-
-
-@router.post("/auth/login-mock")
-def login_mock() -> dict[str, Any]:
-    """Log in dynamically in mock/demo mode (Microsoft provider)."""
-    global _mock_logged_out
-    _mock_logged_out = False
-    set_provider("microsoft", "mock.user@example.com")
-    return {
-        "status": "mock",
-        "authenticated": True,
-        "user_principal_name": "mock.user@example.com"
-    }
-
-
 # ── Microsoft OAuth (authorization-code popup flow) ───────────────────────────
 
 
 @router.post("/auth/microsoft/login-initiate")
 def microsoft_login_initiate() -> dict[str, Any]:
-    """Begin Microsoft sign-in via the smooth popup (auth-code) flow.
+    """Begin Microsoft sign-in via the auth-code popup flow.
 
-    Mock mode logs in instantly. Live mode returns the Microsoft consent URL;
-    the frontend opens it in a popup and polls /auth/microsoft/poll.
+    Returns the Microsoft consent URL; the frontend opens it in a popup and polls /auth/microsoft/poll.
     """
-    global _mock_logged_out
-    client = GraphClient()
-    if client.use_mock:
-        _mock_logged_out = False
-        set_provider("microsoft", "mock.user@example.com")
-        return {"status": "mock", "authenticated": True, "user_principal_name": "mock.user@example.com"}
     if not settings.azure_client_id:
         raise HTTPException(status_code=500, detail="Microsoft OAuth not configured (AZURE_CLIENT_ID).")
     from app.services.graph import build_ms_auth_url
@@ -570,14 +608,6 @@ def google_login_initiate(payload: dict[str, str] | None = None) -> dict[str, An
 
     from app.services.gmail import build_auth_url, google_auth_status
 
-    global _mock_logged_out
-    email = (payload or {}).get("email") or "demo.user@gmail.com"
-    client = GraphClient()
-    if client.use_mock:
-        _mock_logged_out = False
-        set_provider("google", email)
-        return {"status": "mock", "authenticated": True, "user_principal_name": email}
-
     if not settings.google_client_id:
         raise HTTPException(status_code=500, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID/SECRET.")
 
@@ -642,23 +672,11 @@ def google_poll(payload: dict[str, str]) -> dict[str, Any]:
 def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
     """One-tap login for a remembered account — no device code / password.
 
-    - Mock mode: activates the demo session instantly.
-    - Live mode: targets the remembered mailbox and activates an app-only
-      (client-credentials) session, so the user lands directly in the app.
+    Uses the persisted refresh token (Microsoft MSAL cache or Google token) to
+    resume the session silently without requiring the user to re-authenticate.
     """
     email = (payload or {}).get("email")
     provider = (payload or {}).get("provider") or "microsoft"
-    global _mock_logged_out
-    client = GraphClient()
-
-    if client.use_mock:
-        _mock_logged_out = False
-        set_provider(provider, email or ("demo.user@gmail.com" if provider == "google" else "mock.user@example.com"))
-        return {
-            "status": "mock",
-            "authenticated": True,
-            "user_principal_name": active_email(),
-        }
 
     # Live Google: resume silently from the persisted Google refresh token.
     if provider == "google":
@@ -687,24 +705,6 @@ def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
 def auth_status() -> dict[str, Any]:
     """Check the current login status and user principal name."""
     from app.services.graph import _user_token_cache
-
-    global _mock_logged_out
-    # Use the settings flag directly — don't construct a Graph/MSAL client here
-    # (that can do slow network discovery and stall the login screen).
-    if settings.use_mock_graph:
-        if _mock_logged_out:
-            return {
-                "status": "mock_unauthenticated",
-                "authenticated": False,
-                "user_principal_name": None,
-                "provider": active_provider(),
-            }
-        return {
-            "status": "mock",
-            "authenticated": True,
-            "user_principal_name": active_email() or "mock.user@example.com",
-            "provider": active_provider(),
-        }
 
     # A logged-out session is never authenticated, even if a resumable refresh
     # token still exists on disk (that's only used by Quick Login).
@@ -749,9 +749,6 @@ def auth_status() -> dict[str, Any]:
 @router.post("/auth/logout")
 def auth_logout() -> dict[str, Any]:
     """Log out the current user session by clearing token cache."""
-    global _mock_logged_out
-    _mock_logged_out = True
-
     from app.services.gmail import sign_out_google
     from app.services.graph import _user_token_cache
     _user_token_cache["access_token"] = None
@@ -840,8 +837,13 @@ def fetch_thread(thread_id: str) -> list[dict[str, Any]]:
 @router.get("/calendar", response_model=list[CalendarEvent])
 def fetch_calendar(days: int = 7) -> list[CalendarEvent]:
     """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
-    fetcher = CalendarFetcher(get_mail_client())
-    return fetcher.fetch_next_events(days=days)
+    try:
+        fetcher = CalendarFetcher(get_mail_client())
+        return fetcher.fetch_next_events(days=days)
+    except Exception as e:
+        # Return empty list on any error (not authenticated, network issues, etc.)
+        logger.warning(f"Calendar fetch failed: {str(e)}")
+        return []
 
 
 @router.post("/calendar/event")
