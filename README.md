@@ -2,7 +2,7 @@
 
 **Intelligent Enterprise Email Co-Pilot**
 
-MailMind v2 is an AI-powered email productivity platform that helps knowledge workers prioritize emails, draft context-aware responses, extract commitments, and reduce inbox overload while maintaining full human control over every outgoing message.
+MailMind is an AI-powered email productivity platform that helps knowledge workers prioritize emails, draft context-aware responses, extract commitments, and reduce inbox overload while maintaining full human control over every outgoing message.
 
 Built for the **Capgemini AI Buildathon** by **Team RadiantCodeX**.
 
@@ -12,7 +12,7 @@ Built for the **Capgemini AI Buildathon** by **Team RadiantCodeX**.
 
 Enterprise employees spend a significant portion of their workday managing email instead of performing high-value work.
 
-MailMind v2 addresses:
+MailMind addresses:
 
 * Inbox overload and attention fragmentation
 * Missed commitments and deadlines
