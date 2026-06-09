@@ -513,11 +513,7 @@ export async function logoutUser() {
   return res.json();
 }
 
-export async function loginMock() {
-  const res = await fetch(`${BASE}/api/auth/login-mock`, { method: 'POST' });
-  if (!res.ok) throw new Error('Mock login failed');
-  return res.json();
-}
+
 
 export async function microsoftLoginInitiate() {
   const res = await fetch(`${BASE}/api/auth/microsoft/login-initiate`, { method: 'POST' });

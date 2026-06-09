@@ -90,7 +90,7 @@ export default function LoginPage() {
     }
     try {
       const data = await microsoftLoginInitiate();
-      if (data.authenticated || data.status === "mock") {
+      if (data.authenticated) {
         msPopupRef.current?.close();
         router.push("/dashboard");
         return;
@@ -159,7 +159,7 @@ export default function LoginPage() {
     }
     try {
       const data = await googleLoginInitiate(emailHint);
-      if (data.authenticated || data.status === "mock") {
+      if (data.authenticated) {
         googlePopupRef.current?.close();
         router.push("/dashboard");
         return;

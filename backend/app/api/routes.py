@@ -476,39 +476,15 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
     return {"status": "pending", "authenticated": False}
 
 
-# Track mock logged-out state globally
-_mock_logged_out = True
-
-
-@router.post("/auth/login-mock")
-def login_mock() -> dict[str, Any]:
-    """Log in dynamically in mock/demo mode (Microsoft provider)."""
-    global _mock_logged_out
-    _mock_logged_out = False
-    set_provider("microsoft", "mock.user@example.com")
-    return {
-        "status": "mock",
-        "authenticated": True,
-        "user_principal_name": "mock.user@example.com"
-    }
-
-
 # ── Microsoft OAuth (authorization-code popup flow) ───────────────────────────
 
 
 @router.post("/auth/microsoft/login-initiate")
 def microsoft_login_initiate() -> dict[str, Any]:
-    """Begin Microsoft sign-in via the smooth popup (auth-code) flow.
+    """Begin Microsoft sign-in via the auth-code popup flow.
 
-    Mock mode logs in instantly. Live mode returns the Microsoft consent URL;
-    the frontend opens it in a popup and polls /auth/microsoft/poll.
+    Returns the Microsoft consent URL; the frontend opens it in a popup and polls /auth/microsoft/poll.
     """
-    global _mock_logged_out
-    client = GraphClient()
-    if client.use_mock:
-        _mock_logged_out = False
-        set_provider("microsoft", "mock.user@example.com")
-        return {"status": "mock", "authenticated": True, "user_principal_name": "mock.user@example.com"}
     if not settings.azure_client_id:
         raise HTTPException(status_code=500, detail="Microsoft OAuth not configured (AZURE_CLIENT_ID).")
     from app.services.graph import build_ms_auth_url
@@ -632,14 +608,6 @@ def google_login_initiate(payload: dict[str, str] | None = None) -> dict[str, An
 
     from app.services.gmail import build_auth_url, google_auth_status
 
-    global _mock_logged_out
-    email = (payload or {}).get("email") or "demo.user@gmail.com"
-    client = GraphClient()
-    if client.use_mock:
-        _mock_logged_out = False
-        set_provider("google", email)
-        return {"status": "mock", "authenticated": True, "user_principal_name": email}
-
     if not settings.google_client_id:
         raise HTTPException(status_code=500, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID/SECRET.")
 
@@ -704,23 +672,11 @@ def google_poll(payload: dict[str, str]) -> dict[str, Any]:
 def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
     """One-tap login for a remembered account — no device code / password.
 
-    - Mock mode: activates the demo session instantly.
-    - Live mode: targets the remembered mailbox and activates an app-only
-      (client-credentials) session, so the user lands directly in the app.
+    Uses the persisted refresh token (Microsoft MSAL cache or Google token) to
+    resume the session silently without requiring the user to re-authenticate.
     """
     email = (payload or {}).get("email")
     provider = (payload or {}).get("provider") or "microsoft"
-    global _mock_logged_out
-    client = GraphClient()
-
-    if client.use_mock:
-        _mock_logged_out = False
-        set_provider(provider, email or ("demo.user@gmail.com" if provider == "google" else "mock.user@example.com"))
-        return {
-            "status": "mock",
-            "authenticated": True,
-            "user_principal_name": active_email(),
-        }
 
     # Live Google: resume silently from the persisted Google refresh token.
     if provider == "google":
@@ -749,24 +705,6 @@ def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
 def auth_status() -> dict[str, Any]:
     """Check the current login status and user principal name."""
     from app.services.graph import _user_token_cache
-
-    global _mock_logged_out
-    # Use the settings flag directly — don't construct a Graph/MSAL client here
-    # (that can do slow network discovery and stall the login screen).
-    if settings.use_mock_graph:
-        if _mock_logged_out:
-            return {
-                "status": "mock_unauthenticated",
-                "authenticated": False,
-                "user_principal_name": None,
-                "provider": active_provider(),
-            }
-        return {
-            "status": "mock",
-            "authenticated": True,
-            "user_principal_name": active_email() or "mock.user@example.com",
-            "provider": active_provider(),
-        }
 
     # A logged-out session is never authenticated, even if a resumable refresh
     # token still exists on disk (that's only used by Quick Login).
@@ -811,9 +749,6 @@ def auth_status() -> dict[str, Any]:
 @router.post("/auth/logout")
 def auth_logout() -> dict[str, Any]:
     """Log out the current user session by clearing token cache."""
-    global _mock_logged_out
-    _mock_logged_out = True
-
     from app.services.gmail import sign_out_google
     from app.services.graph import _user_token_cache
     _user_token_cache["access_token"] = None

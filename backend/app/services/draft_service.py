@@ -23,10 +23,8 @@ class DraftService:
         """
         Return a LangChain AzureChatOpenAI client so that every draft generation
         call is automatically traced in LangSmith (same client used by the agent nodes).
-        Returns None when credentials are missing — triggers mock draft fallback.
+        Returns None when credentials are missing — caller handles gracefully.
         """
-        if settings.use_mock_graph:
-            return None
         if settings.azure_openai_api_key and settings.azure_openai_base_endpoint:
             try:
                 from langchain_openai import AzureChatOpenAI
@@ -47,27 +45,6 @@ class DraftService:
         clean = sender.split("@")[0]
         clean = "".join(c for c in clean if c.isalpha() or c == " ")
         return clean.strip().title() or "Sender"
-
-    def _generate_mock_draft(self, email_text: str, style: str, sender: str | None, subject: str | None) -> str:
-        name = self._get_clean_name(sender)
-        subj = subject or "your email"
-        if style == "formal":
-            return (
-                f"Dear {name},\n\nThank you for your message regarding '{subj}'. "
-                f"We have received your communication and are reviewing it thoroughly.\n\n"
-                f"We will follow up with a detailed update shortly.\n\nSincerely,\nMailMind Co-Pilot Team"
-            )
-        elif style == "indepth":
-            return (
-                f"Hi {name},\n\nThank you for reaching out regarding '{subj}'.\n\n"
-                f"1. Review & Context:\n   - Analysing requirements and dependencies.\n"
-                f"2. Action Items:\n   - Validate requirements.\n   - Schedule alignment meeting.\n"
-                f"3. Next Steps:\n   - Formal proposal within 24-48 hours.\n\nBest regards,\nMailMind Co-Pilot"
-            )
-        return (
-            f"Hi {name},\n\nThank you for reaching out regarding '{subj}'.\n"
-            f"I have received your email and am looking into the details. I will get back to you shortly.\n\nBest regards,\nMailMind Co-Pilot"
-        )
 
     def _get_user_display_name(self, email: str | None) -> str:
         """Derive a first-name display from an email address (e.g. tarun.sharma@co.com → Tarun)."""
@@ -109,7 +86,7 @@ class DraftService:
 
         client = self._get_llm_client()
         if not client:
-            return self._generate_mock_draft(email_text, style, sender, subject), citations
+            raise RuntimeError("Azure OpenAI credentials not configured. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT.")
 
         # Derive the sender's display name and the current user's display name.
         sender_name = self._get_clean_name(sender) if sender else "there"
@@ -173,4 +150,4 @@ class DraftService:
             return (response.content or "").strip(), citations
         except Exception as e:
             logger.error("Draft generation failed: %s", e)
-            return self._generate_mock_draft(email_text, style, sender, subject), citations
+            raise
