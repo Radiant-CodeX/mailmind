@@ -23,17 +23,26 @@ export interface ClassificationResult {
   confidence: number;
 }
 
+export interface Attachment {
+  attachment_id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+}
+
 export interface Email {
   id: string;
   sender: string;
   subject: string;
-  body: string;
+  body: string;           // plain text — used by agents for LLM processing
+  html_body?: string;     // HTML — used by frontend for display (may be undefined for plain-text emails)
   received_at: string;
   triage?: TriageResult;
   composite_score?: number;
   isStarred?: boolean;
   isRead?: boolean;
   hasAttachments?: boolean;
+  attachments?: Attachment[];
 }
 
 export interface CommitmentItem {

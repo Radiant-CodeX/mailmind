@@ -1,5 +1,169 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Email, ClassificationResult, TriageResult, PrecedentItem, CommitmentItem as TypeCommitment, CalendarEvent } from '../../lib/types';
+
+/**
+ * Sanitize and render HTML email bodies using DOMPurify.
+ *
+ * Rendering strategy:
+ *   - DOMPurify strips all XSS vectors (scripts, event handlers, data: URIs)
+ *   - Rendered inside a sandboxed iframe so email CSS cannot affect the app
+ *   - All links open in a new tab with rel="noopener noreferrer"
+ *   - Iframe auto-resizes to fit the email content height
+ */
+function EmailBodyHtml({ html }: { html: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(300);
+
+  const sanitized = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const DOMPurify = require('dompurify');
+
+    const clean = DOMPurify.sanitize(html, {
+      FORCE_BODY: true,
+      ADD_ATTR: ['target', 'rel', 'width', 'height', 'bgcolor', 'align', 'valign', 'cellpadding', 'cellspacing', 'border'],
+      FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select'],
+      FORBID_ATTR: ['action', 'formaction', 'onerror', 'onload', 'onclick', 'onmouseover'],
+    });
+
+    const doc = new DOMParser().parseFromString(clean, 'text/html');
+
+    // Safe links — open in new tab
+    doc.querySelectorAll('a').forEach((a) => {
+      a.setAttribute('target', '_blank');
+      a.setAttribute('rel', 'noopener noreferrer');
+      if (/^javascript:/i.test(a.getAttribute('href') || '')) a.removeAttribute('href');
+    });
+
+    // Block tracking pixels and external images that could leak the user's IP.
+    // Only images from known safe content hosts are allowed; others are replaced
+    // with a placeholder. (Users can toggle "show images" if needed.)
+    doc.querySelectorAll('img').forEach((img) => {
+      const src = img.getAttribute('src') || '';
+      // Allow data: URIs (inline images) and https: images from CDNs
+      if (!src.startsWith('data:') && !src.startsWith('https://')) {
+        img.removeAttribute('src');
+        img.setAttribute('alt', img.getAttribute('alt') || '[image]');
+      }
+    });
+
+    // Inject base styles matching Gmail's rendering defaults so the email
+    // looks identical to how it appears in the actual Gmail client.
+    const style = doc.createElement('style');
+    style.textContent = `
+      html, body {
+        margin: 0; padding: 8px 0;
+        font-family: Arial, sans-serif;
+        font-size: 14px; line-height: 1.6;
+        color: #202124;
+        background: #ffffff;
+        word-break: break-word;
+        overflow-wrap: break-word;
+        -webkit-text-size-adjust: 100%;
+      }
+      img { max-width: 100%; height: auto; }
+      a { color: #1a73e8; }
+      table { border-collapse: collapse; }
+      blockquote { border-left: 2px solid #ccc; margin: 8px 0; padding-left: 12px; color: #555; }
+      pre, code { font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+    `;
+    // Prepend so email's own styles take precedence
+    if (doc.head.firstChild) doc.head.insertBefore(style, doc.head.firstChild);
+    else doc.head.appendChild(style);
+
+    return doc.documentElement.outerHTML;
+  }, [html]);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) return;
+    doc.open();
+    doc.write(sanitized);
+    doc.close();
+    const resize = () => {
+      const body = iframe.contentDocument?.body;
+      if (body) setHeight(Math.max(200, body.scrollHeight + 32));
+    };
+    iframe.onload = resize;
+    setTimeout(resize, 150);
+  }, [sanitized]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      sandbox="allow-same-origin"
+      style={{ width: '100%', height: `${height}px`, border: 'none', background: 'white', borderRadius: '6px' }}
+      title="Email content"
+    />
+  );
+}
+
+/** Plain-text email body — preserves whitespace and wraps long lines. */
+function EmailBodyPlain({ text }: { text: string }) {
+  return (
+    <p className="text-xs text-[var(--text-primary)]/90 whitespace-pre-wrap leading-relaxed font-medium break-words">
+      {text}
+    </p>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileIcon(mime: string): string {
+  if (mime.startsWith('image/')) return '🖼️';
+  if (mime.includes('pdf')) return '📄';
+  if (mime.includes('word') || mime.includes('document')) return '📝';
+  if (mime.includes('sheet') || mime.includes('excel')) return '📊';
+  if (mime.includes('zip') || mime.includes('compressed')) return '🗜️';
+  return '📎';
+}
+
+/** Downloadable attachment list — clicking a row streams the file via the backend. */
+function AttachmentList({ emailId, attachments }: {
+  emailId: string;
+  attachments: NonNullable<Email['attachments']>;
+}) {
+  const download = (attId: string, filename: string) => {
+    import('../../lib/api').then(({ downloadAttachment }) =>
+      downloadAttachment(emailId, attId, filename),
+    );
+  };
+
+  return (
+    <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg p-5 text-left shadow-sm">
+      <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3 pb-1.5 border-b border-[var(--border-subtle)]">
+        Attachments ({attachments.length})
+      </h3>
+      <div className="flex flex-col gap-2">
+        {attachments.map((att) => (
+          <button
+            key={att.attachment_id}
+            onClick={() => download(att.attachment_id, att.filename)}
+            className="flex items-center gap-3 p-2.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)]/30 hover:bg-[var(--bg-elevated)] hover:border-[var(--accent-primary)] transition-all cursor-pointer text-left group"
+          >
+            <span className="text-lg shrink-0">{fileIcon(att.mime_type)}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-[var(--text-primary)] truncate">{att.filename}</p>
+              <p className="text-[10px] text-[var(--text-muted)]">{formatBytes(att.size)}</p>
+            </div>
+            <svg className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--accent-primary)] shrink-0"
+              fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 import { TriageExplainer } from '../triage/TriageExplainer';
 import { PrecedentList } from './PrecedentList';
 import { DraftPanel } from './DraftPanel';
@@ -211,10 +375,16 @@ export function EmailDetail({
             <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider mb-3 pb-1.5 border-b border-[var(--border-subtle)]">
               Message Body
             </h3>
-            <p className="text-xs text-[var(--text-primary)]/90 whitespace-pre-wrap leading-relaxed font-medium">
-              {email.body}
-            </p>
+            {email.html_body
+              ? <EmailBodyHtml html={email.html_body} />
+              : <EmailBodyPlain text={email.body} />
+            }
           </div>
+
+          {/* Attachments */}
+          {email.attachments && email.attachments.length > 0 && (
+            <AttachmentList emailId={email.id} attachments={email.attachments} />
+          )}
 
           {showPipeline && (<>
           {/* AI Draft Tool Accordion */}

@@ -1,9 +1,12 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from app.config.settings import settings
@@ -141,6 +144,65 @@ def get_mailbox(
         return client.list_emails(folder=folder, limit=limit, page_token=page_token, query=q)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to list {folder}: {str(e)}")
+
+
+@router.get("/inbox/poll")
+def poll_new_email() -> dict[str, Any]:
+    """
+    Lightweight new-email check for both Microsoft and Google accounts.
+
+    Fetches only the single most recent email and returns its id + received_at.
+    The frontend compares this id against what it currently shows — if different,
+    a new email has arrived and the inbox should refresh.
+
+    Cost: 1 Graph/Gmail API call, no LLM, no DB write.
+    """
+    try:
+        client = get_mail_client()
+        # Fetch only 1 email — just the header fields, no body needed
+        page = client.list_emails(folder="inbox", limit=1)
+        emails = page.get("emails") or []
+        if not emails:
+            return {"has_new": False, "latest_id": None, "received_at": None}
+        latest = emails[0]
+        return {
+            "has_new": True,
+            "latest_id": latest.get("email_id") or latest.get("id"),
+            "received_at": latest.get("received_at"),
+            "subject": latest.get("subject", ""),
+        }
+    except Exception as e:
+        logger.warning("[poll] New email check failed: %s", e)
+        return {"has_new": False, "latest_id": None, "error": str(e)}
+
+
+@router.get("/emails/{email_id}/attachments/{attachment_id}")
+def download_attachment(email_id: str, attachment_id: str, filename: str = "attachment"):
+    """Stream an email attachment for download (Gmail or Microsoft Graph)."""
+    import base64
+    from fastapi.responses import Response
+
+    client = get_mail_client()
+    if not hasattr(client, "get_attachment"):
+        raise HTTPException(status_code=501, detail="Attachments not supported for this provider")
+
+    try:
+        att = client.get_attachment(email_id, attachment_id)
+        if not att:
+            raise HTTPException(status_code=404, detail="Attachment not found")
+        # Gmail returns base64url-encoded data
+        data_b64 = att.get("data") or ""
+        raw = base64.urlsafe_b64decode(data_b64 + "=" * (-len(data_b64) % 4))
+        return Response(
+            content=raw,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("[attachment] Download failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Failed to fetch attachment: {str(e)}")
 
 
 @router.get("/emails", response_model=list[EmailPayload])
@@ -840,8 +902,13 @@ def fetch_thread(thread_id: str) -> list[dict[str, Any]]:
 @router.get("/calendar", response_model=list[CalendarEvent])
 def fetch_calendar(days: int = 7) -> list[CalendarEvent]:
     """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
-    fetcher = CalendarFetcher(get_mail_client())
-    return fetcher.fetch_next_events(days=days)
+    try:
+        fetcher = CalendarFetcher(get_mail_client())
+        return fetcher.fetch_next_events(days=days)
+    except Exception as e:
+        # Return empty list on any error (not authenticated, network issues, etc.)
+        logger.warning(f"Calendar fetch failed: {str(e)}")
+        return []
 
 
 @router.post("/calendar/event")

@@ -12,19 +12,19 @@ Graph topology (linear DAG):
   ingest_node          ← PII masking, payload validation
      │
      ▼
-  triage_node          ← GPT-4o + five-axis scoring tools
+  triage_node          ← Triage (GPT-4o five-axis scoring)
      │
      ▼
-  commitment_node      ← GPT-4o structured output, confidence gating
+  commitment_node      ← Commitment Extraction (GPT-4o structured output)
      │
      ▼
-  calendar_node        ← Deterministic conflict detection
+  calendar_node        ← Calendar Conflict Detection (deterministic)
      │
      ▼
-  rag_node             ← Vector retrieval + GPT-4o draft generation
+  rag_node             ← RAG Precedent Retrieval + Draft Reply (GPT-4o)
      │
      ▼
-  gate_node            ← Human-in-the-loop approval checkpoint
+  gate_node            ← Approval Gate (human-in-the-loop checkpoint)
      │
      ▼
   [END]

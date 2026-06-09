@@ -11,6 +11,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@types/dompurify": "^3.0.5",
+    "dompurify": "^3.4.8",
     "next": "16.2.7",
     "react": "19.2.4",
     "react-dom": "19.2.4"

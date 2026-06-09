@@ -240,22 +240,65 @@ def _raise_for_gmail(resp: "httpx.Response") -> None:
     raise HTTPException(status_code=code, detail=detail)
 
 
-def _extract_body(payload: dict[str, Any]) -> str:
-    """Pull a text/plain body out of a Gmail message payload."""
+def _html_to_text(html: str) -> str:
+    """Strip HTML to clean plain text for agent (LLM) processing.
+
+    Removes style/script blocks entirely (including CSS @media rules and
+    JSON-LD schema blobs) before stripping tags, so the LLM only sees
+    the actual readable email content.
+    """
+    import re
+    # Remove style and script blocks entirely (content + tags)
+    html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.IGNORECASE | re.DOTALL)
+    html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.IGNORECASE | re.DOTALL)
+    # Replace block-level tags with newlines before stripping
+    html = re.sub(r'<br\s*/?>', '\n', html, flags=re.IGNORECASE)
+    html = re.sub(r'</(p|div|li|tr|h[1-6]|blockquote|table|td|th)>', '\n', html, flags=re.IGNORECASE)
+    html = re.sub(r'<li[^>]*>', '• ', html, flags=re.IGNORECASE)
+    # Remove all remaining tags
+    html = re.sub(r'<[^>]+>', '', html)
+    # Decode common HTML entities
+    html = html.replace('&nbsp;', ' ').replace('&amp;', '&') \
+               .replace('&lt;', '<').replace('&gt;', '>') \
+               .replace('&quot;', '"').replace('&#39;', "'") \
+               .replace('&#160;', ' ')
+    # Collapse excessive blank lines
+    html = re.sub(r'\n{3,}', '\n\n', html)
+    return html.strip()
+
+
+def _extract_body(payload: dict[str, Any]) -> tuple[str, str]:
+    """Extract email body, returning (html_body, plain_text).
+
+    Prefers text/html for display; also returns a plain-text version
+    for agent processing. Falls back to text/plain if no HTML present.
+    Returns ('', '') on failure.
+    """
     if not payload:
-        return ""
-    body = payload.get("body", {})
-    if body.get("data"):
-        return _decode_part(body["data"])
-    for part in payload.get("parts", []) or []:
-        mime = part.get("mimeType", "")
-        if mime == "text/plain" and part.get("body", {}).get("data"):
-            return _decode_part(part["body"]["data"])
-        # Recurse into multipart containers.
-        nested = _extract_body(part)
-        if nested:
-            return nested
-    return ""
+        return '', ''
+
+    html_body = ''
+    plain_body = ''
+
+    def _walk(node: dict[str, Any]) -> None:
+        nonlocal html_body, plain_body
+        mime = node.get("mimeType", "")
+        data = (node.get("body") or {}).get("data", "")
+        if mime == "text/html" and data and not html_body:
+            html_body = _decode_part(data)
+        elif mime == "text/plain" and data and not plain_body:
+            plain_body = _decode_part(data)
+        for part in node.get("parts", []) or []:
+            _walk(part)
+
+    _walk(payload)
+
+    if html_body:
+        # Use HTML for display; derive plain text for agents
+        agent_text = _html_to_text(html_body)
+        return html_body, agent_text
+    # Plain text only — same value for both
+    return '', plain_body
 
 
 class GmailClient:
@@ -285,6 +328,38 @@ class GmailClient:
             if self._has_attachment(part):
                 return True
         return False
+
+    def _extract_attachments(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Collect attachment metadata (filename, mime, size, attachmentId).
+
+        The actual bytes are fetched lazily via GET /messages/{id}/attachments/{attId}
+        only when the user clicks download.
+        """
+        out: list[dict[str, Any]] = []
+
+        def _walk(node: dict[str, Any]) -> None:
+            for part in node.get("parts", []) or []:
+                filename = part.get("filename") or ""
+                body = part.get("body") or {}
+                att_id = body.get("attachmentId")
+                # Real attachments have a filename AND an attachmentId
+                if filename and att_id:
+                    out.append({
+                        "attachment_id": att_id,
+                        "filename": filename,
+                        "mime_type": part.get("mimeType", "application/octet-stream"),
+                        "size": body.get("size", 0),
+                    })
+                _walk(part)
+
+        _walk(payload)
+        return out
+
+    def get_attachment(self, message_id: str, attachment_id: str) -> dict[str, Any] | None:
+        """Fetch raw attachment bytes (base64url) for download."""
+        if self.use_mock:
+            return None
+        return self._request("GET", f"/messages/{message_id}/attachments/{attachment_id}")
 
     def _list_formatted(self, label: str, limit: int, date_field: str = "received_at") -> List[dict[str, Any]]:
         data = self._request("GET", f"/messages?labelIds={label}&maxResults={limit}")
@@ -319,7 +394,8 @@ class GmailClient:
         payload = (original or {}).get("payload", {})
         headers = payload.get("headers", [])
         subject = _header(headers, "Subject")
-        orig_body = _extract_body(payload) or (original or {}).get("snippet", "")
+        _html, orig_body = _extract_body(payload)
+        orig_body = orig_body or (original or {}).get("snippet", "")
         fwd_body = f"{comment}\n\n---------- Forwarded message ----------\n{orig_body}"
         raw = self._build_raw(to, f"Fwd: {subject}", fwd_body)
         self._request("POST", "/messages/send", json={"raw": raw})
@@ -399,14 +475,23 @@ class GmailClient:
         payload = msg.get("payload", {})
         headers = payload.get("headers", [])
         label_ids = msg.get("labelIds", [])
+        html_body, plain_body = _extract_body(payload)
+        snippet = msg.get("snippet", "")
+        # Plain-text body for agents: prefer extracted plain → HTML-stripped → snippet
+        agent_body = plain_body or (_html_to_text(html_body) if html_body else snippet)
+        attachments = self._extract_attachments(payload)
         return {
             "email_id": msg.get("id", ""),
             "sender": _clean_sender(_header(headers, "From")),
             "subject": _header(headers, "Subject"),
-            "body": _extract_body(payload) or msg.get("snippet", ""),
+            # html_body: sent to frontend for display (preserves formatting + images)
+            # body: plain text sent to agents for LLM processing (no HTML tags)
+            "html_body": html_body or None,
+            "body": agent_body,
             "received_at": _parse_gmail_date(_header(headers, "Date")),
             "is_read": "UNREAD" not in label_ids,
-            "has_attachments": self._has_attachment(payload),
+            "has_attachments": bool(attachments),
+            "attachments": attachments,
         }
 
     # ── public surface (mirrors GraphClient) ──

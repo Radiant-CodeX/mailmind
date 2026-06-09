@@ -13,7 +13,8 @@ class EmailPayload(BaseModel):
     # Plain str (not EmailStr) so real-world 'From' values never fail validation.
     sender: str
     subject: str
-    body: str
+    body: str                              # plain text — used by agents for LLM
+    html_body: Optional[str] = None        # rich HTML — used by frontend for display
     received_at: datetime
     is_read: bool = True
     has_attachments: bool = False
