@@ -126,3 +126,4 @@ redis>=5.0                 # durable enrichment queue (RedisQueueBackend)
 SQLAlchemy>=2.0            # ORM for the persistence layer (app/db)
 psycopg2-binary>=2.9       # PostgreSQL / Supabase driver
 fakeredis>=2.20
+opentelemetry-api
