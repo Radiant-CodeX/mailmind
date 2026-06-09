@@ -22,7 +22,7 @@ import { userStorage } from '../lib/userStorage';
 // Cache versioning: bump TRIAGE_CACHE_VERSION to invalidate all clients and
 // force a fresh triage + DB write on next load. Do this after backend changes
 // that affect triage scoring.
-const TRIAGE_CACHE_VERSION = 'v2';
+const TRIAGE_CACHE_VERSION = 'v3'; // v3 = fixed 0-score bug (max_tokens + prompt template)
 const TRIAGE_CACHE_KEY = `triage_cache_${TRIAGE_CACHE_VERSION}`;
 type TriageLite = NonNullable<Email['triage']>;
 
@@ -87,6 +87,13 @@ function writeEmailCache(folder: string, emails: Email[], nextPageToken: string 
   try {
     const entry: EmailCacheEntry = { v: EMAIL_CACHE_VERSION, emails, cachedAt: Date.now(), nextPageToken };
     userStorage.setItem(_cacheKey(folder), JSON.stringify(entry));
+  } catch {}
+}
+
+function clearEmailCache(folder: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    userStorage.removeItem(_cacheKey(folder));
   } catch {}
 }
 
@@ -570,13 +577,13 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       }
 
       // Optimistic remove
+      let newListLength = 0;
       setEmails((prev) => {
         const next = prev.filter((e) => e.id !== emailId);
-        userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(next));
+        newListLength = next.length;
         return next;
       });
       setSelectedEmailId((prev) => (prev === emailId ? null : prev));
-      userStorage.removeItem('emails_Trash');
 
       // Show toast with undo window
       setPendingTrash({ email: snapshot, startedAt: Date.now() });
@@ -587,13 +594,23 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
         setPendingTrash(null);
         try {
           await moveEmailToTrash(emailId);
+          // Clear cache on success so refresh loads fresh data from API
+          clearEmailCache(activeFolder);
+          clearEmailCache('Trash'); // Email was moved to Trash
+
+          // Auto-fetch next email if page dropped below half size and more exist on server
+          if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
+            await nextPage();
+          }
         } catch (err) {
           console.error(`Failed to move email ${emailId} to trash`, err);
-          loadEmails();
+          // Clear cache and reload on failure to ensure consistency
+          clearEmailCache(activeFolder);
+          await loadEmails();
         }
       }, 5000);
     },
-    [activeFolder, setEmails, loadEmails]
+    [activeFolder, setEmails, loadEmails, nextPage]
   );
 
   const undoTrash = useCallback(() => {
@@ -604,12 +621,13 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     }
     const { email } = pendingTrash;
     setPendingTrash(null);
-    // Re-insert the email into the current list
+    // Re-insert the email into the current list and clear cache
     setEmails((prev) => {
       const next = [...prev, email];
-      userStorage.setItem(`emails_${activeFolder}`, JSON.stringify(next));
       return next;
     });
+    // Clear cache so next load reflects the restored email
+    clearEmailCache(activeFolder);
   }, [pendingTrash, activeFolder, setEmails]);
 
   const dismissTrashToast = useCallback(() => {
@@ -622,21 +640,31 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   // --------------------------------------------------------------------------
   const restoreEmail = useCallback(
     async (emailId: string) => {
+      let newListLength = 0;
       setEmails((prev) => {
         const next = prev.filter((e) => e.id !== emailId);
-        userStorage.setItem('emails_Trash', JSON.stringify(next));
+        newListLength = next.length;
         return next;
       });
       setSelectedEmailId((prev) => (prev === emailId ? null : prev));
-      userStorage.removeItem('emails_Inbox');
       try {
         await restoreEmailFromTrash(emailId);
+        // Clear caches on success
+        clearEmailCache('Trash');
+        clearEmailCache('Inbox');
+
+        // Auto-fetch next email if page dropped below half size and more exist on server
+        if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
+          await nextPage();
+        }
       } catch (err) {
         console.error(`Failed to restore email ${emailId}`, err);
-        loadEmails();
+        // Clear cache and reload on failure
+        clearEmailCache('Trash');
+        await loadEmails();
       }
     },
-    [setEmails, loadEmails]
+    [setEmails, loadEmails, nextPage]
   );
 
   // --------------------------------------------------------------------------
@@ -669,26 +697,58 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   }, [setEmails, persist]);
 
   const archiveEmail = useCallback(async (emailId: string) => {
-    removeFrom(emailId);
-    userStorage.removeItem('emails_Archive');
+    let newListLength = 0;
+    setEmails((prev) => {
+      const next = prev.filter((e) => e.id !== emailId);
+      newListLength = next.length;
+      persist(next);
+      return next;
+    });
+    setSelectedEmailId((prev) => (prev === emailId ? null : prev));
     try {
       await apiArchiveEmail(emailId);
+      // Clear caches on success
+      clearEmailCache(activeFolder);
+      clearEmailCache('Archive');
+
+      // Auto-fetch next email if page dropped below half size and more exist on server
+      if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
+        await nextPage();
+      }
     } catch (err) {
       console.error(`Failed to archive ${emailId}`, err);
-      loadEmails();
+      // Clear cache and reload on failure
+      clearEmailCache(activeFolder);
+      await loadEmails();
     }
-  }, [removeFrom, loadEmails]);
+  }, [activeFolder, setEmails, persist, loadEmails, nextPage]);
 
   const reportSpam = useCallback(async (emailId: string) => {
-    removeFrom(emailId);
-    userStorage.removeItem('emails_Spam');
+    let newListLength = 0;
+    setEmails((prev) => {
+      const next = prev.filter((e) => e.id !== emailId);
+      newListLength = next.length;
+      persist(next);
+      return next;
+    });
+    setSelectedEmailId((prev) => (prev === emailId ? null : prev));
     try {
       await apiReportSpam(emailId);
+      // Clear caches on success
+      clearEmailCache(activeFolder);
+      clearEmailCache('Spam');
+
+      // Auto-fetch next email if page dropped below half size and more exist on server
+      if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
+        await nextPage();
+      }
     } catch (err) {
       console.error(`Failed to report spam ${emailId}`, err);
-      loadEmails();
+      // Clear cache and reload on failure
+      clearEmailCache(activeFolder);
+      await loadEmails();
     }
-  }, [removeFrom, loadEmails]);
+  }, [activeFolder, setEmails, persist, loadEmails, nextPage]);
 
   // --------------------------------------------------------------------------
   // Derived lists

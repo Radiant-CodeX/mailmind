@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 
 from app.config.settings import settings
 from app.db.base import get_session, is_persistence_enabled
-from app.db.models import AuditLog, EmailEnrichment, ProcessingMetric
+from app.db.models import AuditLog, EmailEnrichment, ProcessingMetric, ToneProfile
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ _ENRICHMENT_FIELDS = (
 def _row_to_dict(row: EmailEnrichment) -> dict[str, Any]:
     return {
         "email_id": row.email_id,
+        "user_email": row.user_email,
         "sender": row.sender,
         "subject": row.subject,
         "masked_body": row.masked_body,
@@ -61,6 +62,7 @@ def upsert_enrichment(
     email_id: str,
     state: dict[str, Any],
     *,
+    user_email: Optional[str] = None,
     status: str = "complete",
     enrichment_source: str = "agentic",
     error: Optional[str] = None,
@@ -76,10 +78,21 @@ def upsert_enrichment(
     with get_session() as session:
         if session is None:
             return None
+
+        # Always look up by PK to avoid INSERT on records with a different/NULL user_email.
         row = session.get(EmailEnrichment, email_id)
+
         if row is None:
-            row = EmailEnrichment(email_id=email_id, sender=state.get("sender", "unknown"))
+            row = EmailEnrichment(
+                email_id=email_id,
+                user_email=user_email,
+                sender=state.get("sender", "unknown"),
+            )
             session.add(row)
+        else:
+            # Backfill user_email if the existing row has none (e.g. from an old run).
+            if user_email and not row.user_email:
+                row.user_email = user_email
 
         for field in _ENRICHMENT_FIELDS:
             if field in state and state[field] is not None:
@@ -92,34 +105,44 @@ def upsert_enrichment(
         return _row_to_dict(row)
 
 
-def get_enrichment(email_id: str) -> Optional[dict[str, Any]]:
-    """Fetch one enrichment record, or None if missing / persistence off."""
+def get_enrichment(email_id: str, user_email: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """Fetch one enrichment record scoped to user_email, or None if missing."""
     if not is_persistence_enabled():
         return None
     with get_session() as session:
         if session is None:
             return None
-        row = session.get(EmailEnrichment, email_id)
+        if user_email:
+            stmt = (
+                select(EmailEnrichment)
+                .where(EmailEnrichment.email_id == email_id)
+                .where(EmailEnrichment.user_email == user_email)
+            )
+            row = session.scalars(stmt).first()
+        else:
+            row = session.get(EmailEnrichment, email_id)
         return _row_to_dict(row) if row else None
 
 
 def list_enrichments(
-    *, priority: Optional[str] = None, limit: int = 100, offset: int = 0
+    *, user_email: Optional[str] = None, priority: Optional[str] = None, limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]]:
-    """List enrichment records, optionally filtered by priority (newest first)."""
+    """List enrichment records scoped to user_email, optionally filtered by priority."""
     if not is_persistence_enabled():
         return []
     with get_session() as session:
         if session is None:
             return []
         stmt = select(EmailEnrichment).order_by(EmailEnrichment.created_at.desc())
+        if user_email:
+            stmt = stmt.where(EmailEnrichment.user_email == user_email)
         if priority:
             stmt = stmt.where(EmailEnrichment.priority == priority)
         stmt = stmt.limit(limit).offset(offset)
         return [_row_to_dict(r) for r in session.scalars(stmt).all()]
 
 
-def delete_enrichment(email_id: str) -> bool:
+def delete_enrichment(email_id: str, user_email: Optional[str] = None) -> bool:
     """
     Hard-delete an email's enrichment record (GDPR right-to-erasure).
 
@@ -130,7 +153,15 @@ def delete_enrichment(email_id: str) -> bool:
     with get_session() as session:
         if session is None:
             return False
-        row = session.get(EmailEnrichment, email_id)
+        if user_email:
+            stmt = (
+                select(EmailEnrichment)
+                .where(EmailEnrichment.email_id == email_id)
+                .where(EmailEnrichment.user_email == user_email)
+            )
+            row = session.scalars(stmt).first()
+        else:
+            row = session.get(EmailEnrichment, email_id)
         if row is None:
             return False
         session.delete(row)
@@ -203,6 +234,35 @@ def record_metric(
             email_id=email_id, stage=stage, duration_ms=duration_ms,
             success=success, sla_met=sla_met,
         ))
+        session.commit()
+
+
+def get_tone_profile(user_email: str) -> Optional[dict[str, Any]]:
+    """Return the Tone DNA profile for user_email, or None if not built yet."""
+    if not is_persistence_enabled():
+        return None
+    with get_session() as session:
+        if session is None:
+            return None
+        row = session.get(ToneProfile, user_email)
+        return dict(row.profile) if row else None
+
+
+def save_tone_profile(user_email: str, profile: dict[str, Any]) -> None:
+    """Insert or overwrite the Tone DNA profile for user_email."""
+    if not is_persistence_enabled():
+        return
+    with get_session() as session:
+        if session is None:
+            return
+        row = session.get(ToneProfile, user_email)
+        if row is None:
+            row = ToneProfile(user_email=user_email, profile=profile,
+                              sample_size=profile.get("sample_size", 0))
+            session.add(row)
+        else:
+            row.profile = profile
+            row.sample_size = profile.get("sample_size", 0)
         session.commit()
 
 
