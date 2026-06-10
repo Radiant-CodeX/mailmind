@@ -17,7 +17,7 @@ import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
-import { checkAuthStatus, logoutUser, createCalendarEvent } from '../../lib/api';
+import { checkAuthStatus, logoutUser, createCalendarEvent, UserProfile } from '../../lib/api';
 import { rememberLogin, getRememberMe, Provider } from '../../lib/session';
 import { userStorage } from '../../lib/userStorage';
 import { CalendarEvent } from '../../lib/types';
@@ -30,6 +30,7 @@ export default function Home() {
 
   const [authenticated, setAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [provider, setProvider] = useState<Provider>('microsoft');
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
@@ -42,6 +43,7 @@ export default function Home() {
         if (data.authenticated) {
           setAuthenticated(true);
           setUserEmail(data.user_principal_name);
+          setUserProfile(data.profile || null);
           if (data.provider === 'google' || data.provider === 'microsoft') setProvider(data.provider);
           // Scope all localStorage data to this user — prevents cross-account leaks.
           if (data.user_principal_name) userStorage.setUser(data.user_principal_name);
@@ -178,6 +180,7 @@ export default function Home() {
       userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);
+      setUserProfile(null);
       router.replace('/');
     }
   };
@@ -197,6 +200,7 @@ export default function Home() {
         onToggleCollapse={toggleSidebar}
         authenticated={authenticated}
         userEmail={userEmail}
+        userProfile={userProfile}
         provider={provider}
         onLoginClick={() => {}}
         onLogoutClick={handleLogout}

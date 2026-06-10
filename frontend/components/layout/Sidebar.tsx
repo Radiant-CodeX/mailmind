@@ -1,4 +1,5 @@
 import React from 'react';
+import type { UserProfile } from '../../lib/api';
 
 interface SidebarProps {
   activeTab: string;
@@ -7,6 +8,7 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   authenticated: boolean;
   userEmail: string | null;
+  userProfile?: UserProfile | null;
   provider?: 'google' | 'microsoft';
   onLoginClick: () => void;
   onLogoutClick: () => void;
@@ -20,24 +22,39 @@ export function Sidebar({
   onToggleCollapse,
   authenticated,
   userEmail,
+  userProfile,
   provider = 'microsoft',
   onLoginClick,
   onLogoutClick,
   onComposeClick,
 }: SidebarProps) {
-  // Show the user's name (derived from their email local-part) rather than a
-  // generic "Microsoft Account" label. Falls back to the provider label when
-  // no email is known.
+  const profileEmail = userProfile?.email || userEmail;
+
+  // Prefer the provider display name, with a readable email-derived fallback.
   const accountLabel = React.useMemo(() => {
-    if (!userEmail) return provider === 'google' ? 'Google Account' : 'Microsoft Account';
-    const local = userEmail.split('@')[0];
+    const profileName = userProfile?.display_name?.trim();
+    if (profileName) return profileName;
+    if (!profileEmail) return provider === 'google' ? 'Google Account' : 'Microsoft Account';
+    const local = profileEmail.split('@')[0];
     const name = local
       .split(/[._-]+/)
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ');
-    return name || userEmail;
-  }, [userEmail, provider]);
+    return name || profileEmail;
+  }, [profileEmail, provider, userProfile?.display_name]);
+
+  const accountInitials = React.useMemo(() => {
+    const source = accountLabel || profileEmail || 'User';
+    const parts = source
+      .replace(/@.*$/, '')
+      .split(/\s+|[._-]+/)
+      .filter(Boolean);
+    const initials = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('');
+    return initials || 'US';
+  }, [accountLabel, profileEmail]);
+
+  const avatar = userProfile?.photo_url;
   const [isMoreExpanded, setIsMoreExpanded] = React.useState(false);
 
   const primaryItems = [
@@ -291,10 +308,15 @@ export function Sidebar({
             <button
               onClick={onLogoutClick}
               className="w-9 h-9 rounded-full bg-[var(--bg-elevated)] border border-red-500/20 hover:border-red-500 text-red-500 hover:bg-red-500/5 flex items-center justify-center font-bold text-xs mx-auto shadow-inner cursor-pointer transition-all duration-200 animate-fade-in"
-              title={`Logged in as ${userEmail || 'User'}. Click to Sign Out.`}
+              title={`Logged in as ${accountLabel || profileEmail || 'User'}. Click to Sign Out.`}
               id="sidebar-user-collapsed-signout"
             >
-              {userEmail ? userEmail.slice(0, 2).toUpperCase() : 'US'}
+              {avatar ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatar} alt={accountLabel} className="h-full w-full rounded-full object-cover" />
+              ) : (
+                accountInitials
+              )}
             </button>
           ) : (
             <button
@@ -324,12 +346,17 @@ export function Sidebar({
             <div className="flex items-center justify-between gap-2 animate-fade-in w-full">
               <div className="flex items-center gap-2.5 overflow-hidden">
                 <div className="w-9 h-9 rounded-full bg-[var(--bg-elevated)] border border-[var(--accent-primary)]/30 flex items-center justify-center font-bold text-xs text-[var(--accent-primary)] shadow-inner shrink-0">
-                  {userEmail ? userEmail.slice(0, 2).toUpperCase() : 'US'}
+                  {avatar ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={avatar} alt={accountLabel} className="h-full w-full rounded-full object-cover" />
+                  ) : (
+                    accountInitials
+                  )}
                 </div>
                 <div className="overflow-hidden">
                   <h4 className="text-xs font-semibold text-[var(--text-primary)] truncate">{accountLabel}</h4>
-                  <p className="text-[10px] text-[var(--text-muted)] truncate" title={userEmail || ''}>
-                    {userEmail}
+                  <p className="text-[10px] text-[var(--text-muted)] truncate" title={profileEmail || ''}>
+                    {profileEmail}
                   </p>
                 </div>
               </div>
