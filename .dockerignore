@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+.next
+dist
+build
+chroma
+chromadb
+prometheus-data
+jaeger-data
+.env
+.env.*
