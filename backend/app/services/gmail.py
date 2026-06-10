@@ -32,6 +32,7 @@ _SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
     "openid",
 ]
 
@@ -117,9 +118,15 @@ def exchange_code(code: str) -> dict[str, Any]:
 
     _token_cache["access_token"] = tok.get("access_token")
     _token_cache["expires_at"] = time.time() + int(tok.get("expires_in", 3600))
-    email = _fetch_email(tok.get("access_token"))
+    profile = _fetch_profile(tok.get("access_token"))
+    email = profile.get("email") or "user@gmail.com"
     _token_cache["email"] = email
-    _save_tokens({"refresh_token": tok.get("refresh_token"), "email": email})
+    _save_tokens({
+        "refresh_token": tok.get("refresh_token"),
+        "email": email,
+        "name": profile.get("name"),
+        "picture": profile.get("picture"),
+    })
     return {"email": email}
 
 
@@ -171,9 +178,9 @@ def current_google_email() -> str | None:
     return _token_cache.get("email") or _load_tokens().get("email")
 
 
-def _fetch_email(access_token: str | None) -> str:
+def _fetch_profile(access_token: str | None) -> dict[str, str | None]:
     if not access_token:
-        return "user@gmail.com"
+        return {"email": "user@gmail.com", "name": None, "picture": None}
     try:
         with httpx.Client(timeout=15.0) as client:
             resp = client.get(
@@ -181,9 +188,18 @@ def _fetch_email(access_token: str | None) -> str:
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             resp.raise_for_status()
-            return resp.json().get("email", "user@gmail.com")
+            data = resp.json()
+            return {
+                "email": data.get("email") or "user@gmail.com",
+                "name": data.get("name"),
+                "picture": data.get("picture"),
+            }
     except Exception:
-        return "user@gmail.com"
+        return {"email": "user@gmail.com", "name": None, "picture": None}
+
+
+def _fetch_email(access_token: str | None) -> str:
+    return _fetch_profile(access_token).get("email") or "user@gmail.com"
 
 
 # ── Gmail message parsing helpers ─────────────────────────────────────────────
@@ -307,6 +323,34 @@ class GmailClient:
     def __init__(self, settings_obj=settings):
         self.settings = settings_obj
         self.use_mock = bool(self.settings.use_mock_graph)
+
+    def get_user_profile(self) -> dict[str, str | None]:
+        """Return the signed-in Google profile for display in the app shell."""
+        if self.use_mock:
+            return {
+                "email": current_google_email() or "user@gmail.com",
+                "display_name": "Google User",
+                "photo_url": None,
+            }
+        stored = _load_tokens()
+        profile = {
+            "email": current_google_email(),
+            "display_name": stored.get("name"),
+            "photo_url": stored.get("picture"),
+        }
+        try:
+            live = _fetch_profile(_get_access_token())
+            profile["email"] = live.get("email") or profile["email"]
+            profile["display_name"] = live.get("name") or profile["display_name"]
+            profile["photo_url"] = live.get("picture") or profile["photo_url"]
+            _save_tokens({
+                "email": profile["email"],
+                "name": profile["display_name"],
+                "picture": profile["photo_url"],
+            })
+        except Exception:
+            pass
+        return profile
 
     # ── helpers ──
     def _request(self, method: str, path: str, **kwargs) -> Any:

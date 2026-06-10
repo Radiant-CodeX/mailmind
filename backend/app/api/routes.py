@@ -100,6 +100,28 @@ def _validate_approval_token(token: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid approval token")
 
 
+def _current_user_profile(fallback_email: str | None = None) -> dict[str, str | None]:
+    """Best-effort provider profile for the app shell."""
+    profile: dict[str, str | None] = {
+        "email": fallback_email,
+        "display_name": None,
+        "photo_url": None,
+    }
+    try:
+        client = get_mail_client()
+        if hasattr(client, "get_user_profile"):
+            provider_profile = client.get_user_profile()
+            if isinstance(provider_profile, dict):
+                profile.update({
+                    "email": provider_profile.get("email") or fallback_email,
+                    "display_name": provider_profile.get("display_name"),
+                    "photo_url": provider_profile.get("photo_url"),
+                })
+    except Exception as exc:
+        logger.warning("[auth] Profile fetch failed: %s", exc)
+    return profile
+
+
 @router.get("/health")
 def health(request: Request) -> dict[str, Any]:
     """Liveness probe — process is up and serving."""
@@ -747,11 +769,13 @@ def auth_status() -> dict[str, Any]:
     if active_provider() == "google":
         from app.services.gmail import current_google_email, has_google_session
         if has_google_session():
+            email = current_google_email()
             return {
                 "status": "authenticated",
                 "authenticated": True,
-                "user_principal_name": current_google_email(),
+                "user_principal_name": email,
                 "provider": "google",
+                "profile": _current_user_profile(email),
             }
         return {"status": "unauthenticated", "authenticated": False, "user_principal_name": None, "provider": "google"}
 
@@ -759,11 +783,13 @@ def auth_status() -> dict[str, Any]:
     import time
     now = time.time()
     if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
+        email = _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com"
         return {
             "status": "authenticated",
             "authenticated": True,
-            "user_principal_name": _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com",
+            "user_principal_name": email,
             "provider": "microsoft",
+            "profile": _current_user_profile(email),
         }
     return {
         "status": "unauthenticated",

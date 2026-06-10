@@ -18,6 +18,20 @@ function resolveBase(): string {
 
 export const BASE = resolveBase();
 
+export interface UserProfile {
+  email?: string | null;
+  display_name?: string | null;
+  photo_url?: string | null;
+}
+
+export interface AuthStatus {
+  status: string;
+  authenticated: boolean;
+  user_principal_name: string | null;
+  provider?: 'google' | 'microsoft';
+  profile?: UserProfile;
+}
+
 export async function classifyEmail(text: string) {
   const res = await fetch(`${BASE}/api/classify`, {
     method: 'POST',
@@ -500,7 +514,7 @@ export async function loginPoll(deviceCode: string) {
   }
 }
 
-export async function checkAuthStatus() {
+export async function checkAuthStatus(): Promise<AuthStatus> {
   // Fail fast (5s) so the login screen never hangs on a slow/unreachable backend.
   const res = await fetch(`${BASE}/api/auth/status`, { signal: AbortSignal.timeout(5000) });
   if (!res.ok) throw new Error('Auth status check failed');

@@ -295,6 +295,48 @@ class GraphClient:
             return None
         return resp.json()
 
+    def get_user_profile(self) -> dict[str, str | None]:
+        """Return the signed-in Microsoft profile for display in the app shell."""
+        if self.use_mock:
+            return {
+                "email": _user_token_cache.get("user_principal_name") or self.settings.azure_user_upn or "user@example.com",
+                "display_name": "Microsoft User",
+                "photo_url": None,
+            }
+
+        prefix = self._get_prefix()
+        email = _user_token_cache.get("user_principal_name") or self.settings.azure_user_upn
+        display_name = None
+        photo_url = None
+
+        try:
+            user = self._request("GET", f"{prefix}?$select=displayName,mail,userPrincipalName")
+            display_name = (user or {}).get("displayName")
+            email = (user or {}).get("mail") or (user or {}).get("userPrincipalName") or email
+        except Exception:
+            pass
+
+        try:
+            token = self._get_token()
+            headers = {"Accept": "image/*"}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(f"{self.base}{prefix}/photo/$value", headers=headers)
+            if resp.status_code == 200 and resp.content:
+                import base64
+                content_type = resp.headers.get("content-type") or "image/jpeg"
+                encoded = base64.b64encode(resp.content).decode("ascii")
+                photo_url = f"data:{content_type};base64,{encoded}"
+        except Exception:
+            photo_url = None
+
+        return {
+            "email": email,
+            "display_name": display_name,
+            "photo_url": photo_url,
+        }
+
     def _get_prefix(self) -> str:
         """Get the user prefix path for Microsoft Graph queries."""
         if self.use_mock:
