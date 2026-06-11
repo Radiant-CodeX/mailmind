@@ -305,8 +305,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     }
 
     // ── Cache-first: serve from localStorage if fresh and not forced ─────────
+    // BUT: Skip cache if there's an active search query, since cache is for
+    // the default (no-search) state and won't contain search results.
+    const hasSearchQuery = searchRef.current && searchRef.current.trim().length > 0;
     const cached = readEmailCache(folder);
-    if (!force && cached && isCacheFresh(cached) && cached.emails.length > 0) {
+    if (!force && !hasSearchQuery && cached && isCacheFresh(cached) && cached.emails.length > 0) {
       console.info('[inbox] Serving %s from cache (%ds old) — skipping API call',
         folder, Math.round((Date.now() - cached.cachedAt) / 1000));
 
