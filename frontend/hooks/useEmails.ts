@@ -175,12 +175,14 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   }, []);
 
   // --------------------------------------------------------------------------
-  // Pagination — fetch exactly 10 emails per page directly from Graph/Gmail.
+  // Pagination — fetch emails per page directly from Graph/Gmail.
+  // Increased from 10 to 20 to reduce the number of API calls needed for pagination
+  // and improve initial load performance.
   // Triage fires only for the current page's emails using the 3-level cache
   // (localStorage → Redis → DB → LLM). Previous pages stay in allEmails so
   // navigating back is instant with no extra API calls.
   // --------------------------------------------------------------------------
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 20;
 
   const [allEmails, setAllEmails] = useState<Email[]>([]);
   const [total, setTotal] = useState(0);

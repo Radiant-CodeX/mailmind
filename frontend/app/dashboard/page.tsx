@@ -53,11 +53,13 @@ export default function Home() {
           }
           setCheckingAuth(false);
         } else {
+          console.warn('Auth check returned authenticated: false', data);
           router.push('/');
         }
       } catch (err) {
-        console.error('Failed to get auth status', err);
-        router.push('/');
+        console.error('Failed to get auth status', err instanceof Error ? err.message : err);
+        // Wait a bit before redirecting in case it's a temporary network issue
+        setTimeout(() => router.push('/'), 1000);
       }
     }
     loadAuthStatus();
@@ -178,8 +180,10 @@ export default function Home() {
     } finally {
       // Always sign the user out locally and return to the login page, even if
       // the backend logout call failed.
-      // Clear all user-scoped cached data. Keep remembered login for 7 days so
-      // the same user can quickly log back in on the same device (device-scoped).
+      // Clear quick login on logout to prevent other users on shared device from
+      // impersonating this user. When the same user logs back in, their quick login
+      // will be automatically re-saved.
+      clearRememberedLogin();
       userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);

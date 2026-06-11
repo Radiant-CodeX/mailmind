@@ -575,8 +575,9 @@ export async function loginPoll(deviceCode: string) {
 }
 
 export async function checkAuthStatus(): Promise<AuthStatus> {
-  // Fail fast (5s) so the login screen never hangs on a slow/unreachable backend.
-  const res = await apiFetch(`${BASE}/api/auth/status`, { signal: AbortSignal.timeout(5000) });
+  // Timeout set to 15s to allow backend time to fetch OAuth account data and validate session.
+  // Backend may need to call external APIs (Google/Microsoft) which adds latency.
+  const res = await apiFetch(`${BASE}/api/auth/status`, { signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error('Auth status check failed');
   const data = await res.json();
   return persistSessionFromResponse(data);

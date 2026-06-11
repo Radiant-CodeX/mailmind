@@ -25,6 +25,7 @@ export interface RememberedLogin {
 const KEY = 'mailmind_last_login';
 const REMEMBER_KEY = 'mailmind_remember_me';
 const DEVICE_ID_KEY = 'mailmind_device_id';
+const LAST_EMAIL_KEY = 'mailmind_last_login_email';
 
 /** Generate a simple UUID v4 */
 function generateDeviceId(): string {
@@ -95,19 +96,33 @@ export function rememberLogin(
   provider: Provider = 'microsoft'
 ): void {
   if (typeof window === 'undefined') return;
+
+  const normalizedEmail = (email || 'Signed-in user').toLowerCase();
+  const lastEmail = localStorage.getItem(LAST_EMAIL_KEY);
+
+  // SECURITY: If a DIFFERENT user logs in on this device, clear the previous
+  // user's quick login to prevent impersonation.
+  // Example: User A logs in, logs out. User B logs in on the same device.
+  // When User A returns and hard-reloads, they should NOT see User B's quick login.
+  if (lastEmail && lastEmail !== normalizedEmail) {
+    localStorage.removeItem(KEY);
+  }
+
   const entry: RememberedLogin = {
     mode,
     provider,
-    email: email || 'Signed-in user',
+    email: normalizedEmail,
     ts: Date.now(),
     deviceId: getDeviceId(),
   };
   localStorage.setItem(KEY, JSON.stringify(entry));
+  localStorage.setItem(LAST_EMAIL_KEY, normalizedEmail);
 }
 
 export function clearRememberedLogin(): void {
   if (typeof window === 'undefined') return;
   localStorage.removeItem(KEY);
+  localStorage.removeItem(LAST_EMAIL_KEY);
 }
 
 /** Initials for an avatar chip, e.g. "mock.user@x.com" → "MO". */

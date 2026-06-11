@@ -233,11 +233,17 @@ export default function LoginPage() {
     setError(null);
     try {
       await quickLogin(remembered.email, remembered.provider);
+      // Small delay to ensure session cookie is fully set before redirecting.
+      // This prevents race conditions where the dashboard's auth check runs
+      // before the cookie is available.
+      await new Promise(resolve => setTimeout(resolve, 500));
       router.push("/dashboard");
-    } catch {
+    } catch (err) {
       // Session can't be resumed silently (token expired/cleared) — fall back to
       // a full sign-in for the remembered provider instead of showing an error.
+      console.error('Quick login failed:', err);
       setLoading(false);
+      setError(err instanceof Error ? err.message : 'Quick login failed. Please try again.');
       if (remembered.provider === "google") {
         handleGoogle(remembered.email, true);
       } else {
