@@ -47,9 +47,9 @@ export default function Home() {
           if (data.provider === 'google' || data.provider === 'microsoft') setProvider(data.provider);
           // Scope all localStorage data to this user — prevents cross-account leaks.
           if (data.user_principal_name) userStorage.setUser(data.user_principal_name);
-          // Save the login for quick login on next session (same user, same browser).
+          // Save the login for quick login on next session (same user, same device).
           if (data.user_principal_name && (data.provider === 'google' || data.provider === 'microsoft')) {
-            rememberLogin(data.provider === 'mock' ? 'mock' : 'live', data.user_principal_name, data.provider);
+            rememberLogin('live', data.user_principal_name, data.provider);
           }
           setCheckingAuth(false);
         } else {
@@ -178,9 +178,8 @@ export default function Home() {
     } finally {
       // Always sign the user out locally and return to the login page, even if
       // the backend logout call failed.
-      // Clear all user-scoped cached data and remembered login so the next user
-      // starts completely fresh (security: no account hints for shared devices).
-      clearRememberedLogin();
+      // Clear all user-scoped cached data. Keep remembered login for 7 days so
+      // the same user can quickly log back in on the same device (device-scoped).
       userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);
