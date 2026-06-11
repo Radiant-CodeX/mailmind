@@ -70,14 +70,38 @@ function EmailBodyHtml({ html }: { html: string }) {
         a.removeAttribute("href");
     });
 
-    // Block tracking pixels and external images that could leak the user's IP.
-    // Only data: URIs (inline images) and https: CDN images are allowed.
+    // Allow images from data URIs and trusted HTTPS sources (CDNs, email providers).
+    // Block tracking pixels: 1x1 or very small images from external domains.
     doc.querySelectorAll("img").forEach((img) => {
       const src = img.getAttribute("src") || "";
-      if (!src.startsWith("data:") && !src.startsWith("https://")) {
-        img.removeAttribute("src");
-        img.setAttribute("alt", img.getAttribute("alt") || "[image]");
+      const width = parseInt(img.getAttribute("width") || "0", 10);
+      const height = parseInt(img.getAttribute("height") || "0", 10);
+
+      // Data URIs and HTTPS images are safe — allow them
+      if (src.startsWith("data:") || src.startsWith("https://")) {
+        // Optionally block 1x1 tracking pixels even from HTTPS
+        if (width === 1 && height === 1) {
+          img.removeAttribute("src");
+          img.setAttribute("alt", img.getAttribute("alt") || "[tracking pixel]");
+        }
+        return; // Safe — allow the image
       }
+
+      // HTTP images: allow if from email provider domains (fallback for dev/legacy)
+      if (src.startsWith("http://")) {
+        // Allow localhost for dev
+        if (src.includes("localhost") || src.includes("127.0.0.1")) {
+          return;
+        }
+        // Block external HTTP (not secure)
+        img.removeAttribute("src");
+        img.setAttribute("alt", img.getAttribute("alt") || "[insecure image]");
+        return;
+      }
+
+      // Block unknown protocols (javascript:, file:, etc.)
+      img.removeAttribute("src");
+      img.setAttribute("alt", img.getAttribute("alt") || "[image]");
     });
 
     // Base styles — match Gmail's rendering defaults.

@@ -120,9 +120,14 @@ export function useEmailDetail(
 
       // ── Fetch attachment metadata (lazy — only when email has attachments) ────
       if (currEmail.hasAttachments) {
-        fetchAttachments(currEmail.id).then((atts) => {
-          if (!cancelled && atts.length > 0) setAttachments(atts);
-        });
+        fetchAttachments(currEmail.id)
+          .then((atts) => {
+            if (!cancelled) setAttachments(atts);
+          })
+          .catch((err) => {
+            console.warn('[attachments] Failed to fetch:', err);
+            if (!cancelled) setAttachments([]);
+          });
       }
 
       // ── Check enrichment cache ───────────────────────────────────────────────

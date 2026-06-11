@@ -18,7 +18,7 @@ import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
 import { checkAuthStatus, logoutUser, createCalendarEvent, UserProfile } from '../../lib/api';
-import { rememberLogin, getRememberMe, Provider } from '../../lib/session';
+import { rememberLogin, clearRememberedLogin, getRememberMe, Provider } from '../../lib/session';
 import { userStorage } from '../../lib/userStorage';
 import { CalendarEvent } from '../../lib/types';
 
@@ -168,18 +168,15 @@ export default function Home() {
 
   const handleLogout = async () => {
     try {
-      // Remember this account for one-tap Quick Login (valid for 1 week) —
-      // only when "Remember me" was checked, and only on sign-out.
-      if (userEmail && getRememberMe()) {
-        rememberLogin('live', userEmail, provider);
-      }
       await logoutUser();
     } catch (err) {
       console.error('Logout request failed (signing out anyway)', err);
     } finally {
       // Always sign the user out locally and return to the login page, even if
       // the backend logout call failed.
-      // Clear all user-scoped cached data so the next user starts fresh.
+      // Clear all user-scoped cached data and remembered login so the next user
+      // starts completely fresh (security: no account hints for shared devices).
+      clearRememberedLogin();
       userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);
