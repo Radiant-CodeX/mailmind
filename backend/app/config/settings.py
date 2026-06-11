@@ -67,7 +67,7 @@ class Settings:
     # Triage uses gpt-4o-mini by default (faster, cheaper); heavier nodes (commitments, RAG) use gpt-4o
     azure_openai_triage_deployment: str = os.getenv("AZURE_OPENAI_TRIAGE_DEPLOYMENT", "gpt-4o-mini")
     azure_openai_embedding_deployment: str = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    # Groq is the fallback LLM when Azure OpenAI is not configured.
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
 
     # ── Runtime environment ────────────────────────────────────────────────

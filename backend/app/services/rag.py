@@ -35,10 +35,15 @@ class EmbeddingProvider:
     _api_unavailable: bool = False  # shared across all instances in the process
 
     def _get_llm_client(self) -> tuple[Any, str]:
+        """Return Azure embedding client, or None to fall back to deterministic embeddings.
+
+        Note: Groq has no embeddings API; we only support Azure OpenAI for embeddings.
+        When Azure is unavailable, _deterministic() provides a fast fallback.
+        """
         if settings.use_mock_graph:
             return None, ""
         try:
-            from openai import AzureOpenAI, OpenAI
+            from openai import AzureOpenAI
             if settings.azure_openai_api_key and settings.azure_openai_endpoint:
                 return AzureOpenAI(
                     api_key=settings.azure_openai_api_key,
@@ -46,13 +51,9 @@ class EmbeddingProvider:
                     azure_endpoint=settings.azure_openai_endpoint,
                     max_retries=0,  # 404s are permanent — don't retry
                 ), settings.azure_openai_embedding_deployment
-            elif settings.openai_api_key:
-                return OpenAI(
-                    api_key=settings.openai_api_key,
-                    max_retries=0,
-                ), "text-embedding-ada-002"
         except Exception:
             pass
+        # No embeddings service configured — fall back to deterministic embeddings.
         return None, ""
 
     @staticmethod
