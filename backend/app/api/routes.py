@@ -71,29 +71,34 @@ from app.api.deps import SESSION_COOKIE, get_current_user
 def _set_session_cookie(response: Response, token: str) -> None:
     """Attach the session as an HttpOnly cookie, scoped to parent domain for subdomain sharing.
 
-    Frontend and backend on different subdomains (mailmind.* and api.*) or ports
-    require SameSite=None and Domain scope. In production, Secure=True is mandatory
-    with SameSite=None. In localhost dev, browsers allow Secure=False as a special
-    exception.
+    Frontend (mailmind.*) and backend (api.*) on different subdomains require
+    explicit Domain scope to share cookies. SameSite=None is required for cross-site
+    requests. In production, Secure=True is mandatory with SameSite=None.
     """
     from urllib.parse import urlparse
 
     is_https = settings.is_production or settings.frontend_origin.startswith("https")
 
-    # Extract parent domain for subdomain cookie sharing.
+    # Extract parent domain from FRONTEND_ORIGIN for cookie sharing across subdomains.
     # e.g., "https://mailmind.radiantsofficial.com" → ".radiantsofficial.com"
-    # or "http://localhost:3000" → None (default to request hostname)
     domain = None
-    try:
-        parsed = urlparse(settings.frontend_origin)
-        hostname = parsed.hostname or ""
-        # Only set domain for real TLDs (not localhost or raw IPs)
-        if hostname and "." in hostname and not hostname.startswith("127"):
-            parts = hostname.split(".")
-            if len(parts) >= 2:
-                domain = "." + ".".join(parts[-2:])  # e.g., ".radiantsofficial.com"
-    except Exception:
-        pass
+    if settings.frontend_origin:
+        try:
+            parsed = urlparse(settings.frontend_origin)
+            hostname = (parsed.hostname or "").lower().strip()
+
+            # Only set explicit domain for real TLDs with dots (not localhost/IPs)
+            if hostname and "." in hostname and not hostname.startswith("127"):
+                parts = hostname.split(".")
+                # Extract parent domain (last 2 parts): example.com, .radiantsofficial.com
+                if len(parts) >= 2:
+                    domain = "." + ".".join(parts[-2:])
+                    audit.debug(
+                        "COOKIE_DOMAIN_SET extracted=%s from_origin=%s",
+                        domain, settings.frontend_origin,
+                    )
+        except Exception as e:
+            audit.warning("COOKIE_DOMAIN_EXTRACTION_FAILED origin=%s error=%s", settings.frontend_origin, e)
 
     response.set_cookie(
         key=SESSION_COOKIE,
@@ -105,6 +110,10 @@ def _set_session_cookie(response: Response, token: str) -> None:
         path="/",
         domain=domain,
     )
+    audit.info(
+        "SESSION_COOKIE_SET domain=%s secure=%s token_prefix=%s",
+        domain or "request_hostname", is_https, token[:8],
+    )
 
 
 def _clear_session_cookie(response: Response) -> None:
@@ -114,15 +123,16 @@ def _clear_session_cookie(response: Response) -> None:
 
     # Match the domain used in _set_session_cookie so delete works correctly
     domain = None
-    try:
-        parsed = urlparse(settings.frontend_origin)
-        hostname = parsed.hostname or ""
-        if hostname and "." in hostname and not hostname.startswith("127"):
-            parts = hostname.split(".")
-            if len(parts) >= 2:
-                domain = "." + ".".join(parts[-2:])
-    except Exception:
-        pass
+    if settings.frontend_origin:
+        try:
+            parsed = urlparse(settings.frontend_origin)
+            hostname = (parsed.hostname or "").lower().strip()
+            if hostname and "." in hostname and not hostname.startswith("127"):
+                parts = hostname.split(".")
+                if len(parts) >= 2:
+                    domain = "." + ".".join(parts[-2:])
+        except Exception:
+            pass
 
     response.delete_cookie(
         key=SESSION_COOKIE,
@@ -1068,8 +1078,9 @@ def classify_text(payload: RAGQuery, current_user: str = Depends(get_current_use
 
 @router.get("/thread/{thread_id}")
 def fetch_thread(thread_id: str, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
-    """Fetch recent messages for a given thread from the Graph stub client."""
-    fetcher = ThreadFetcher(GraphClient())
+    """Fetch recent messages for a given thread (user-scoped via mail client)."""
+    client = get_mail_client()  # Uses ContextVar session; returns account-bound client
+    fetcher = ThreadFetcher(client)
     return fetcher.fetch(thread_id)
 
 
