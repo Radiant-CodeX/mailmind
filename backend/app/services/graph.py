@@ -134,6 +134,23 @@ def exchange_ms_code(state: str, query_params: dict[str, str]) -> dict[str, Any]
     # refresh_token is persisted inside the MSAL cache (not in _user_token_cache)
     # so it survives process restarts via the msal_cache.bin file.
     _save_token_cache(cache)
+
+    # Dual-write the serialized MSAL cache to the per-user oauth_accounts table
+    # (encrypted). MSAL owns refresh/rotation semantics, so storing its cache
+    # blob per account is safer than extracting raw tokens. No-op without a DB.
+    try:
+        from app.services import identity
+        if upn:
+            user_id = identity.get_or_create_user(upn, claims.get("name"))
+            identity.upsert_oauth_account(
+                user_id, "microsoft", upn,
+                provider_account_id=claims.get("oid") or upn,
+                msal_cache=cache.serialize(),
+            )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("[auth] Failed to persist oauth account: %s", exc)
+
     import logging
     logging.getLogger(__name__).info(
         "[auth] Token exchange complete for %s — refresh token persisted (offline_access)", upn
@@ -207,9 +224,13 @@ class GraphClient:
 
     internal_domain = "example.com"
 
-    def __init__(self, settings_obj: type(settings) = settings):
+    def __init__(self, account: dict[str, Any] | None = None, settings_obj: type(settings) = settings):
         self.settings = settings_obj
         self.use_mock = bool(self.settings.use_mock_graph)
+        # When set (a row from identity.get_oauth_account), this client sources
+        # delegated tokens from that account's MSAL cache blob only — never the
+        # process-global _user_token_cache — so concurrent users stay isolated.
+        self.account = account
         if not self.use_mock:
             if msal is None:
                 raise RuntimeError("msal package is required for Graph integration; pip install msal")
@@ -231,9 +252,53 @@ class GraphClient:
             self._token_expires_at = 0.0
             self.base = "https://graph.microsoft.com/v1.0"
 
+    def _account_token(self) -> str:
+        """Acquire a delegated access token for this client's bound account.
+
+        Self-contained: deserializes the account's MSAL cache, silently acquires
+        a token for that account, and persists any rotated cache back to the
+        same account row. Never reads or writes _user_token_cache.
+        """
+        if msal is None:
+            raise RuntimeError("msal package is required for Graph integration")
+        cache = msal.SerializableTokenCache()
+        blob = self.account.get("msal_cache")
+        if blob:
+            try:
+                cache.deserialize(blob)
+            except Exception:
+                pass
+        tenant_id = self.settings.azure_tenant_id or "common"
+        app = msal.ConfidentialClientApplication(
+            self.settings.azure_client_id,
+            client_credential=self.settings.azure_client_secret,
+            authority=f"https://login.microsoftonline.com/{tenant_id}",
+            token_cache=cache,
+        )
+        target = self.account.get("account_email")
+        accounts = app.get_accounts(username=target) or app.get_accounts()
+        result = None
+        if accounts:
+            result = app.acquire_token_silent(_DELEGATED_SCOPES, account=accounts[0])
+        if not result or "access_token" not in result:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="Microsoft session expired. Please reconnect.")
+        # Persist rotated refresh tokens back to this account only.
+        if cache.has_state_changed:
+            try:
+                from app.services import identity
+                identity.update_account_tokens_locked(self.account["id"], msal_cache=cache.serialize())
+            except Exception:
+                pass
+        return result["access_token"]
+
     def _get_token(self) -> str | None:
         if self.use_mock:
             return None
+
+        # Account-bound clients use their own per-account token flow.
+        if self.account:
+            return self._account_token()
 
         now = time.time()
         # 1. Active user session — proactively refresh _TOKEN_REFRESH_BUFFER seconds
@@ -297,15 +362,16 @@ class GraphClient:
 
     def get_user_profile(self) -> dict[str, str | None]:
         """Return the signed-in Microsoft profile for display in the app shell."""
+        own_email = self.account.get("account_email") if self.account else None
         if self.use_mock:
             return {
-                "email": _user_token_cache.get("user_principal_name") or self.settings.azure_user_upn or "user@example.com",
+                "email": own_email or _user_token_cache.get("user_principal_name") or self.settings.azure_user_upn or "user@example.com",
                 "display_name": "Microsoft User",
                 "photo_url": None,
             }
 
         prefix = self._get_prefix()
-        email = _user_token_cache.get("user_principal_name") or self.settings.azure_user_upn
+        email = own_email or _user_token_cache.get("user_principal_name") or self.settings.azure_user_upn
         display_name = None
         photo_url = None
 
@@ -341,9 +407,9 @@ class GraphClient:
         """Get the user prefix path for Microsoft Graph queries."""
         if self.use_mock:
             return "/me"
-        
-        # If user token is active, we are logged in directly as the user, so use /me
-        if _user_token_cache["access_token"]:
+
+        # Account-bound or active user session — we act as the delegated user.
+        if self.account or _user_token_cache["access_token"]:
             return "/me"
         
         # Check if UPN is explicitly configured in Settings

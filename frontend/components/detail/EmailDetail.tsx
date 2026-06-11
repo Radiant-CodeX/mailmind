@@ -128,7 +128,7 @@ function EmailBodyHtml({ html }: { html: string }) {
   return (
     <iframe
       ref={iframeRef}
-      sandbox="allow-same-origin"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       style={{
         width: "100%",
         height: `${height}px`,
@@ -258,6 +258,8 @@ interface EmailDetailProps {
   confirmSelectedCommitments: () => void;
   checkConflict: (deadline: string | null) => CalendarEvent | null;
   onClose: () => void;
+  /** Fetched attachment metadata (replaces empty email.attachments from inbox). */
+  attachments?: NonNullable<Email["attachments"]>;
   /** When false (e.g. the Sent folder) the AI pipeline panels are hidden. */
   showPipeline?: boolean;
 }
@@ -291,6 +293,7 @@ export function EmailDetail({
   confirmSelectedCommitments,
   checkConflict,
   onClose,
+  attachments: attachmentsProp,
   showPipeline = true,
 }: EmailDetailProps) {
   const [isDraftExpanded, setIsDraftExpanded] = useState(false);
@@ -476,11 +479,12 @@ export function EmailDetail({
           </div>
 
           {/* Attachments */}
-          {email.attachments && email.attachments.length > 0 && (
-            <AttachmentList
-              emailId={email.id}
-              attachments={email.attachments}
-            />
+          {(() => {
+            const atts = attachmentsProp && attachmentsProp.length > 0
+              ? attachmentsProp
+              : email.attachments && email.attachments.length > 0 ? email.attachments : null;
+            return atts ? <AttachmentList emailId={email.id} attachments={atts} /> : null;
+          })()}
           )}
 
           {showPipeline && (

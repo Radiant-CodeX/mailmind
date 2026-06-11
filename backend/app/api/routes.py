@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
+audit = logging.getLogger("mailmind.audit")
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from app.config.settings import settings
@@ -38,8 +39,10 @@ from app.services.mail_provider import (
     active_email,
     active_provider,
     clear_provider,
+    create_session,
     get_mail_client,
-    is_active,
+    get_session,
+    revoke_session,
     set_provider,
 )
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
@@ -60,7 +63,38 @@ router = APIRouter(prefix="/api")
 rate_limit_store: dict[str, list[datetime]] = {}
 
 
-from app.api.deps import get_current_user
+from fastapi import Cookie, Response
+
+from app.api.deps import SESSION_COOKIE, get_current_user
+
+
+def _set_session_cookie(response: Response, token: str) -> None:
+    """Attach the session as an HttpOnly cookie.
+
+    Cross-origin deployments (frontend and backend on different domains) need
+    SameSite=None which mandates Secure; local http dev uses Lax instead.
+    """
+    cross_origin = settings.frontend_origin.startswith("https")
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        secure=cross_origin or settings.is_production,
+        samesite="none" if cross_origin else "lax",
+        max_age=30 * 86400,
+        path="/",
+    )
+
+
+def _clear_session_cookie(response: Response) -> None:
+    cross_origin = settings.frontend_origin.startswith("https")
+    response.delete_cookie(
+        key=SESSION_COOKIE,
+        httponly=True,
+        secure=cross_origin or settings.is_production,
+        samesite="none" if cross_origin else "lax",
+        path="/",
+    )
 
 # Cache of evaluation predictions keyed by email text — the golden dataset is
 # fixed, so after the first run every re-run is instant.
@@ -196,6 +230,19 @@ def poll_new_email(_user: str = Depends(get_current_user)) -> dict[str, Any]:
     except Exception as e:
         logger.warning("[poll] New email check failed: %s", e)
         return {"has_new": False, "latest_id": None, "error": str(e)}
+
+
+@router.get("/emails/{email_id}/attachments")
+def list_attachments(email_id: str, _user: str = Depends(get_current_user)) -> list[dict]:
+    """Return attachment metadata (id, filename, mime_type, size) for an email."""
+    client = get_mail_client()
+    if not hasattr(client, "list_attachments"):
+        return []
+    try:
+        return client.list_attachments(email_id)
+    except Exception as e:
+        logger.warning("[attachments] Failed to list attachments for %s: %s", email_id, e)
+        return []
 
 
 @router.get("/emails/{email_id}/attachments/{attachment_id}")
@@ -466,7 +513,7 @@ def login_initiate() -> dict[str, Any]:
 
 
 @router.post("/auth/login-poll")
-def login_poll(payload: dict[str, str]) -> dict[str, Any]:
+def login_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     """Read the status of an in-progress device-code login.
 
     The actual token acquisition happens once in a background thread started by
@@ -486,14 +533,21 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
     status_val = state.get("status")
     if status_val == "success":
         _device_flow_status.pop(device_code, None)
-        set_provider("microsoft", state.get("user_principal_name"))
+        email = state.get("user_principal_name") or state.get("email")
+        if not email:
+            raise HTTPException(status_code=500, detail="Authentication succeeded but no user identity was returned. Please try again.")
+        session_token = create_session("microsoft", email)
+        _set_session_cookie(response, session_token)
+        audit.info("AUTH_LOGIN_SUCCESS provider=microsoft flow=device_code email=%s", email)
         return {
             "status": "success",
             "authenticated": True,
-            "user_principal_name": state.get("user_principal_name"),
+            "user_principal_name": email,
+            "session_token": session_token,
         }
     if status_val == "error":
         _device_flow_status.pop(device_code, None)
+        audit.warning("AUTH_LOGIN_FAILED provider=microsoft flow=device_code error=%s", state.get("error"))
         raise HTTPException(status_code=400, detail=state.get("error", "Authentication failed"))
 
     return {"status": "pending", "authenticated": False}
@@ -634,7 +688,7 @@ def microsoft_callback(request: Request) -> str:
 
 
 @router.post("/auth/microsoft/poll")
-def microsoft_poll(payload: dict[str, str]) -> dict[str, Any]:
+def microsoft_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     """Poll the status of an in-progress Microsoft sign-in."""
     from app.services.graph import ms_auth_status
     state = payload.get("state")
@@ -645,9 +699,21 @@ def microsoft_poll(payload: dict[str, str]) -> dict[str, Any]:
         return {"status": "pending", "authenticated": False}
     if info.get("status") == "success":
         ms_auth_status.pop(state, None)
-        return {"status": "success", "authenticated": True, "user_principal_name": info.get("email")}
+        email = info.get("email")
+        if not email:
+            raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
+        session_token = create_session("microsoft", email)
+        _set_session_cookie(response, session_token)
+        audit.info("AUTH_LOGIN_SUCCESS provider=microsoft flow=popup email=%s", email)
+        return {
+            "status": "success",
+            "authenticated": True,
+            "user_principal_name": email,
+            "session_token": session_token,
+        }
     if info.get("status") == "error":
         ms_auth_status.pop(state, None)
+        audit.warning("AUTH_LOGIN_FAILED provider=microsoft flow=popup error=%s", info.get("error"))
         raise HTTPException(status_code=400, detail=info.get("error", "Microsoft sign-in failed"))
     return {"status": "pending", "authenticated": False}
 
@@ -698,7 +764,7 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
 
 
 @router.post("/auth/google/poll")
-def google_poll(payload: dict[str, str]) -> dict[str, Any]:
+def google_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     """Poll the status of an in-progress Google sign-in."""
     from app.services.gmail import google_auth_status
 
@@ -710,15 +776,27 @@ def google_poll(payload: dict[str, str]) -> dict[str, Any]:
         return {"status": "pending", "authenticated": False}
     if info.get("status") == "success":
         google_auth_status.pop(state, None)
-        return {"status": "success", "authenticated": True, "user_principal_name": info.get("email")}
+        email = info.get("email")
+        if not email:
+            raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
+        session_token = create_session("google", email)
+        _set_session_cookie(response, session_token)
+        audit.info("AUTH_LOGIN_SUCCESS provider=google flow=popup email=%s", email)
+        return {
+            "status": "success",
+            "authenticated": True,
+            "user_principal_name": email,
+            "session_token": session_token,
+        }
     if info.get("status") == "error":
         google_auth_status.pop(state, None)
+        audit.warning("AUTH_LOGIN_FAILED provider=google flow=popup error=%s", info.get("error"))
         raise HTTPException(status_code=400, detail=info.get("error", "Google sign-in failed"))
     return {"status": "pending", "authenticated": False}
 
 
 @router.post("/auth/quick-login")
-def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
+def quick_login(response: Response, payload: dict[str, str] | None = None) -> dict[str, Any]:
     """One-tap login for a remembered account — no device code / password.
 
     Uses the persisted refresh token (Microsoft MSAL cache or Google token) to
@@ -731,45 +809,66 @@ def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
     if provider == "google":
         from app.services.gmail import _refresh_access_token, current_google_email, has_google_session
         if not has_google_session() or not _refresh_access_token():
+            audit.warning("AUTH_QUICK_LOGIN_FAILED provider=google reason=no_session email=%s", email)
             raise HTTPException(status_code=400, detail="No Google session to resume. Please connect Google again.")
         set_provider("google", current_google_email() or email)
-        return {"status": "authenticated", "authenticated": True, "user_principal_name": active_email()}
+        user_email = active_email()
+        session_token = create_session("google", user_email)
+        _set_session_cookie(response, session_token)
+        audit.info("AUTH_QUICK_LOGIN_SUCCESS provider=google email=%s", user_email)
+        return {
+            "status": "authenticated",
+            "authenticated": True,
+            "user_principal_name": user_email,
+            "session_token": session_token,
+        }
 
     # Live Microsoft: resume the delegated session silently via the persisted
     # refresh token. Delegated tokens work with personal accounts and avoid the
     # app-only Conditional Access block (AADSTS53003).
     try:
-        info = client.quick_login(email)
+        ms_client = GraphClient()
+        info = ms_client.quick_login(email)
     except Exception as e:
+        audit.warning("AUTH_QUICK_LOGIN_FAILED provider=microsoft email=%s error=%s", email, e)
         raise HTTPException(status_code=400, detail=str(e))
     set_provider("microsoft", info.get("user_principal_name") or email)
+    user_email = info.get("user_principal_name") or email
+    session_token = create_session("microsoft", user_email)
+    _set_session_cookie(response, session_token)
+    audit.info("AUTH_QUICK_LOGIN_SUCCESS provider=microsoft email=%s", user_email)
     return {
         "status": "authenticated",
         "authenticated": True,
-        "user_principal_name": info.get("user_principal_name") or email,
+        "user_principal_name": user_email,
+        "session_token": session_token,
     }
 
 
 @router.get("/auth/status")
-def auth_status() -> dict[str, Any]:
+def auth_status(
+    mailmind_session: str | None = Cookie(default=None),
+    x_mailmind_session: str | None = Header(default=None),
+) -> dict[str, Any]:
     """Check the current login status and user principal name."""
     from app.services.graph import _user_token_cache
 
-    # A logged-out session is never authenticated, even if a resumable refresh
-    # token still exists on disk (that's only used by Quick Login).
-    if not is_active():
+    session = get_session(mailmind_session or x_mailmind_session)
+    if not session:
         return {
             "status": "unauthenticated",
             "authenticated": False,
             "user_principal_name": None,
             "provider": active_provider(),
         }
+    provider = session["provider"]
+    session_email = session.get("email")
 
     # Live Google session.
-    if active_provider() == "google":
+    if provider == "google":
         from app.services.gmail import current_google_email, has_google_session
         if has_google_session():
-            email = current_google_email()
+            email = current_google_email() or session_email
             return {
                 "status": "authenticated",
                 "authenticated": True,
@@ -783,7 +882,7 @@ def auth_status() -> dict[str, Any]:
     import time
     now = time.time()
     if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
-        email = _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com"
+        email = _user_token_cache["user_principal_name"] or session_email or "authenticated.user@outlook.com"
         return {
             "status": "authenticated",
             "authenticated": True,
@@ -800,15 +899,29 @@ def auth_status() -> dict[str, Any]:
 
 
 @router.post("/auth/logout")
-def auth_logout() -> dict[str, Any]:
+def auth_logout(
+    response: Response,
+    mailmind_session: str | None = Cookie(default=None),
+    x_mailmind_session: str | None = Header(default=None),
+) -> dict[str, Any]:
     """Log out the current user session by clearing token cache."""
     from app.services.gmail import sign_out_google
     from app.services.graph import _user_token_cache
+    # Resolve email before clearing so we can log who logged out.
+    _session_for_log = get_session(mailmind_session or x_mailmind_session)
     _user_token_cache["access_token"] = None
     _user_token_cache["expires_at"] = 0.0
     _user_token_cache["user_principal_name"] = None
     sign_out_google()  # keeps the refresh token so Quick Login can resume
+    revoke_session(mailmind_session or x_mailmind_session)
+    _clear_session_cookie(response)
     clear_provider()   # reset provider + mark the session logged out
+    audit.info(
+        "AUTH_LOGOUT provider=%s email=%s user_id=%s",
+        (_session_for_log or {}).get("provider", "?"),
+        (_session_for_log or {}).get("email", "?"),
+        (_session_for_log or {}).get("user_id", "?"),
+    )
     return {"status": "logged_out"}
 
 

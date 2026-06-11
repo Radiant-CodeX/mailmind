@@ -104,18 +104,33 @@ def _make_client_mock() -> MagicMock:
 
 @pytest.fixture(scope="module")
 def client():
-    """TestClient with the provider layer patched to fake data."""
+    """TestClient with the provider layer patched to fake data + a fake session.
+
+    Auth is satisfied by overriding the session/user dependencies (so we test
+    endpoint behavior, not the login flow). The provider layer is patched to
+    return deterministic mock data.
+    """
     mock_client = _make_client_mock()
     # Ensure live code paths run regardless of other test files' module-level settings
     from app.config.settings import settings as _settings
     _orig_mock_graph = _settings.use_mock_graph
     _settings.use_mock_graph = False
+
+    # Bypass authentication: every request runs as a fixed test user.
+    from app.api.deps import get_current_session, get_current_user
+    _fake_session = {"user_id": "test-user", "provider": "microsoft", "email": "tester@example.com"}
+    app.dependency_overrides[get_current_user] = lambda: _fake_session["email"]
+    app.dependency_overrides[get_current_session] = lambda: _fake_session
+
     # Patch get_mail_client everywhere it's imported
     with patch("app.api.routes.get_mail_client", return_value=mock_client), \
          patch("app.services.mail_provider.get_mail_client", return_value=mock_client), \
          patch("app.services.tools.GraphClient", return_value=mock_client):
         with TestClient(app) as c:
             yield c
+
+    app.dependency_overrides.pop(get_current_user, None)
+    app.dependency_overrides.pop(get_current_session, None)
     _settings.use_mock_graph = _orig_mock_graph
 
 
