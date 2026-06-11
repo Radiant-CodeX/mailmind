@@ -568,10 +568,13 @@ def enrich_email(request: EnrichRequest) -> dict[str, Any]:
         return rag_with_index(dict(state))
 
     if request.generate_draft:
-        # User explicitly requested a draft — run commitment + rag in parallel
+        # User explicitly requested a draft — run commitment + rag in parallel.
+        # Propagate the request's session ContextVar into the worker threads so
+        # ToneDNA/draft (which call get_mail_client) bind to the right user.
+        from app.services.request_context import run_in_context
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            future_commitment = executor.submit(run_commitment)
-            future_rag = executor.submit(run_rag)
+            future_commitment = executor.submit(run_in_context(run_commitment))
+            future_rag = executor.submit(run_in_context(run_rag))
             try:
                 commitment_result = future_commitment.result(timeout=30)
             except Exception as e:

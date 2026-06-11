@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta
@@ -22,6 +23,8 @@ from urllib.parse import urlencode
 import httpx
 
 from app.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # OAuth + API endpoints
 _AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -127,6 +130,23 @@ def exchange_code(code: str) -> dict[str, Any]:
         "name": profile.get("name"),
         "picture": profile.get("picture"),
     })
+
+    # Dual-write credentials to the per-user oauth_accounts table (encrypted).
+    # The file above remains the dev fallback; the DB row is what multi-tenant
+    # per-request clients read. No-op when persistence is disabled.
+    try:
+        from datetime import datetime, timedelta, timezone
+        from app.services import identity
+        user_id = identity.get_or_create_user(email, profile.get("name"))
+        identity.upsert_oauth_account(
+            user_id, "google", email,
+            access_token=tok.get("access_token"),
+            refresh_token=tok.get("refresh_token"),
+            token_expires_at=datetime.now(tz=timezone.utc) + timedelta(seconds=int(tok.get("expires_in", 3600))),
+        )
+    except Exception as exc:
+        logger.warning("[gmail] Failed to persist oauth account: %s", exc)
+
     return {"email": email}
 
 
@@ -317,29 +337,104 @@ def _extract_body(payload: dict[str, Any]) -> tuple[str, str]:
     return '', plain_body
 
 
-class GmailClient:
-    """Gmail client with the same surface as GraphClient (mock + live)."""
+def _refresh_google_token(refresh_token: str) -> dict[str, Any] | None:
+    """Exchange a refresh token for a new access token. Pure — no global state.
 
-    def __init__(self, settings_obj=settings):
+    Returns ``{access_token, expires_in}`` or None on failure. Used by
+    account-bound clients so a refresh only ever updates that one account.
+    """
+    data = {
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(_TOKEN_URI, data=data)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        return None
+
+
+class GmailClient:
+    """Gmail client with the same surface as GraphClient (mock + live).
+
+    When constructed with ``account`` (a row from ``identity.get_oauth_account``)
+    the instance is *account-bound*: it sources and refreshes tokens for that one
+    Google account only, never touching the process-global ``_token_cache``. This
+    is what lets several users share one backend process without crossing
+    mailboxes. Without ``account`` it falls back to the legacy global cache.
+    """
+
+    def __init__(self, account: dict[str, Any] | None = None, settings_obj=settings):
         self.settings = settings_obj
         self.use_mock = bool(self.settings.use_mock_graph)
+        self.account = account
+
+    def _own_email(self) -> str | None:
+        """This client's own mailbox address (account-bound or legacy)."""
+        if self.account:
+            return self.account.get("account_email")
+        return current_google_email()
+
+    def _access_token(self) -> str:
+        """Return a valid access token for this client's account.
+
+        Account-bound: refresh from the account's stored refresh token and
+        persist the new token back to that account row under a lock. Legacy:
+        defer to the module-global token flow.
+        """
+        if not self.account:
+            return _get_access_token()
+
+        # Reuse a still-valid cached access token from the account row.
+        now = time.time()
+        expires_at = self.account.get("token_expires_at")
+        expires_ts = expires_at.timestamp() if hasattr(expires_at, "timestamp") else 0.0
+        if self.account.get("access_token") and now < (expires_ts - 60):
+            return self.account["access_token"]
+
+        refresh_token = self.account.get("refresh_token")
+        if not refresh_token:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="Google session expired. Please reconnect.")
+        tok = _refresh_google_token(refresh_token)
+        if not tok or not tok.get("access_token"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=401, detail="Google session expired. Please reconnect.")
+
+        from datetime import timezone as _tz
+        access_token = tok["access_token"]
+        new_expiry = datetime.now(tz=_tz.utc) + timedelta(seconds=int(tok.get("expires_in", 3600)))
+        self.account["access_token"] = access_token
+        self.account["token_expires_at"] = new_expiry
+        try:
+            from app.services import identity
+            identity.update_account_tokens_locked(
+                self.account["id"], access_token=access_token, token_expires_at=new_expiry,
+            )
+        except Exception:
+            pass  # token still usable this request even if the write fails
+        return access_token
 
     def get_user_profile(self) -> dict[str, str | None]:
         """Return the signed-in Google profile for display in the app shell."""
         if self.use_mock:
             return {
-                "email": current_google_email() or "user@gmail.com",
+                "email": self._own_email() or "user@gmail.com",
                 "display_name": "Google User",
                 "photo_url": None,
             }
         stored = _load_tokens()
         profile = {
-            "email": current_google_email(),
+            "email": self._own_email(),
             "display_name": stored.get("name"),
             "photo_url": stored.get("picture"),
         }
         try:
-            live = _fetch_profile(_get_access_token())
+            live = _fetch_profile(self._access_token())
             profile["email"] = live.get("email") or profile["email"]
             profile["display_name"] = live.get("name") or profile["display_name"]
             profile["photo_url"] = live.get("picture") or profile["photo_url"]
@@ -354,7 +449,7 @@ class GmailClient:
 
     # ── helpers ──
     def _request(self, method: str, path: str, **kwargs) -> Any:
-        token = _get_access_token()
+        token = self._access_token()
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {token}"
         headers.setdefault("Accept", "application/json")
@@ -597,7 +692,7 @@ class GmailClient:
                 clean = _clean_sender(addr)
                 if "@" in clean:
                     recipients.add(clean)
-        recipients.discard(current_google_email())
+        recipients.discard(self._own_email())
         to = ", ".join(sorted(r for r in recipients if r))
         raw = self._build_raw(to, f"Re: {subject}", comment)
         self._request("POST", "/messages/send", json={"raw": raw, "threadId": thread_id})

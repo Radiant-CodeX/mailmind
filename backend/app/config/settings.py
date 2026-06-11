@@ -68,6 +68,7 @@ class Settings:
     azure_openai_triage_deployment: str = os.getenv("AZURE_OPENAI_TRIAGE_DEPLOYMENT", "gpt-4o-mini")
     azure_openai_embedding_deployment: str = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    groq_api_key: str = os.getenv("GROQ_API_KEY", "")
 
     # ── Runtime environment ────────────────────────────────────────────────
     app_env: str = os.getenv("APP_ENV", "development")          # development | staging | production

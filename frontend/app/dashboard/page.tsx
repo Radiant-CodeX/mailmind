@@ -117,6 +117,8 @@ export default function Home() {
     classification,
     triageResult,
     precedents,
+    attachments: detailAttachments,
+    pipelineCommitments,
     aiDraft,
     setAiDraft,
     isGeneratingDraft,
@@ -142,6 +144,7 @@ export default function Home() {
   } = useCommitments(
     showPipeline ? selectedEmail?.id || null : null,
     showPipeline ? selectedEmail?.body || null : null,
+    showPipeline ? pipelineCommitments : undefined,
   );
 
   const {
@@ -279,6 +282,7 @@ export default function Home() {
                   confirmSelectedCommitments={confirmSelected}
                   checkConflict={checkConflict}
                   onClose={() => setSelectedEmailId(null)}
+                  attachments={detailAttachments}
                   showPipeline={showPipeline}
                 />
               )}
