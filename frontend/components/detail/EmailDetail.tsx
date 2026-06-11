@@ -473,12 +473,16 @@ export function EmailDetail({
 
           {/* Attachments */}
           {(() => {
-            const atts = attachmentsProp && attachmentsProp.length > 0
-              ? attachmentsProp
-              : email.attachments && email.attachments.length > 0 ? email.attachments : null;
-            return atts ? <AttachmentList emailId={email.id} attachments={atts} /> : null;
+            const atts =
+              attachmentsProp && attachmentsProp.length > 0
+                ? attachmentsProp
+                : email.attachments && email.attachments.length > 0
+                  ? email.attachments
+                  : null;
+            return atts ? (
+              <AttachmentList emailId={email.id} attachments={atts} />
+            ) : null;
           })()}
-          )}
 
           {showPipeline && (
             <>
