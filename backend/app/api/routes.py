@@ -69,31 +69,68 @@ from app.api.deps import SESSION_COOKIE, get_current_user
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
-    """Attach the session as an HttpOnly cookie.
+    """Attach the session as an HttpOnly cookie, scoped to parent domain for subdomain sharing.
 
-    Cross-origin deployments (frontend and backend on different domains) need
-    SameSite=None which mandates Secure; local http dev uses Lax instead.
+    Frontend and backend on different subdomains (mailmind.* and api.*) or ports
+    require SameSite=None and Domain scope. In production, Secure=True is mandatory
+    with SameSite=None. In localhost dev, browsers allow Secure=False as a special
+    exception.
     """
-    cross_origin = settings.frontend_origin.startswith("https")
+    from urllib.parse import urlparse
+
+    is_https = settings.is_production or settings.frontend_origin.startswith("https")
+
+    # Extract parent domain for subdomain cookie sharing.
+    # e.g., "https://mailmind.radiantsofficial.com" → ".radiantsofficial.com"
+    # or "http://localhost:3000" → None (default to request hostname)
+    domain = None
+    try:
+        parsed = urlparse(settings.frontend_origin)
+        hostname = parsed.hostname or ""
+        # Only set domain for real TLDs (not localhost or raw IPs)
+        if hostname and "." in hostname and not hostname.startswith("127"):
+            parts = hostname.split(".")
+            if len(parts) >= 2:
+                domain = "." + ".".join(parts[-2:])  # e.g., ".radiantsofficial.com"
+    except Exception:
+        pass
+
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
-        secure=cross_origin or settings.is_production,
-        samesite="none" if cross_origin else "lax",
+        secure=is_https,
+        samesite="none",
         max_age=30 * 86400,
         path="/",
+        domain=domain,
     )
 
 
 def _clear_session_cookie(response: Response) -> None:
-    cross_origin = settings.frontend_origin.startswith("https")
+    from urllib.parse import urlparse
+
+    is_https = settings.is_production or settings.frontend_origin.startswith("https")
+
+    # Match the domain used in _set_session_cookie so delete works correctly
+    domain = None
+    try:
+        parsed = urlparse(settings.frontend_origin)
+        hostname = parsed.hostname or ""
+        if hostname and "." in hostname and not hostname.startswith("127"):
+            parts = hostname.split(".")
+            if len(parts) >= 2:
+                domain = "." + ".".join(parts[-2:])
+    except Exception:
+        pass
+
     response.delete_cookie(
         key=SESSION_COOKIE,
         httponly=True,
-        secure=cross_origin or settings.is_production,
-        samesite="none" if cross_origin else "lax",
+        secure=is_https,
+        samesite="none",
         path="/",
+        domain=domain,
     )
 
 # Cache of evaluation predictions keyed by email text — the golden dataset is
@@ -799,50 +836,86 @@ def google_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
 def quick_login(response: Response, payload: dict[str, str] | None = None) -> dict[str, Any]:
     """One-tap login for a remembered account — no device code / password.
 
-    Uses the persisted refresh token (Microsoft MSAL cache or Google token) to
-    resume the session silently without requiring the user to re-authenticate.
+    Validates the requested email against stored OAuth accounts and uses account-bound
+    clients (never global state) to refresh tokens silently. This prevents cross-user
+    confusion in multi-tenant setups where global caches could overlap.
     """
+    from app.db.base import is_persistence_enabled
+    from app.services import identity
+
     email = (payload or {}).get("email")
     provider = (payload or {}).get("provider") or "microsoft"
 
-    # Live Google: resume silently from the persisted Google refresh token.
-    if provider == "google":
-        from app.services.gmail import _refresh_access_token, current_google_email, has_google_session
-        if not has_google_session() or not _refresh_access_token():
-            audit.warning("AUTH_QUICK_LOGIN_FAILED provider=google reason=no_session email=%s", email)
-            raise HTTPException(status_code=400, detail="No Google session to resume. Please connect Google again.")
-        set_provider("google", current_google_email() or email)
-        user_email = active_email()
-        session_token = create_session("google", user_email)
-        _set_session_cookie(response, session_token)
-        audit.info("AUTH_QUICK_LOGIN_SUCCESS provider=google email=%s", user_email)
-        return {
-            "status": "authenticated",
-            "authenticated": True,
-            "user_principal_name": user_email,
-            "session_token": session_token,
-        }
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required for quick login")
 
-    # Live Microsoft: resume the delegated session silently via the persisted
-    # refresh token. Delegated tokens work with personal accounts and avoid the
-    # app-only Conditional Access block (AADSTS53003).
+    # Normalize email
+    email = email.strip().lower()
+
+    # Get or create user ID (required to look up OAuth account)
     try:
-        ms_client = GraphClient()
-        info = ms_client.quick_login(email)
+        user_id = identity.get_or_create_user(email)
     except Exception as e:
-        audit.warning("AUTH_QUICK_LOGIN_FAILED provider=microsoft email=%s error=%s", email, e)
-        raise HTTPException(status_code=400, detail=str(e))
-    set_provider("microsoft", info.get("user_principal_name") or email)
-    user_email = info.get("user_principal_name") or email
-    session_token = create_session("microsoft", user_email)
-    _set_session_cookie(response, session_token)
-    audit.info("AUTH_QUICK_LOGIN_SUCCESS provider=microsoft email=%s", user_email)
-    return {
-        "status": "authenticated",
-        "authenticated": True,
-        "user_principal_name": user_email,
-        "session_token": session_token,
-    }
+        audit.warning("AUTH_QUICK_LOGIN_FAILED provider=%s email=%s reason=user_lookup error=%s", provider, email, e)
+        raise HTTPException(status_code=500, detail="Failed to resolve user")
+
+    # Check if this user has a stored OAuth account for the requested provider
+    if not is_persistence_enabled():
+        audit.warning("AUTH_QUICK_LOGIN_FAILED provider=%s email=%s reason=persistence_disabled", provider, email)
+        raise HTTPException(status_code=400, detail="Quick login requires database persistence")
+
+    try:
+        account = identity.get_oauth_account(user_id, provider)
+        if not account:
+            audit.warning("AUTH_QUICK_LOGIN_FAILED provider=%s email=%s reason=no_oauth_account", provider, email)
+            raise HTTPException(status_code=400, detail=f"No {provider.title()} account found for {email}. Please sign in again.")
+    except Exception as e:
+        audit.warning("AUTH_QUICK_LOGIN_FAILED provider=%s email=%s error=%s", provider, email, e)
+        raise HTTPException(status_code=500, detail="Failed to load account credentials")
+
+    # Use account-bound client to refresh tokens
+    if provider == "google":
+        from app.services.gmail import GmailClient
+        try:
+            client = GmailClient(account=account)
+            # Trigger a request that requires auth — if token is expired, this will refresh it
+            client.list_emails(limit=1)
+            set_provider("google", email)
+            session_token = create_session("google", email)
+            _set_session_cookie(response, session_token)
+            audit.info("AUTH_QUICK_LOGIN_SUCCESS provider=google email=%s", email)
+            return {
+                "status": "authenticated",
+                "authenticated": True,
+                "user_principal_name": email,
+                "session_token": session_token,
+            }
+        except Exception as e:
+            audit.warning("AUTH_QUICK_LOGIN_FAILED provider=google email=%s reason=token_refresh error=%s", email, e)
+            raise HTTPException(status_code=400, detail=f"Failed to refresh Google credentials: {str(e)}")
+
+    # Microsoft: use account-bound GraphClient
+    if provider == "microsoft":
+        from app.services.graph import GraphClient
+        try:
+            client = GraphClient(account=account)
+            # Trigger a request that requires auth — if token is expired, this will refresh it
+            client.get_user_profile()
+            set_provider("microsoft", email)
+            session_token = create_session("microsoft", email)
+            _set_session_cookie(response, session_token)
+            audit.info("AUTH_QUICK_LOGIN_SUCCESS provider=microsoft email=%s", email)
+            return {
+                "status": "authenticated",
+                "authenticated": True,
+                "user_principal_name": email,
+                "session_token": session_token,
+            }
+        except Exception as e:
+            audit.warning("AUTH_QUICK_LOGIN_FAILED provider=microsoft email=%s reason=token_refresh error=%s", email, e)
+            raise HTTPException(status_code=400, detail=f"Failed to refresh Microsoft credentials: {str(e)}")
+
+    raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
 
 @router.get("/auth/status")
