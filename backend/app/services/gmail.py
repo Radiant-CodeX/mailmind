@@ -494,6 +494,20 @@ class GmailClient:
         _walk(payload)
         return out
 
+    def list_attachments(self, message_id: str) -> list[dict[str, Any]]:
+        """Return attachment metadata for a Gmail message (id, filename, mime_type, size).
+
+        Fetches the message envelope (no body bytes) and walks the MIME tree to
+        collect every part that has a filename and attachmentId. The actual bytes
+        are only fetched when the user clicks download via get_attachment().
+        """
+        if self.use_mock:
+            return []
+        msg = self._request("GET", f"/messages/{message_id}?format=metadata&metadataHeaders=Subject")
+        if not msg:
+            return []
+        return self._extract_attachments(msg.get("payload") or {})
+
     def get_attachment(self, message_id: str, attachment_id: str) -> dict[str, Any] | None:
         """Fetch raw attachment bytes (base64url) for download."""
         if self.use_mock:

@@ -46,7 +46,6 @@ function EmailBodyHtml({ html }: { html: string }) {
         "embed",
         "form",
         "input",
-        "button",
         "textarea",
         "select",
       ],
@@ -62,28 +61,26 @@ function EmailBodyHtml({ html }: { html: string }) {
 
     const doc = new DOMParser().parseFromString(clean, "text/html");
 
-    // Safe links — open in new tab
+    // Force all links to open in a new tab — required for sandbox allow-popups.
     doc.querySelectorAll("a").forEach((a) => {
       a.setAttribute("target", "_blank");
       a.setAttribute("rel", "noopener noreferrer");
+      // Strip javascript: hrefs entirely.
       if (/^javascript:/i.test(a.getAttribute("href") || ""))
         a.removeAttribute("href");
     });
 
     // Block tracking pixels and external images that could leak the user's IP.
-    // Only images from known safe content hosts are allowed; others are replaced
-    // with a placeholder. (Users can toggle "show images" if needed.)
+    // Only data: URIs (inline images) and https: CDN images are allowed.
     doc.querySelectorAll("img").forEach((img) => {
       const src = img.getAttribute("src") || "";
-      // Allow data: URIs (inline images) and https: images from CDNs
       if (!src.startsWith("data:") && !src.startsWith("https://")) {
         img.removeAttribute("src");
         img.setAttribute("alt", img.getAttribute("alt") || "[image]");
       }
     });
 
-    // Inject base styles matching Gmail's rendering defaults so the email
-    // looks identical to how it appears in the actual Gmail client.
+    // Base styles — match Gmail's rendering defaults.
     const style = doc.createElement("style");
     style.textContent = `
       html, body {
@@ -97,38 +94,34 @@ function EmailBodyHtml({ html }: { html: string }) {
         -webkit-text-size-adjust: 100%;
       }
       img { max-width: 100%; height: auto; }
-      a { color: #1a73e8; }
+      a { color: #1a73e8; cursor: pointer; }
       table { border-collapse: collapse; }
       blockquote { border-left: 2px solid #ccc; margin: 8px 0; padding-left: 12px; color: #555; }
       pre, code { font-family: monospace; font-size: 13px; white-space: pre-wrap; }
     `;
-    // Prepend so email's own styles take precedence
     if (doc.head.firstChild) doc.head.insertBefore(style, doc.head.firstChild);
     else doc.head.appendChild(style);
 
     return doc.documentElement.outerHTML;
   }, [html]);
 
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    if (!doc) return;
-    doc.open();
-    doc.write(sanitized);
-    doc.close();
-    const resize = () => {
-      const body = iframe.contentDocument?.body;
-      if (body) setHeight(Math.max(200, body.scrollHeight + 32));
-    };
-    iframe.onload = resize;
-    setTimeout(resize, 150);
-  }, [sanitized]);
+  // Auto-resize the iframe to the email content height once it loads.
+  // srcdoc is the correct declarative approach; doc.write() is deprecated and
+  // unreliable inside sandboxed iframes across browsers.
+  const handleLoad = () => {
+    const body = iframeRef.current?.contentDocument?.body;
+    if (body) setHeight(Math.max(200, body.scrollHeight + 32));
+  };
 
   return (
     <iframe
       ref={iframeRef}
-      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      // allow-same-origin: lets us read scrollHeight for auto-resize
+      // allow-popups + allow-popups-to-escape-sandbox: lets target="_blank" links open new tabs
+      // allow-top-navigation-by-user-activation: lets clicked links that lack target="_blank" navigate
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+      srcDoc={sanitized}
+      onLoad={handleLoad}
       style={{
         width: "100%",
         height: `${height}px`,

@@ -179,7 +179,7 @@ def ready() -> dict[str, Any]:
         settings.azure_client_id and settings.azure_tenant_id
     )
     llm_ready = bool(settings.azure_openai_api_key and settings.azure_openai_base_endpoint) or bool(
-        settings.openai_api_key
+        settings.groq_api_key
     )
     checks = {
         "graph": graph_ready,

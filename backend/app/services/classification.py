@@ -3,12 +3,20 @@ from __future__ import annotations
 import json
 import logging
 
-from openai import AzureOpenAI, OpenAI
+from openai import AzureOpenAI
 
 from app.config.settings import settings
 from app.models.schemas import ClassificationResult
 
 logger = logging.getLogger(__name__)
+
+# Groq fallback for when Azure OpenAI is not configured.
+try:
+    from langchain_groq import ChatGroq as _ChatGroq
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _ChatGroq = None
+    _GROQ_AVAILABLE = False
 
 
 class ClassificationService:
@@ -48,8 +56,12 @@ class ClassificationService:
             }
         ]
 
-    def _get_llm_client(self) -> tuple[OpenAI | AzureOpenAI | None, str]:
-        """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
+    def _get_llm_client(self) -> tuple[AzureOpenAI | _ChatGroq | None, str]:
+        """Return the appropriate LLM client: Azure OpenAI → Groq → None.
+
+        Returns a tuple of (client, model_name). Groq returns the model name
+        directly (e.g. "llama-3.3-70b-versatile"); Azure returns the deployment name.
+        """
         if settings.use_mock_graph:
             return None, ""
         if settings.azure_openai_api_key and settings.azure_openai_endpoint:
@@ -58,8 +70,8 @@ class ClassificationService:
                 api_version="2024-02-01",
                 azure_endpoint=settings.azure_openai_endpoint
             ), settings.azure_openai_chat_deployment
-        elif settings.openai_api_key:
-            return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
+        elif settings.groq_api_key and _GROQ_AVAILABLE and _ChatGroq is not None:
+            return _ChatGroq(api_key=settings.groq_api_key, model="llama-3.3-70b-versatile"), "llama-3.3-70b-versatile"
         # No LLM credentials in live mode — return None so callers fall back to
         # the rule-based classifier instead of raising a 500.
         return None, ""
@@ -90,14 +102,14 @@ class ClassificationService:
         return ClassificationResult(priority=priority, category=category, confidence=confidence)
 
     def classify(self, masked_text: str) -> ClassificationResult:
-        """Classify the masked email text using GPT-4o with a fallback to rule-based rules."""
+        """Classify the masked email text using an LLM (Azure/Groq) with rule-based fallback."""
         if settings.use_mock_graph:
-            logger.info("Mock mode active. Bypassing LLM client and using rule-based fallback classification.")
+            logger.info("Mock mode active. Bypassing LLM and using rule-based fallback.")
             return self._fallback_classify(masked_text)
 
         client, model = self._get_llm_client()
         if not client:
-            logger.info("LLM client not configured. Using rule-based fallback classification.")
+            logger.info("LLM not configured. Using rule-based fallback.")
             return self._fallback_classify(masked_text)
 
         # Build few-shot prompt
@@ -120,20 +132,26 @@ class ClassificationService:
         user_prompt = f"Here are some examples:\n{few_shot_str}\n\nNow, classify the following email:\nEmail: {masked_text}\nResult:"
 
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
+            # Azure OpenAI supports JSON mode; Groq does not — both are handled the same way
+            # for OpenAI, response_format ensures valid JSON; for Groq, the prompt alone drives it.
+            is_azure = isinstance(client, AzureOpenAI)
+            kwargs = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                response_format={"type": "json_object"},
-                timeout=10.0
-            )
+                "timeout": 10.0
+            }
+            if is_azure:
+                kwargs["response_format"] = {"type": "json_object"}
+
+            response = client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content
             if not content:
                 raise ValueError("Empty response from LLM")
             data = json.loads(content)
-            
+
             priority = str(data.get("priority", "MEDIUM")).upper()
             if priority not in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
                 priority = "MEDIUM"
@@ -148,9 +166,6 @@ class ClassificationService:
             return ClassificationResult(priority=priority, category=category, confidence=confidence)
 
         except Exception as e:
-            logger.warning(
-                f"GPT-4o classification failed: {e}. "
-                f"Falling back to rule-based classification."
-            )
+            logger.warning("LLM classification failed: %s. Falling back to rule-based.", e)
             return self._fallback_classify(masked_text)
 
