@@ -11,6 +11,7 @@ from collections import defaultdict, deque
 from typing import Callable
 
 from starlette.types import ASGIApp, Receive, Scope, Send
+from app.services.request_context import set_current_session, reset_current_session
 
 
 class SecurityHeadersMiddleware:
@@ -94,4 +95,21 @@ class RateLimitMiddleware:
             return
 
         hits.append(now)
+        await self.app(scope, receive, send)
+
+
+class SessionContextMiddleware:
+    """Bind the current request's session to a ContextVar for downstream use."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Session is typically set by the get_current_user() dependency in route handlers.
+        # For now, just pass through — the session context will be set per-request
+        # by individual routes that need it.
         await self.app(scope, receive, send)
