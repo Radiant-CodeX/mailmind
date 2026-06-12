@@ -784,14 +784,11 @@ def microsoft_poll(payload: dict[str, str], response: Response) -> dict[str, Any
         email = info.get("email")
         if not email:
             raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
-        session_token = create_session("microsoft", email)
-        _set_session_cookie(response, session_token)
         audit.info("AUTH_LOGIN_SUCCESS provider=microsoft flow=popup email=%s", email)
         return {
             "status": "success",
             "authenticated": True,
             "user_principal_name": email,
-            "session_token": session_token,
         }
     if info.get("status") == "error":
         ms_auth_status.pop(state, None)
@@ -889,14 +886,11 @@ def google_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
         email = info.get("email")
         if not email:
             raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
-        session_token = create_session("google", email)
-        _set_session_cookie(response, session_token)
         audit.info("AUTH_LOGIN_SUCCESS provider=google flow=popup email=%s", email)
         return {
             "status": "success",
             "authenticated": True,
             "user_principal_name": email,
-            "session_token": session_token,
         }
     if info.get("status") == "error":
         google_auth_status.pop(state, None)
