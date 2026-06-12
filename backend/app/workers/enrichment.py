@@ -93,7 +93,7 @@ class EnrichmentWorker:
         state = job["state"]
         user_email: str = state.get("user_email") or ""
 
-        with track_stage("enrichment", email_id):
+        with track_stage("enrichment"):
             state.update(commitment_node(state))
             state.update(calendar_node(state))
             state.update(rag_node(state, index_documents=self.index_documents))
