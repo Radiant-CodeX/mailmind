@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Email, ClassificationResult, TriageResult, PrecedentItem, CommitmentItem } from '../lib/types';
-import { enrichEmail, processEmailFull, generateEmailDraft, sendEmailReply } from '../lib/api';
+import { Attachment, Email, ClassificationResult, TriageResult, PrecedentItem, CommitmentItem } from '../lib/types';
+import { enrichEmail, fetchAttachments, processEmailFull, generateEmailDraft, sendEmailReply } from '../lib/api';
 import { userStorage } from '../lib/userStorage';
 
 /**
@@ -72,6 +72,8 @@ export function useEmailDetail(
   const [precedents, setPrecedents] = useState<PrecedentItem[]>([]);
   const [pipelineCommitments, setPipelineCommitments] = useState<CommitmentItem[]>([]);
 
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isSendingDraft, setIsSendingDraft] = useState(false);
   const [activeStyle, setActiveStyle] = useState<'standard' | 'formal' | 'indepth'>('standard');
@@ -91,6 +93,7 @@ export function useEmailDetail(
         setActiveStyle('standard');
         setIsDraftApproved(false);
         setError(null);
+        setAttachments([]);
       }, 0);
       return () => clearTimeout(t);
     }
@@ -99,6 +102,7 @@ export function useEmailDetail(
       setError(null);
       setPipelineCommitments([]);
       setPrecedents([]);
+      setAttachments([]);
       setAiDrafts({ standard: null, formal: null, indepth: null });
       setActiveStyle('standard');
       setIsDraftApproved(false);
@@ -112,6 +116,18 @@ export function useEmailDetail(
         setLoading(false);
       } else {
         setLoading(true); // only show spinner if we truly have nothing yet
+      }
+
+      // ── Fetch attachment metadata (lazy — only when email has attachments) ────
+      if (currEmail.hasAttachments) {
+        fetchAttachments(currEmail.id)
+          .then((atts) => {
+            if (!cancelled) setAttachments(atts);
+          })
+          .catch((err) => {
+            console.warn('[attachments] Failed to fetch:', err);
+            if (!cancelled) setAttachments([]);
+          });
       }
 
       // ── Check enrichment cache ───────────────────────────────────────────────
@@ -198,8 +214,9 @@ export function useEmailDetail(
       }
     }
 
+    let cancelled = false;
     const t = setTimeout(() => load(email), 0);
-    return () => clearTimeout(t);
+    return () => { cancelled = true; clearTimeout(t); };
   }, [email, enabled, currentUserEmail]);
 
   const generateDraft = async (styleToGen?: 'standard' | 'formal' | 'indepth') => {
@@ -281,6 +298,7 @@ export function useEmailDetail(
     triageResult,
     precedents,
     pipelineCommitments,
+    attachments,
     aiDraft: aiDrafts[activeStyle],
     setAiDraft,
     isGeneratingDraft,

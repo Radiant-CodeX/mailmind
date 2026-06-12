@@ -5,6 +5,7 @@ issue where BaseHTTPMiddleware can strip Set-Cookie headers from responses.
 """
 from __future__ import annotations
 
+import logging
 import time
 from collections import defaultdict, deque
 from typing import Callable

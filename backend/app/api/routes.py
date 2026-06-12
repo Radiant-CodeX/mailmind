@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 
 logger = logging.getLogger(__name__)
+audit = logging.getLogger("mailmind.audit")
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from app.config.settings import settings
@@ -244,7 +245,7 @@ def ready() -> dict[str, Any]:
         settings.azure_client_id and settings.azure_tenant_id
     )
     llm_ready = bool(settings.azure_openai_api_key and settings.azure_openai_base_endpoint) or bool(
-        settings.openai_api_key
+        settings.groq_api_key
     )
     checks = {
         "graph": graph_ready,
@@ -296,6 +297,19 @@ def poll_new_email(account=Depends(get_default_account)) -> dict[str, Any]:
     except Exception as e:
         logger.warning("[poll] New email check failed: %s", e)
         return {"has_new": False, "latest_id": None, "error": str(e)}
+
+
+@router.get("/emails/{email_id}/attachments")
+def list_attachments(email_id: str, _user: str = Depends(get_current_user)) -> list[dict]:
+    """Return attachment metadata (id, filename, mime_type, size) for an email."""
+    client = get_mail_client()
+    if not hasattr(client, "list_attachments"):
+        return []
+    try:
+        return client.list_attachments(email_id)
+    except Exception as e:
+        logger.warning("[attachments] Failed to list attachments for %s: %s", email_id, e)
+        return []
 
 
 @router.get("/emails/{email_id}/attachments/{attachment_id}")
@@ -566,7 +580,7 @@ def login_initiate() -> dict[str, Any]:
 
 
 @router.post("/auth/login-poll")
-def login_poll(payload: dict[str, str]) -> dict[str, Any]:
+def login_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     """Read the status of an in-progress device-code login.
 
     The actual token acquisition happens once in a background thread started by
@@ -589,10 +603,12 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
         return {
             "status": "success",
             "authenticated": True,
-            "user_principal_name": state.get("user_principal_name"),
+            "user_principal_name": email,
+            "session_token": session_token,
         }
     if status_val == "error":
         _device_flow_status.pop(device_code, None)
+        audit.warning("AUTH_LOGIN_FAILED provider=microsoft flow=device_code error=%s", state.get("error"))
         raise HTTPException(status_code=400, detail=state.get("error", "Authentication failed"))
 
     return {"status": "pending", "authenticated": False}
@@ -754,7 +770,7 @@ def microsoft_callback(request: Request) -> Response:
 
 
 @router.post("/auth/microsoft/poll")
-def microsoft_poll(payload: dict[str, str]) -> dict[str, Any]:
+def microsoft_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     """Poll the status of an in-progress Microsoft sign-in."""
     from app.services.graph import ms_auth_status
     state = payload.get("state")
@@ -765,9 +781,21 @@ def microsoft_poll(payload: dict[str, str]) -> dict[str, Any]:
         return {"status": "pending", "authenticated": False}
     if info.get("status") == "success":
         ms_auth_status.pop(state, None)
-        return {"status": "success", "authenticated": True, "user_principal_name": info.get("email")}
+        email = info.get("email")
+        if not email:
+            raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
+        session_token = create_session("microsoft", email)
+        _set_session_cookie(response, session_token)
+        audit.info("AUTH_LOGIN_SUCCESS provider=microsoft flow=popup email=%s", email)
+        return {
+            "status": "success",
+            "authenticated": True,
+            "user_principal_name": email,
+            "session_token": session_token,
+        }
     if info.get("status") == "error":
         ms_auth_status.pop(state, None)
+        audit.warning("AUTH_LOGIN_FAILED provider=microsoft flow=popup error=%s", info.get("error"))
         raise HTTPException(status_code=400, detail=info.get("error", "Microsoft sign-in failed"))
     return {"status": "pending", "authenticated": False}
 
@@ -846,7 +874,7 @@ def google_callback(
 
 
 @router.post("/auth/google/poll")
-def google_poll(payload: dict[str, str]) -> dict[str, Any]:
+def google_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     """Poll the status of an in-progress Google sign-in."""
     from app.services.gmail import google_auth_status
 
@@ -858,9 +886,21 @@ def google_poll(payload: dict[str, str]) -> dict[str, Any]:
         return {"status": "pending", "authenticated": False}
     if info.get("status") == "success":
         google_auth_status.pop(state, None)
-        return {"status": "success", "authenticated": True, "user_principal_name": info.get("email")}
+        email = info.get("email")
+        if not email:
+            raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
+        session_token = create_session("google", email)
+        _set_session_cookie(response, session_token)
+        audit.info("AUTH_LOGIN_SUCCESS provider=google flow=popup email=%s", email)
+        return {
+            "status": "success",
+            "authenticated": True,
+            "user_principal_name": email,
+            "session_token": session_token,
+        }
     if info.get("status") == "error":
         google_auth_status.pop(state, None)
+        audit.warning("AUTH_LOGIN_FAILED provider=google flow=popup error=%s", info.get("error"))
         raise HTTPException(status_code=400, detail=info.get("error", "Google sign-in failed"))
     return {"status": "pending", "authenticated": False}
 

@@ -8,11 +8,21 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
+from openai import AzureOpenAI
+
 from app.config.settings import settings
 from app.models.schemas import CommitmentItem
 from app.services.calendar import CalendarConflictService
 from app.services.graph import GraphClient
 from app.services.rag import EmbeddingProvider, RAGIndexFactory, mask_pii
+
+# Groq fallback for when Azure OpenAI is not configured.
+try:
+    from langchain_groq import ChatGroq as _ChatGroq
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _ChatGroq = None
+    _GROQ_AVAILABLE = False
 
 
 class CommitmentService:
@@ -53,27 +63,25 @@ class CommitmentService:
             }
         ]
 
-    def _get_llm_client(self) -> tuple[Any, str]:
-        """Return the appropriate OpenAI or AzureOpenAI client, or None if not configured."""
+    def _get_llm_client(self) -> tuple[AzureOpenAI | _ChatGroq | None, str]:
+        """Return the appropriate LLM client: Azure OpenAI → Groq → None.
+
+        Returns a tuple of (client, model_name). Groq returns the model name
+        directly; Azure returns the deployment name.
+        """
         if settings.use_mock_graph:
             return None, ""
-        try:
-            from openai import AzureOpenAI, OpenAI
-            if settings.azure_openai_api_key and settings.azure_openai_endpoint:
-                return AzureOpenAI(
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                    azure_endpoint=settings.azure_openai_endpoint
-                ), settings.azure_openai_chat_deployment
-            elif settings.openai_api_key:
-                return OpenAI(api_key=settings.openai_api_key), "gpt-4o"
-        except Exception as e:
-            logging.warning(f"Failed to initialize OpenAI client; using regex fallback: {e}")
-            return None, ""
-        # No LLM credentials configured in live mode — degrade gracefully to the
-        # rule-based regex extractor rather than failing the request.
+        if settings.azure_openai_api_key and settings.azure_openai_endpoint:
+            return AzureOpenAI(
+                api_key=settings.azure_openai_api_key,
+                api_version=settings.azure_openai_api_version,
+                azure_endpoint=settings.azure_openai_endpoint
+            ), settings.azure_openai_chat_deployment
+        elif settings.groq_api_key and _GROQ_AVAILABLE and _ChatGroq is not None:
+            return _ChatGroq(api_key=settings.groq_api_key, model="llama-3.3-70b-versatile"), "llama-3.3-70b-versatile"
+        # No LLM credentials configured — degrade gracefully to regex fallback.
         logging.warning(
-            "No Azure OpenAI / OpenAI credentials configured; using regex fallback "
+            "No Azure OpenAI or Groq credentials configured; using regex fallback "
             "for commitment extraction."
         )
         return None, ""

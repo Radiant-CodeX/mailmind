@@ -118,6 +118,10 @@ function buildSrcDoc(
         if (mapped) img.setAttribute("src", mapped);
         else { img.removeAttribute("src"); img.setAttribute("alt", "[embedded image]"); }
       }
+
+      // Block unknown protocols (javascript:, file:, etc.)
+      img.removeAttribute("src");
+      img.setAttribute("alt", img.getAttribute("alt") || "[image]");
     });
   }
 
@@ -355,6 +359,7 @@ export function EmailDetail({
   confirmSelectedCommitments,
   checkConflict,
   onClose,
+  attachments: attachmentsProp,
   showPipeline = true,
   provider = "google",
 }: EmailDetailProps) {

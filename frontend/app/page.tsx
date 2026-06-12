@@ -254,6 +254,7 @@ export default function LoginPage() {
       }
     } catch {
       setLoading(false);
+      setError(err instanceof Error ? err.message : 'Quick login failed. Please try again.');
       if (remembered.provider === "google") {
         handleGoogle(remembered.email, true);
       } else {

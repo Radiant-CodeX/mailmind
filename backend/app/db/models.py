@@ -341,6 +341,86 @@ class ToneProfile(Base):
     account: Mapped[OAuthAccount] = relationship(back_populates="tone_profile")
 
 
+class User(Base):
+    """
+    Internal MailMind identity. One row per human, regardless of how many
+    mail accounts they connect.
+
+    The user's primary email is whichever address they first signed in with —
+    it is a label, not the identity. ``id`` is the identity; everything else
+    (oauth accounts, sessions, caches) hangs off it.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # uuid4 hex-with-dashes
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OAuthAccount(Base):
+    """
+    One connected mailbox (Gmail or Outlook) belonging to a user.
+
+    Deliberately one-to-many from users: the schema supports a user connecting
+    several accounts even though the UI is single-account today.
+
+    Token columns are stored encrypted (see ``app.services.crypto``). For
+    Microsoft we store the serialized MSAL token cache blob rather than raw
+    tokens — MSAL owns refresh/rotation, which avoids re-implementing AAD's
+    token semantics. For Google we store the refresh/access token pair.
+    """
+
+    __tablename__ = "oauth_accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)  # "google" | "microsoft"
+    # The provider's stable account identifier (Google `sub` / AAD object id),
+    # falling back to the account email when the provider id is unavailable.
+    provider_account_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    account_email: Mapped[str] = mapped_column(String(320), nullable=False)
+
+    # ── Encrypted credential material ────────────────────────────────────────
+    access_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    msal_cache_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+    __table_args__ = (
+        # A given provider account can only be linked once, to one user.
+        Index("uq_oauth_provider_account", "provider", "provider_account_id", unique=True),
+        Index("ix_oauth_user_provider", "user_id", "provider"),
+    )
+
+
+class UserSession(Base):
+    """
+    Browser session. The token travels as an HttpOnly cookie (with the
+    X-MailMind-Session header kept as a transitional fallback).
+
+    Only a SHA-256 hash of the token is stored — a leaked DB dump cannot be
+    replayed as live sessions.
+    """
+
+    __tablename__ = "user_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class ProcessingMetric(Base):
     """Per-stage latency and SLA outcome for one email's processing."""
 

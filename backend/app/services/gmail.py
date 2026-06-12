@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta
@@ -336,8 +337,29 @@ def _extract_body(payload: dict[str, Any]) -> tuple[str, str]:
     return '', plain_body
 
 
+def _refresh_google_token(refresh_token: str) -> dict[str, Any] | None:
+    """Exchange a refresh token for a new access token. Pure — no global state.
+
+    Returns ``{access_token, expires_in}`` or None on failure. Used by
+    account-bound clients so a refresh only ever updates that one account.
+    """
+    data = {
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(_TOKEN_URI, data=data)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception:
+        return None
+
+
 class GmailClient:
-    """Gmail client with the same surface as GraphClient (mock + live)."""
+    """Gmail client with the same surface as GraphClient (mock + live).
 
     def __init__(self, settings_obj=settings, *, access_token: str | None = None, refresh_token: str | None = None):
         self.settings = settings_obj
@@ -389,13 +411,13 @@ class GmailClient:
         """Return the signed-in Google profile for display in the app shell."""
         if self.use_mock:
             return {
-                "email": current_google_email() or "user@gmail.com",
+                "email": self._own_email() or "user@gmail.com",
                 "display_name": "Google User",
                 "photo_url": None,
             }
         stored = _load_tokens()
         profile = {
-            "email": current_google_email(),
+            "email": self._own_email(),
             "display_name": stored.get("name"),
             "photo_url": stored.get("picture"),
         }
@@ -475,6 +497,20 @@ class GmailClient:
 
         _walk(payload)
         return out
+
+    def list_attachments(self, message_id: str) -> list[dict[str, Any]]:
+        """Return attachment metadata for a Gmail message (id, filename, mime_type, size).
+
+        Fetches the message envelope (no body bytes) and walks the MIME tree to
+        collect every part that has a filename and attachmentId. The actual bytes
+        are only fetched when the user clicks download via get_attachment().
+        """
+        if self.use_mock:
+            return []
+        msg = self._request("GET", f"/messages/{message_id}?format=metadata&metadataHeaders=Subject")
+        if not msg:
+            return []
+        return self._extract_attachments(msg.get("payload") or {})
 
     def get_attachment(self, message_id: str, attachment_id: str) -> dict[str, Any] | None:
         """Fetch raw attachment bytes (base64url) for download."""
@@ -674,7 +710,7 @@ class GmailClient:
                 clean = _clean_sender(addr)
                 if "@" in clean:
                     recipients.add(clean)
-        recipients.discard(current_google_email())
+        recipients.discard(self._own_email())
         to = ", ".join(sorted(r for r in recipients if r))
         raw = self._build_raw(to, f"Re: {subject}", comment)
         self._request("POST", "/messages/send", json={"raw": raw, "threadId": thread_id})

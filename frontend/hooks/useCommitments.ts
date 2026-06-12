@@ -4,7 +4,11 @@ import { useState, useEffect } from 'react';
 import { CommitmentItem } from '../lib/types';
 import { extractCommitments, confirmCommitments } from '../lib/api';
 
-export function useCommitments(emailId: string | null, emailBody: string | null) {
+export function useCommitments(
+  emailId: string | null,
+  emailBody: string | null,
+  initialCommitments?: CommitmentItem[],
+) {
   const [commitments, setCommitments] = useState<CommitmentItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +28,15 @@ export function useCommitments(emailId: string | null, emailBody: string | null)
         setEventUrls([]);
       }, 0);
       return () => clearTimeout(resetTimer);
+    }
+
+    // If the pipeline already extracted commitments, use them directly and skip
+    // the separate /api/commitments/extract call to avoid the duplicate LLM work.
+    if (initialCommitments && initialCommitments.length > 0) {
+      const seeded = initialCommitments.map((c) => ({ ...c, approved: c.approved ?? true }));
+      setCommitments(seeded);
+      setLoading(false);
+      return;
     }
 
     async function loadCommitments() {

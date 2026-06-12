@@ -14,19 +14,53 @@ from app.api.monitoring_routes import router as monitoring_router
 from app.api.routes import router
 from app.config.settings import settings
 from app.db.base import init_db
-from app.middleware import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.middleware import (
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    SessionContextMiddleware,
+)
 from app.observability import init_observability
 from app.queue.queue import EmailQueue
-from routes.ai_routes import router as ai_router
-from routes.email_routes import router as email_router
-from routes.evaluation_routes import router as evaluation_router
-from routes.graph_routes import router as graph_router
 
-# api_bridge.py is no longer included — app/api/routes.py handles all /api/* routes
-# (including auth, emails, commitments, triage, drafts, etc.)
-api_bridge_router = None
+def _configure_logging() -> None:
+    """Set up structured logging with a dedicated audit trail.
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    The ``mailmind.audit`` logger emits security-relevant events (login, logout,
+    session create/expire/revoke, token refresh, rate-limit hits) to its own
+    handler so they can be routed to a separate sink (file, CloudWatch, Datadog)
+    without noise from debug logs. In development it writes to stderr alongside
+    the main log; in production, swap the handler for your log-shipping solution.
+    """
+    log_level = logging.DEBUG if os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG" else logging.INFO
+
+    fmt = logging.Formatter("%(asctime)s %(levelname)-8s [%(name)s] %(message)s")
+    handler = logging.StreamHandler()
+    handler.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(log_level)
+    if not root.handlers:
+        root.addHandler(handler)
+
+    # Dedicated audit logger — propagates to root by default (so audit events
+    # appear in the main log stream), but you can attach a separate FileHandler
+    # or log-shipping handler here to get an isolated audit sink.
+    audit_logger = logging.getLogger("mailmind.audit")
+    audit_logger.setLevel(logging.DEBUG)  # capture all audit levels
+
+    audit_log_path = os.getenv("AUDIT_LOG_FILE")
+    if audit_log_path:
+        try:
+            os.makedirs(os.path.dirname(audit_log_path), exist_ok=True)
+            audit_handler = logging.FileHandler(audit_log_path, encoding="utf-8")
+            audit_handler.setFormatter(fmt)
+            audit_logger.addHandler(audit_handler)
+            audit_logger.propagate = False  # don't double-emit to root
+        except Exception as e:
+            logging.warning("Could not open AUDIT_LOG_FILE=%s: %s — audit events go to root log", audit_log_path, e)
+
+
+_configure_logging()
 
 
 @asynccontextmanager
@@ -65,6 +99,9 @@ init_observability(app)
 # wrap the rate-limiter which wraps the app.
 app.add_middleware(RateLimitMiddleware, limit_per_minute=settings.rate_limit_per_minute)
 app.add_middleware(SecurityHeadersMiddleware)
+# Registered last → runs first (outermost), so the session ContextVar is bound
+# before any downstream middleware or route handler runs.
+app.add_middleware(SessionContextMiddleware)
 
 # Build an explicit allow-list of origins (no wildcards alongside credentials).
 _allowed_origins = list(dict.fromkeys(filter(None, [
@@ -81,7 +118,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     # Explicit header list — the CORS spec forbids "*" when credentials are allowed.
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token", "X-MailMind-Session"],
 )
 
 logger = logging.getLogger(__name__)
@@ -96,9 +133,3 @@ app.include_router(router)
 app.include_router(agent_router)
 app.include_router(monitoring_router, prefix="/api")
 app.include_router(compliance_router)
-app.include_router(email_router)
-app.include_router(ai_router)
-app.include_router(graph_router)
-app.include_router(evaluation_router)
-
-# api_bridge_router is disabled — routes.py supersedes it

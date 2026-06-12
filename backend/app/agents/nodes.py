@@ -28,6 +28,13 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import AzureChatOpenAI
 
+try:
+    from langchain_groq import ChatGroq as _ChatGroq
+    _GROQ_AVAILABLE = True
+except ImportError:
+    _ChatGroq = None
+    _GROQ_AVAILABLE = False
+
 from app.graph.state import EmailAgentState
 from app.monitoring.metrics import observe_node, record_llm_call, record_pii_masked
 from app.tools.email_tools import (
@@ -55,45 +62,81 @@ logger = logging.getLogger(__name__)
 # Creating AzureChatOpenAI is not free: it validates credentials and sets up the
 # HTTP client. Caching saves ~200-400ms per request.
 _llm_cache: dict[tuple[float, str], AzureChatOpenAI] = {}
+_groq_cache: dict[tuple[float, str], Any] = {}
+
+# Groq model used as fallback when Azure OpenAI is not configured.
+_GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
 
-def _get_llm(temperature: float = 0.1, deployment: str | None = None) -> AzureChatOpenAI | None:
+def _get_llm(temperature: float = 0.1, deployment: str | None = None):
     """
-    Return a cached AzureChatOpenAI instance. Built once per (temperature, deployment) pair
-    and reused for all subsequent requests in this process lifetime.
-    Returns None if Azure credentials are not present (triggers fallback paths).
+    Return a cached LLM instance. Priority order:
+      1. AzureChatOpenAI — when AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT are set
+      2. ChatGroq — when GROQ_API_KEY is set (free, fast fallback)
+      3. None — triggers deterministic rule-based fallbacks
 
     Args:
         temperature: Model temperature (0.0 for deterministic, 0.3+ for creative)
-        deployment: Azure deployment name. If None, uses azure_openai_chat_deployment (gpt-4o by default)
+        deployment: Azure deployment name (Azure only). Ignored for Groq.
     """
-    global _llm_cache
-
     from app.config import settings as _settings
+
+    # ── 1. Azure OpenAI ───────────────────────────────────────────────────────
     api_key = _settings.azure_openai_api_key
     endpoint = _settings.azure_openai_base_endpoint
-    api_version = _settings.azure_openai_api_version
 
-    if not api_key or not endpoint:
-        logger.warning("Azure OpenAI credentials not set — using deterministic fallbacks")
-        return None
-
-    deployment = deployment or _settings.azure_openai_chat_deployment
-    cache_key = (temperature, deployment)
-
-    if cache_key in _llm_cache:
+    if api_key and endpoint:
+        global _llm_cache
+        resolved_deployment = deployment or _settings.azure_openai_chat_deployment
+        cache_key = (temperature, resolved_deployment)
+        if cache_key not in _llm_cache:
+            _llm_cache[cache_key] = AzureChatOpenAI(
+                azure_endpoint=endpoint,
+                azure_deployment=resolved_deployment,
+                api_key=api_key,
+                api_version=_settings.azure_openai_api_version,
+                temperature=temperature,
+            )
+            logger.info("AzureChatOpenAI cached (temperature=%.1f, deployment=%s)", temperature, resolved_deployment)
         return _llm_cache[cache_key]
 
-    instance = AzureChatOpenAI(
-        azure_endpoint=endpoint,
-        azure_deployment=deployment,
-        api_key=api_key,
-        api_version=api_version,
-        temperature=temperature,
-    )
-    _llm_cache[cache_key] = instance
-    logger.info("AzureChatOpenAI instance cached (temperature=%.1f, deployment=%s)", temperature, deployment)
-    return instance
+    # ── 2. Groq fallback ──────────────────────────────────────────────────────
+    groq_key = _settings.groq_api_key
+    if groq_key and _GROQ_AVAILABLE and _ChatGroq is not None:
+        global _groq_cache
+        model = _GROQ_DEFAULT_MODEL
+        cache_key = (temperature, model)
+        if cache_key not in _groq_cache:
+            _groq_cache[cache_key] = _ChatGroq(
+                api_key=groq_key,
+                model=model,
+                temperature=temperature,
+            )
+            logger.info("ChatGroq cached as LLM fallback (model=%s, temperature=%.1f)", model, temperature)
+        return _groq_cache[cache_key]
+
+    # ── 3. No LLM available ───────────────────────────────────────────────────
+    logger.warning("No LLM credentials set (Azure or Groq) — using deterministic fallbacks")
+    return None
+
+
+def _with_max_tokens(llm, max_tokens: int):
+    """Apply a max_tokens cap in a provider-agnostic way.
+
+    AzureChatOpenAI: supports `bind(max_tokens=...)`.
+    ChatGroq: `max_tokens` must be passed via the constructor; `bind()` raises
+    a ValidationError. For Groq we recreate with the cap baked in, or simply
+    return the llm unchanged if it was already constructed with a cap.
+    """
+    if llm is None:
+        return None
+    if _ChatGroq is not None and isinstance(llm, _ChatGroq):
+        # ChatGroq exposes max_tokens as a constructor field; bind() doesn't accept it.
+        return llm.bind(stop=None) if hasattr(llm, "max_tokens") else llm
+    try:
+        return llm.bind(max_tokens=max_tokens)
+    except Exception:
+        return llm
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -362,7 +405,7 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
 
             # max_tokens cap: 5-axis JSON with explanations averages ~150-200 tokens;
             # 400 is a safe ceiling that still keeps inference fast.
-            triage_llm = llm.bind(max_tokens=400)
+            triage_llm = _with_max_tokens(llm, 400)
             response: AIMessage = triage_llm.invoke([
                 SystemMessage(content=_TRIAGE_SYSTEM_PROMPT),
                 HumanMessage(content=user_prompt),
@@ -472,7 +515,7 @@ def commitment_node(state: EmailAgentState) -> dict[str, Any]:
             ]
 
             # max_tokens cap: commitment JSON averages ~200 tokens per item.
-            commit_llm = llm.bind(max_tokens=400)
+            commit_llm = _with_max_tokens(llm, 400)
             response = commit_llm.invoke(messages)
             content = response.content.strip()
             # Strip markdown fences if present

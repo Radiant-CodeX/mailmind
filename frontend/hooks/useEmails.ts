@@ -178,12 +178,14 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   }, []);
 
   // --------------------------------------------------------------------------
-  // Pagination — fetch exactly 10 emails per page directly from Graph/Gmail.
+  // Pagination — fetch emails per page directly from Graph/Gmail.
+  // Increased from 10 to 20 to reduce the number of API calls needed for pagination
+  // and improve initial load performance.
   // Triage fires only for the current page's emails using the 3-level cache
   // (localStorage → Redis → DB → LLM). Previous pages stay in allEmails so
   // navigating back is instant with no extra API calls.
   // --------------------------------------------------------------------------
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = 20;
 
   const [allEmails, setAllEmails] = useState<Email[]>([]);
   const [total, setTotal] = useState(0);
@@ -334,8 +336,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     }
 
     // ── Cache-first: serve from localStorage if fresh and not forced ─────────
+    // BUT: Skip cache if there's an active search query, since cache is for
+    // the default (no-search) state and won't contain search results.
+    const hasSearchQuery = searchRef.current && searchRef.current.trim().length > 0;
     const cached = readEmailCache(folder);
-    if (!force && cached && isCacheFresh(cached) && cached.emails.length > 0) {
+    if (!force && !hasSearchQuery && cached && isCacheFresh(cached) && cached.emails.length > 0) {
       console.info('[inbox] Serving %s from cache (%ds old) — skipping API call',
         folder, Math.round((Date.now() - cached.cachedAt) / 1000));
 

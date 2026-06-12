@@ -344,6 +344,7 @@ export function downloadAttachment(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+  URL.revokeObjectURL(objectUrl);
 }
 
 /** Check if a new email has arrived — returns latest email id + received_at. */
@@ -358,7 +359,7 @@ export async function pollNewEmail(): Promise<{
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return { has_new: false, latest_id: null, received_at: null };
-    return res.json();
+    return persistSessionFromResponse(await res.json());
   } catch {
     return { has_new: false, latest_id: null, received_at: null };
   }
@@ -681,7 +682,7 @@ export async function loginPoll(deviceCode: string) {
       throw new Error(errorMessage);
     }
 
-    return res.json();
+    return persistSessionFromResponse(await res.json());
   } catch (err) {
     throw err;
   }
@@ -729,7 +730,7 @@ export async function microsoftLoginInitiate() {
     } catch {}
     throw new Error(message);
   }
-  return res.json();
+  return persistSessionFromResponse(await res.json());
 }
 
 export async function microsoftLoginPoll(state: string) {
@@ -746,7 +747,7 @@ export async function microsoftLoginPoll(state: string) {
     } catch {}
     throw new Error(message);
   }
-  return res.json();
+  return persistSessionFromResponse(await res.json());
 }
 
 export async function googleLoginInitiate(email?: string) {
@@ -765,7 +766,7 @@ export async function googleLoginInitiate(email?: string) {
     }
     throw new Error(message);
   }
-  return res.json();
+  return persistSessionFromResponse(await res.json());
 }
 
 export async function googleLoginPoll(state: string) {
@@ -784,7 +785,7 @@ export async function googleLoginPoll(state: string) {
     }
     throw new Error(message);
   }
-  return res.json();
+  return persistSessionFromResponse(await res.json());
 }
 
 // ── Account management (v3) ──────────────────────────────────────────────────

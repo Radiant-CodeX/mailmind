@@ -135,6 +135,8 @@ export default function Home() {
     classification,
     triageResult,
     precedents,
+    attachments: detailAttachments,
+    pipelineCommitments,
     aiDraft,
     setAiDraft,
     isGeneratingDraft,
@@ -160,6 +162,7 @@ export default function Home() {
   } = useCommitments(
     showPipeline ? selectedEmail?.id || null : null,
     showPipeline ? selectedEmail?.body || null : null,
+    showPipeline ? pipelineCommitments : undefined,
   );
 
   const {
@@ -194,7 +197,10 @@ export default function Home() {
     } finally {
       // Always sign the user out locally and return to the login page, even if
       // the backend logout call failed.
-      // Clear all user-scoped cached data so the next user starts fresh.
+      // Clear quick login on logout to prevent other users on shared device from
+      // impersonating this user. When the same user logs back in, their quick login
+      // will be automatically re-saved.
+      clearRememberedLogin();
       userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);
