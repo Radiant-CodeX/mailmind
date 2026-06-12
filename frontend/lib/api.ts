@@ -1,4 +1,4 @@
-import { CommitmentItem } from './types';
+import { CommitmentItem } from "./types";
 
 /**
  * Resolve the backend base URL.
@@ -10,74 +10,64 @@ import { CommitmentItem } from './types';
  */
 function resolveBase(): string {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     return `${window.location.protocol}//${window.location.hostname}:8000`;
   }
-  return 'http://127.0.0.1:8000';
+  return "http://127.0.0.1:8000";
 }
 
 export const BASE = resolveBase();
 
-export interface UserProfile {
-  email?: string | null;
-  display_name?: string | null;
-  photo_url?: string | null;
+/**
+ * Drop-in replacement for `fetch` that always sends HttpOnly session cookies
+ * cross-origin (required for the mm_session / mm_quick cookie auth model).
+ */
+export function apiFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  return fetch(input, { credentials: "include", ...init });
+}
+
+export interface UserInfo {
+  id: string;
+  display_name: string | null;
+  primary_email: string | null;
+}
+
+export interface AccountInfo {
+  id: string;
+  provider: "google" | "microsoft";
+  email: string;
+  photo_url: string | null;
+  nickname: string | null;
+  color: string | null;
+  is_default: boolean;
+  sync_enabled: boolean;
+  has_token: boolean;
+  token_expires_at: string | null;
+  created_at: string;
 }
 
 export interface AuthStatus {
   status: string;
   authenticated: boolean;
-  user_principal_name: string | null;
-  provider?: 'google' | 'microsoft';
-  profile?: UserProfile;
-  session_token?: string;
-}
-
-const SESSION_KEY = 'mailmind_session_token';
-
-function getSessionToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(SESSION_KEY);
-}
-
-function setSessionToken(token?: string | null): void {
-  if (typeof window === 'undefined') return;
-  if (token) {
-    window.localStorage.setItem(SESSION_KEY, token);
-  } else {
-    window.localStorage.removeItem(SESSION_KEY);
-  }
-}
-
-function authHeaders(headers?: HeadersInit): Headers {
-  const merged = new Headers(headers);
-  const token = getSessionToken();
-  if (token) merged.set('X-MailMind-Session', token);
-  return merged;
-}
-
-async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  return fetch(input, {
-    ...init,
-    // Send the HttpOnly session cookie (primary auth). The X-MailMind-Session
-    // header from localStorage is kept as a transitional fallback.
-    credentials: 'include',
-    headers: authHeaders(init.headers),
-  });
-}
-
-function persistSessionFromResponse<T extends { session_token?: string }>(data: T): T {
-  if (data.session_token) setSessionToken(data.session_token);
-  return data;
+  /** v3 — user object (null when unauthenticated) */
+  user: UserInfo | null;
+  /** v3 — default account (null when unauthenticated) */
+  default_account: AccountInfo | null;
+  /** Legacy compat — resolved from user.primary_email */
+  user_principal_name?: string | null;
+  provider?: "google" | "microsoft";
 }
 
 export async function classifyEmail(text: string) {
   const res = await apiFetch(`${BASE}/api/classify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email_text: text }),
   });
-  if (!res.ok) throw new Error('Classification failed');
+  if (!res.ok) throw new Error("Classification failed");
   return res.json();
 }
 
@@ -105,11 +95,11 @@ export async function enrichEmail(payload: {
   generate_draft?: boolean;
 }) {
   const res = await apiFetch(`${BASE}/api/agent/enrich`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Enrichment failed');
+  if (!res.ok) throw new Error("Enrichment failed");
   return res.json();
 }
 
@@ -125,11 +115,11 @@ export async function processEmailFull(payload: {
   calendar_events?: unknown[];
 }) {
   const res = await apiFetch(`${BASE}/api/agent/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Full pipeline failed');
+  if (!res.ok) throw new Error("Full pipeline failed");
   return res.json();
 }
 
@@ -137,13 +127,19 @@ export async function processEmailFull(payload: {
  * Triage a single email through the LangGraph agent pipeline.
  * Uses /api/agent/triage so the LLM call is traced in LangSmith.
  */
-export async function triageEmail(payload: { email_id: string; sender: string; subject: string; body: string; received_at: string }) {
+export async function triageEmail(payload: {
+  email_id: string;
+  sender: string;
+  subject: string;
+  body: string;
+  received_at: string;
+}) {
   const res = await apiFetch(`${BASE}/api/agent/triage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Triage scoring failed');
+  if (!res.ok) throw new Error("Triage scoring failed");
   return res.json();
 }
 
@@ -152,22 +148,30 @@ export async function triageEmail(payload: { email_id: string; sender: string; s
  * Retries up to maxRetries times, doubling the delay each attempt.
  */
 async function triageWithRetry(
-  payload: { email_id: string; sender: string; subject: string; body: string; received_at: string },
+  payload: {
+    email_id: string;
+    sender: string;
+    subject: string;
+    body: string;
+    received_at: string;
+  },
   maxRetries = 4,
 ): Promise<unknown> {
   let delay = 2000; // start at 2s
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await apiFetch(`${BASE}/api/agent/triage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
     if (res.status === 429) {
       // Respect Retry-After header if provided, otherwise exponential backoff
-      const retryAfter = parseInt(res.headers.get('Retry-After') || '0', 10);
+      const retryAfter = parseInt(res.headers.get("Retry-After") || "0", 10);
       const wait = retryAfter > 0 ? retryAfter * 1000 : delay;
-      console.warn(`[triage] 429 rate-limited for ${payload.email_id}, waiting ${wait}ms (attempt ${attempt + 1}/${maxRetries})`);
+      console.warn(
+        `[triage] 429 rate-limited for ${payload.email_id}, waiting ${wait}ms (attempt ${attempt + 1}/${maxRetries})`,
+      );
       if (attempt < maxRetries) {
         await new Promise((r) => setTimeout(r, wait));
         delay = Math.min(delay * 2, 30000); // cap at 30s
@@ -188,7 +192,13 @@ async function triageWithRetry(
  * Falls back to the fast deterministic /api/triage/batch for any that fail.
  */
 export async function triageEmailsBatch(
-  payloads: Array<{ email_id: string; sender: string; subject: string; body: string; received_at: string }>,
+  payloads: Array<{
+    email_id: string;
+    sender: string;
+    subject: string;
+    body: string;
+    received_at: string;
+  }>,
 ) {
   if (payloads.length === 0) return [];
 
@@ -200,59 +210,73 @@ export async function triageEmailsBatch(
   for (let i = 0; i < payloads.length; i += CONCURRENCY) {
     const chunk = payloads.slice(i, i + CONCURRENCY);
     const settled = await Promise.allSettled(
-      chunk.map((p) => triageWithRetry(p))
+      chunk.map((p) => triageWithRetry(p)),
     );
     settled.forEach((s, j) => {
-      results[i + j] = s.status === 'fulfilled' ? s.value : null;
+      results[i + j] = s.status === "fulfilled" ? s.value : null;
     });
   }
 
   // Any nulls (agent failures / exhausted retries) fall back to deterministic triage.
   const failedPayloads = payloads.filter((_, i) => !results[i]);
   if (failedPayloads.length > 0) {
-    console.warn(`[triage] ${failedPayloads.length} emails falling back to deterministic triage`);
+    console.warn(
+      `[triage] ${failedPayloads.length} emails falling back to deterministic triage`,
+    );
     try {
       const fallback = await apiFetch(`${BASE}/api/triage/batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(failedPayloads),
       });
       if (fallback.ok) {
         const fallbackData = await fallback.json();
         let fi = 0;
-        results.forEach((r, i) => { if (!r) results[i] = fallbackData[fi++]; });
+        results.forEach((r, i) => {
+          if (!r) results[i] = fallbackData[fi++];
+        });
       }
-    } catch { /* ignore fallback errors */ }
+    } catch {
+      /* ignore fallback errors */
+    }
   }
 
   return results;
 }
 
-export async function extractCommitments(maskedText: string, threadSummary = '', emailId?: string) {
+export async function extractCommitments(
+  maskedText: string,
+  threadSummary = "",
+  emailId?: string,
+) {
   const res = await apiFetch(`${BASE}/api/commitments/extract`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       masked_email_text: maskedText,
       thread_summary: threadSummary,
-      email_id: emailId
+      email_id: emailId,
     }),
   });
-  if (!res.ok) throw new Error('Commitment extraction failed');
+  if (!res.ok) throw new Error("Commitment extraction failed");
   return res.json();
 }
 
-export async function confirmCommitments(emailId: string, commitments: CommitmentItem[]) {
+export async function confirmCommitments(
+  emailId: string,
+  commitments: CommitmentItem[],
+) {
   const res = await apiFetch(`${BASE}/api/commitments/confirm`, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
-      'X-Approval-Token': process.env.NEXT_PUBLIC_APPROVAL_TOKEN || 'secret-approval-token',
+      "Content-Type": "application/json",
+      "X-Approval-Token":
+        process.env.NEXT_PUBLIC_APPROVAL_TOKEN || "secret-approval-token",
     },
     body: JSON.stringify({ email_id: emailId, commitments }),
   });
   if (!res.ok) {
-    let message = 'Confirmation failed';
+    let message = "Confirmation failed";
     try {
       const errData = await res.json();
       if (errData && errData.detail) message = errData.detail;
@@ -266,21 +290,21 @@ export async function confirmCommitments(emailId: string, commitments: Commitmen
 
 export async function retrievePrecedents(text: string) {
   const res = await apiFetch(`${BASE}/api/rag/retrieve`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email_text: text }),
   });
-  if (!res.ok) throw new Error('RAG retrieval failed');
+  if (!res.ok) throw new Error("RAG retrieval failed");
   return res.json();
 }
 
 export async function generateDraftPrompt(text: string) {
   const res = await apiFetch(`${BASE}/api/rag/inject`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email_text: text }),
   });
-  if (!res.ok) throw new Error('Draft generation prompt inject failed');
+  if (!res.ok) throw new Error("Draft generation prompt inject failed");
   return res.json();
 }
 
@@ -292,8 +316,8 @@ export async function generateEmailDraft(
   currentUserEmail?: string,
 ) {
   const res = await apiFetch(`${BASE}/api/rag/draft`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email_text: text,
       style: style,
@@ -303,36 +327,19 @@ export async function generateEmailDraft(
       current_user_email: currentUserEmail,
     }),
   });
-  if (!res.ok) throw new Error('Email draft generation failed');
+  if (!res.ok) throw new Error("Email draft generation failed");
   return res.json();
 }
 
-
-/** Fetch attachment metadata list for an email (id, filename, mime_type, size). */
-export async function fetchAttachments(emailId: string): Promise<Array<{
-  attachment_id: string;
-  filename: string;
-  mime_type: string;
-  size: number;
-}>> {
-  try {
-    const res = await apiFetch(`${BASE}/api/emails/${encodeURIComponent(emailId)}/attachments`);
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
-}
-
 /** Trigger a browser download of an email attachment. */
-export async function downloadAttachment(emailId: string, attachmentId: string, filename: string): Promise<void> {
+export function downloadAttachment(
+  emailId: string,
+  attachmentId: string,
+  filename: string,
+): void {
   const url = `${BASE}/api/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}?filename=${encodeURIComponent(filename)}`;
-  const res = await apiFetch(url);
-  if (!res.ok) throw new Error('Attachment download failed');
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = objectUrl;
+  const a = document.createElement("a");
+  a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
@@ -348,7 +355,9 @@ export async function pollNewEmail(): Promise<{
   subject?: string;
 }> {
   try {
-    const res = await apiFetch(`${BASE}/api/inbox/poll`, { signal: AbortSignal.timeout(5000) });
+    const res = await apiFetch(`${BASE}/api/inbox/poll`, {
+      signal: AbortSignal.timeout(5000),
+    });
     if (!res.ok) return { has_new: false, latest_id: null, received_at: null };
     return persistSessionFromResponse(await res.json());
   } catch {
@@ -357,26 +366,80 @@ export async function pollNewEmail(): Promise<{
 }
 
 /** Triage up to 10 emails in one batch call — Redis → DB → LLM (3-level cache). */
+export async function* triagePageStream(requests: Array<{
+  email_id: string;
+  sender: string;
+  subject: string;
+  body: string;
+  received_at?: string;
+}>) {
+  const res = await apiFetch(`${BASE}/api/agent/triage-page-stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requests),
+  });
+  if (!res.ok) throw new Error("Failed to start triage stream");
+  if (!res.body) throw new Error("No response body for stream");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6);
+          if (data.trim()) {
+            yield JSON.parse(data);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export async function triagePageBatch(
-  payloads: Array<{ email_id: string; sender: string; subject: string; body: string; received_at: string }>,
+  payloads: Array<{
+    email_id: string;
+    sender: string;
+    subject: string;
+    body: string;
+    received_at: string;
+  }>,
 ): Promise<unknown[]> {
   if (payloads.length === 0) return [];
   try {
     const res = await apiFetch(`${BASE}/api/agent/triage-page`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payloads),
     });
     if (res.ok) return res.json();
-  } catch { /* fall through to per-email fallback */ }
+  } catch {
+    /* fall through to per-email fallback */
+  }
   // Fallback: individual calls with retry
   return triageEmailsBatch(payloads);
 }
 
 export async function fetchCalendar(days = 7) {
-  const res = await apiFetch(`${BASE}/api/calendar?days=${days}`);
-  if (!res.ok) throw new Error('Calendar fetch failed');
-  return res.json();
+  try {
+    const res = await apiFetch(`${BASE}/api/calendar?days=${days}`);
+    if (!res.ok) return []; // Gracefully handle calendar fetch failures
+    return res.json();
+  } catch (err) {
+    console.error("Calendar fetch failed:", err);
+    return []; // Return empty array on error
+  }
 }
 
 export async function createCalendarEvent(payload: {
@@ -387,46 +450,51 @@ export async function createCalendarEvent(payload: {
   email_id?: string;
 }) {
   const res = await apiFetch(`${BASE}/api/calendar/event`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to create calendar event');
+  if (!res.ok) throw new Error("Failed to create calendar event");
   return res.json();
 }
 
 export async function fetchTasks(limit = 20) {
-  const res = await apiFetch(`${BASE}/api/tasks?limit=${limit}`);
-  if (!res.ok) throw new Error('Tasks fetch failed');
-  return res.json();
+  try {
+    const res = await apiFetch(`${BASE}/api/tasks?limit=${limit}`);
+    if (!res.ok) return []; // Gracefully handle tasks fetch failures
+    return res.json();
+  } catch (err) {
+    console.error("Tasks fetch failed:", err);
+    return []; // Return empty array on error
+  }
 }
 
 export async function createTask(title: string) {
   const res = await apiFetch(`${BASE}/api/tasks`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
   });
-  if (!res.ok) throw new Error('Failed to create task');
+  if (!res.ok) throw new Error("Failed to create task");
   return res.json();
 }
 
 export async function ingestEmail(payload: Record<string, unknown>) {
   const res = await apiFetch(`${BASE}/api/ingest`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (res.status === 429) {
-    throw new Error('Rate limit exceeded. Please try again in 1 minute.');
+    throw new Error("Rate limit exceeded. Please try again in 1 minute.");
   }
-  if (!res.ok) throw new Error('Ingest failed');
+  if (!res.ok) throw new Error("Ingest failed");
   return res.json();
 }
 
 export async function fetchEmails(limit = 10) {
   const res = await apiFetch(`${BASE}/api/emails?limit=${limit}`);
-  if (!res.ok) throw new Error('Emails fetch failed');
+  if (!res.ok) throw new Error("Emails fetch failed");
   return res.json();
 }
 
@@ -444,119 +512,165 @@ export async function fetchMailbox(
   query?: string,
 ): Promise<MailboxPage> {
   const params = new URLSearchParams({ folder, limit: String(limit) });
-  if (pageToken) params.set('page_token', pageToken);
-  if (query && query.trim()) params.set('q', query.trim());
+  if (pageToken) params.set("page_token", pageToken);
+  if (query && query.trim()) params.set("q", query.trim());
   const res = await apiFetch(`${BASE}/api/mailbox?${params.toString()}`);
-  if (!res.ok) throw new Error('Mailbox fetch failed');
+  if (!res.ok) {
+    let detail = "";
+
+    try {
+      const body = await res.json();
+      detail = body.detail || JSON.stringify(body);
+    } catch {
+      detail = await res.text();
+    }
+
+    throw new Error(`${res.status}: ${detail}`);
+  }
   return res.json();
 }
 
 export async function fetchSentEmails(limit = 10) {
   const res = await apiFetch(`${BASE}/api/emails/sent?limit=${limit}`);
-  if (!res.ok) throw new Error('Sent emails fetch failed');
+  if (!res.ok) throw new Error("Sent emails fetch failed");
   return res.json();
 }
 
 export async function fetchDraftEmails(limit = 10) {
   const res = await apiFetch(`${BASE}/api/emails/drafts?limit=${limit}`);
-  if (!res.ok) throw new Error('Drafts fetch failed');
+  if (!res.ok) throw new Error("Drafts fetch failed");
   return res.json();
 }
 
 export async function fetchSpamEmails(limit = 10) {
   const res = await apiFetch(`${BASE}/api/emails/spam?limit=${limit}`);
-  if (!res.ok) throw new Error('Spam fetch failed');
+  if (!res.ok) throw new Error("Spam fetch failed");
   return res.json();
 }
 
 export async function fetchTrashEmails(limit = 10) {
   const res = await apiFetch(`${BASE}/api/emails/trash?limit=${limit}`);
-  if (!res.ok) throw new Error('Trash fetch failed');
+  if (!res.ok) throw new Error("Trash fetch failed");
+  return res.json();
+}
+
+export async function approveAgentDraft(
+  emailId: string,
+  action: "approve" | "reject" | "edit",
+  editedDraft?: string,
+  reviewerNote?: string,
+) {
+  const res = await apiFetch(`${BASE}/api/agent/approve/${emailId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action,
+      edited_draft: editedDraft ?? null,
+      reviewer_note: reviewerNote ?? null,
+    }),
+  });
+  if (!res.ok) throw new Error("Failed to record approval decision");
   return res.json();
 }
 
 export async function sendEmailReply(emailId: string, comment: string) {
   const res = await apiFetch(`${BASE}/api/emails/${emailId}/reply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ comment }),
   });
-  if (!res.ok) throw new Error('Failed to send email reply');
+  if (!res.ok) throw new Error("Failed to send email reply");
   return res.json();
 }
 
 export async function restoreEmailFromTrash(emailId: string) {
   const res = await apiFetch(`${BASE}/api/emails/${emailId}/restore`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
   });
-  if (!res.ok) throw new Error('Failed to restore email from trash');
+  if (!res.ok) throw new Error("Failed to restore email from trash");
   return res.json();
 }
 
 export async function fetchEvaluation() {
   const res = await apiFetch(`${BASE}/api/evaluate`);
-  if (!res.ok) throw new Error('Evaluation fetch failed');
+  if (!res.ok) throw new Error("Evaluation fetch failed");
   return res.json();
 }
 
 export async function moveEmailToTrash(emailId: string) {
   const res = await apiFetch(`${BASE}/api/emails/${emailId}/trash`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
   });
-  if (!res.ok) throw new Error('Failed to move email to trash');
+  if (!res.ok) throw new Error("Failed to move email to trash");
   return res.json();
 }
 
-async function emailAction(emailId: string, action: string, body?: Record<string, unknown>) {
+async function emailAction(
+  emailId: string,
+  action: string,
+  body?: Record<string, unknown>,
+) {
   const res = await apiFetch(`${BASE}/api/emails/${emailId}/${action}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
     let message = `Failed: ${action}`;
-    try { const d = await res.json(); if (d?.detail) message = d.detail; } catch {}
+    try {
+      const d = await res.json();
+      if (d?.detail) message = d.detail;
+    } catch {}
     throw new Error(message);
   }
   return res.json();
 }
 
-export const markEmailRead = (id: string, read: boolean) => emailAction(id, 'read', { read });
-export const archiveEmail = (id: string) => emailAction(id, 'archive');
-export const reportSpam = (id: string) => emailAction(id, 'spam');
-export const forwardEmail = (id: string, to: string, comment: string) => emailAction(id, 'forward', { to, comment });
-export const replyAllEmail = (id: string, comment: string) => emailAction(id, 'reply-all', { comment });
+export const markEmailRead = (id: string, read: boolean) =>
+  emailAction(id, "read", { read });
+export const archiveEmail = (id: string) => emailAction(id, "archive");
+export const reportSpam = (id: string) => emailAction(id, "spam");
+export const forwardEmail = (id: string, to: string, comment: string) =>
+  emailAction(id, "forward", { to, comment });
+export const replyAllEmail = (id: string, comment: string) =>
+  emailAction(id, "reply-all", { comment });
 
-export async function composeEmail(payload: { to: string; subject: string; body: string; cc?: string; bcc?: string }) {
+export async function composeEmail(payload: {
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string;
+  bcc?: string;
+}) {
   const res = await apiFetch(`${BASE}/api/emails/compose`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  if (!res.ok) throw new Error('Failed to send email');
+  if (!res.ok) throw new Error("Failed to send email");
   return res.json();
 }
 
-
-
 export async function loginInitiate() {
-  const res = await apiFetch(`${BASE}/api/auth/login-initiate`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to initiate login flow');
+  const res = await apiFetch(`${BASE}/api/auth/login-initiate`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to initiate login flow");
   return res.json();
 }
 
 export async function loginPoll(deviceCode: string) {
   try {
     const res = await apiFetch(`${BASE}/api/auth/login-poll`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_code: deviceCode }),
     });
 
     if (!res.ok) {
-      let errorMessage = 'Polling request failed';
+      let errorMessage = "Polling request failed";
       try {
         const errData = await res.json();
         if (errData && errData.detail) {
@@ -575,28 +689,45 @@ export async function loginPoll(deviceCode: string) {
 }
 
 export async function checkAuthStatus(): Promise<AuthStatus> {
-  // Timeout set to 15s to allow backend time to fetch OAuth account data and validate session.
-  // Backend may need to call external APIs (Google/Microsoft) which adds latency.
-  const res = await apiFetch(`${BASE}/api/auth/status`, { signal: AbortSignal.timeout(15000) });
-  if (!res.ok) throw new Error('Auth status check failed');
-  const data = await res.json();
-  return persistSessionFromResponse(data);
-}
-
-export async function logoutUser() {
-  const res = await apiFetch(`${BASE}/api/auth/logout`, { method: 'POST' });
-  if (!res.ok) throw new Error('Logout request failed');
-  setSessionToken(null);
+  // Fail fast (5s) so the login screen never hangs on a slow/unreachable backend.
+  const res = await apiFetch(`${BASE}/api/auth/status`, {
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) throw new Error("Auth status check failed");
   return res.json();
 }
 
+/** Full sign-out: invalidates session + quick login, deletes both cookies. */
+export async function logoutUser() {
+  const res = await apiFetch(`${BASE}/api/auth/logout`, { method: "POST" });
+  if (!res.ok) throw new Error("Logout request failed");
+  return res.json();
+}
 
+/** Session-only sign-out: invalidates mm_session, keeps mm_quick for quick login. */
+export async function logoutSession() {
+  const res = await apiFetch(`${BASE}/api/auth/logout-session`, { method: "POST" });
+  if (!res.ok) throw new Error("Logout session request failed");
+  return res.json();
+}
+
+/** Explicit quick-login: validates mm_quick cookie and issues a new session. */
+export async function quickLogin() {
+  const res = await apiFetch(`${BASE}/api/auth/quick-login`, { method: "POST" });
+  if (!res.ok) throw new Error("Quick login failed");
+  return res.json();
+}
 
 export async function microsoftLoginInitiate() {
-  const res = await apiFetch(`${BASE}/api/auth/microsoft/login-initiate`, { method: 'POST' });
+  const res = await apiFetch(`${BASE}/api/auth/microsoft/login-initiate`, {
+    method: "POST",
+  });
   if (!res.ok) {
-    let message = 'Microsoft sign-in failed';
-    try { const d = await res.json(); if (d?.detail) message = d.detail; } catch {}
+    let message = "Microsoft sign-in failed";
+    try {
+      const d = await res.json();
+      if (d?.detail) message = d.detail;
+    } catch {}
     throw new Error(message);
   }
   return persistSessionFromResponse(await res.json());
@@ -604,13 +735,16 @@ export async function microsoftLoginInitiate() {
 
 export async function microsoftLoginPoll(state: string) {
   const res = await apiFetch(`${BASE}/api/auth/microsoft/poll`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ state }),
   });
   if (!res.ok) {
-    let message = 'Microsoft sign-in failed';
-    try { const d = await res.json(); if (d?.detail) message = d.detail; } catch {}
+    let message = "Microsoft sign-in failed";
+    try {
+      const d = await res.json();
+      if (d?.detail) message = d.detail;
+    } catch {}
     throw new Error(message);
   }
   return persistSessionFromResponse(await res.json());
@@ -618,12 +752,12 @@ export async function microsoftLoginPoll(state: string) {
 
 export async function googleLoginInitiate(email?: string) {
   const res = await apiFetch(`${BASE}/api/auth/google/login-initiate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
   });
   if (!res.ok) {
-    let message = 'Google sign-in failed';
+    let message = "Google sign-in failed";
     try {
       const data = await res.json();
       if (data?.detail) message = data.detail;
@@ -637,12 +771,12 @@ export async function googleLoginInitiate(email?: string) {
 
 export async function googleLoginPoll(state: string) {
   const res = await apiFetch(`${BASE}/api/auth/google/poll`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ state }),
   });
   if (!res.ok) {
-    let message = 'Google sign-in failed';
+    let message = "Google sign-in failed";
     try {
       const data = await res.json();
       if (data?.detail) message = data.detail;
@@ -654,22 +788,37 @@ export async function googleLoginPoll(state: string) {
   return persistSessionFromResponse(await res.json());
 }
 
-export async function quickLogin(email: string, provider: string = 'microsoft') {
-  const res = await apiFetch(`${BASE}/api/auth/quick-login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, provider }),
+// ── Account management (v3) ──────────────────────────────────────────────────
+
+export async function fetchAccounts(): Promise<AccountInfo[]> {
+  const res = await apiFetch(`${BASE}/api/accounts`);
+  if (!res.ok) throw new Error("Failed to fetch accounts");
+  return res.json();
+}
+
+export async function setDefaultAccount(accountId: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/api/accounts/${accountId}/set-default`, {
+    method: "POST",
   });
-  if (!res.ok) {
-    let message = 'Quick login failed';
-    try {
-      const data = await res.json();
-      if (data?.detail) message = data.detail;
-    } catch {
-      // keep default
-    }
-    throw new Error(message);
-  }
-  return persistSessionFromResponse(await res.json());
+  if (!res.ok) throw new Error("Failed to set default account");
 }
 
+export async function updateAccountMetadata(
+  accountId: string,
+  payload: { nickname?: string; color?: string; sync_enabled?: boolean },
+): Promise<AccountInfo> {
+  const res = await apiFetch(`${BASE}/api/accounts/${accountId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to update account");
+  return res.json();
+}
+
+export async function disconnectAccount(accountId: string): Promise<void> {
+  const res = await apiFetch(`${BASE}/api/accounts/${accountId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to disconnect account");
+}

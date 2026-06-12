@@ -224,13 +224,13 @@ class GraphClient:
 
     internal_domain = "example.com"
 
-    def __init__(self, account: dict[str, Any] | None = None, settings_obj: type(settings) = settings):
+    def __init__(self, settings_obj: type(settings) = settings, *, access_token: str | None = None, refresh_token: str | None = None):
         self.settings = settings_obj
         self.use_mock = bool(self.settings.use_mock_graph)
-        # When set (a row from identity.get_oauth_account), this client sources
-        # delegated tokens from that account's MSAL cache blob only — never the
-        # process-global _user_token_cache — so concurrent users stay isolated.
-        self.account = account
+        # v3: when tokens are injected at construction, they take precedence
+        # over the process-level _user_token_cache.
+        self._injected_access_token = access_token
+        self._injected_refresh_token = refresh_token
         if not self.use_mock:
             if msal is None:
                 raise RuntimeError("msal package is required for Graph integration; pip install msal")
@@ -296,9 +296,9 @@ class GraphClient:
         if self.use_mock:
             return None
 
-        # Account-bound clients use their own per-account token flow.
-        if self.account:
-            return self._account_token()
+        # v3: injected token wins over global cache (AccountService path)
+        if self._injected_access_token:
+            return self._injected_access_token
 
         now = time.time()
         # 1. Active user session — proactively refresh _TOKEN_REFRESH_BUFFER seconds

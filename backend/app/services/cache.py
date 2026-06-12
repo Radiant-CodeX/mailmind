@@ -77,12 +77,23 @@ class TriageCache:
             logger.info("[TriageCache] Redis not available (%s) — using memory-only cache", e)
             self._redis_ok = False
 
+    @staticmethod
+    def _to_str(user_email) -> str:
+        """Accept str, User ORM object, or None — always return a plain string."""
+        if user_email is None:
+            return ""
+        if hasattr(user_email, "primary_email"):
+            return (user_email.primary_email or user_email.id or "").lower()
+        if hasattr(user_email, "id"):
+            return str(user_email.id).lower()
+        return str(user_email).lower()
+
     def _rkey(self, email_id: str, user_email: str = "") -> str:
-        prefix = user_email.lower() if user_email else "_global"
+        prefix = self._to_str(user_email) or "_global"
         return f"{self.KEY_PREFIX}{prefix}:{email_id}"
 
     def _mkey(self, email_id: str, user_email: str = "") -> str:
-        prefix = user_email.lower() if user_email else "_global"
+        prefix = self._to_str(user_email) or "_global"
         return f"{prefix}:{email_id}"
 
     def get(self, email_id: str, user_email: str = "") -> dict[str, Any] | None:

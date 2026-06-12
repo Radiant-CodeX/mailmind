@@ -31,9 +31,9 @@ logger = logging.getLogger(__name__)
 
 # ── Per-user file path (fallback / dev-mode cache) ───────────────────────────
 
-def _profile_path(user_email: str) -> Path:
-    """Deterministic per-user path that avoids special chars in filenames."""
-    slug = hashlib.md5(user_email.strip().lower().encode()).hexdigest()
+def _profile_path(account_id: str) -> Path:
+    """Deterministic per-account path that avoids special chars in filenames."""
+    slug = hashlib.md5(account_id.strip().lower().encode()).hexdigest()
     return Path("data/tone_dna") / f"{slug}.json"
 
 
@@ -159,9 +159,9 @@ def build_profile(emails: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def load_profile(user_email: str) -> dict[str, Any] | None:
+def load_profile(account_id: str) -> dict[str, Any] | None:
     """
-    Load the profile for *user_email*.
+    Load the profile for *account_id*.
 
     Priority:
       1. Database (authoritative — persists across deploys / container restarts)
@@ -170,44 +170,44 @@ def load_profile(user_email: str) -> dict[str, Any] | None:
     # 1. DB
     try:
         from app.db.repository import get_tone_profile
-        profile = get_tone_profile(user_email)
+        profile = get_tone_profile(account_id)
         if profile:
             return profile
     except Exception as exc:
         logger.debug("[ToneDNA] DB load skipped: %s", exc)
 
     # 2. File fallback
-    path = _profile_path(user_email)
+    path = _profile_path(account_id)
     if path.exists():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning("[ToneDNA] File load failed for %s: %s", user_email, exc)
+            logger.warning("[ToneDNA] File load failed for %s: %s", account_id, exc)
 
     return None
 
 
-def save_profile(user_email: str, profile: dict[str, Any]) -> None:
+def save_profile(account_id: str, profile: dict[str, Any]) -> None:
     """
-    Persist the profile for *user_email* to DB (primary) and local file (fallback).
+    Persist the profile for *account_id* to DB (primary) and local file (fallback).
 
     Both writes are best-effort — a failure in one does not abort the other.
     """
     # 1. DB
     try:
         from app.db.repository import save_tone_profile
-        save_tone_profile(user_email, profile)
-        logger.info("[ToneDNA] Profile saved to DB for %s", user_email)
+        save_tone_profile(account_id, profile)
+        logger.info("[ToneDNA] Profile saved to DB for %s", account_id)
     except Exception as exc:
-        logger.warning("[ToneDNA] DB save failed for %s: %s", user_email, exc)
+        logger.warning("[ToneDNA] DB save failed for %s: %s", account_id, exc)
 
     # 2. File fallback
     try:
-        path = _profile_path(user_email)
+        path = _profile_path(account_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
     except Exception as exc:
-        logger.warning("[ToneDNA] File save failed for %s: %s", user_email, exc)
+        logger.warning("[ToneDNA] File save failed for %s: %s", account_id, exc)
 
 
 def needs_refresh(profile: dict[str, Any]) -> bool:
@@ -261,19 +261,19 @@ class ToneDNAService:
         An active GraphClient or GmailClient instance for the current user.
         Used to fetch sent mail.  Pass ``get_mail_client()`` at call time —
         never hard-code ``GraphClient()``.
-    user_email:
-        The current user's email address.  Used to scope storage so different
-        users' profiles never overwrite each other.
+    account_id:
+        The OAuthAccount UUID.  Used to scope storage so different accounts
+        (including the same user's Gmail vs Outlook) never overwrite each other.
     """
 
-    def __init__(self, mail_client: Any, user_email: str) -> None:
+    def __init__(self, mail_client: Any, account_id: str) -> None:
         self.mail_client = mail_client
-        self.user_email = user_email
+        self.account_id = account_id
         self._profile: dict[str, Any] | None = None
 
     def get_profile(self) -> dict[str, Any] | None:
         if self._profile is None:
-            self._profile = load_profile(self.user_email)
+            self._profile = load_profile(self.account_id)
         if self._profile and needs_refresh(self._profile):
             self._schedule_refresh()
         return self._profile
@@ -286,16 +286,16 @@ class ToneDNAService:
         Both operations share one mail-provider fetch so there is no second
         round-trip to Microsoft Graph / Gmail.
         """
-        logger.info("[ToneDNA] Ingesting sent mail for %s…", self.user_email)
+        logger.info("[ToneDNA] Ingesting sent mail for account %s…", self.account_id)
         emails = self.mail_client.fetch_sent_emails(days=30)
 
         # ── 1. Stylometric profile ────────────────────────────────────────────
         profile = build_profile(emails)
-        save_profile(self.user_email, profile)
+        save_profile(self.account_id, profile)
         self._profile = profile
         logger.info(
             "[ToneDNA] Profile built for %s — %d emails, formality=%.2f",
-            self.user_email,
+            self.account_id,
             profile["sample_size"],
             profile["features"]["formality_score"],
         )
@@ -321,9 +321,9 @@ class ToneDNAService:
                 })
             if documents:
                 index.index(documents)
-                logger.info("[ToneDNA] Indexed %d sent emails into RAG for %s", len(documents), self.user_email)
+                logger.info("[ToneDNA] Indexed %d sent emails into RAG for %s", len(documents), self.account_id)
         except Exception as exc:
-            logger.warning("[ToneDNA] RAG indexing failed for %s: %s", self.user_email, exc)
+            logger.warning("[ToneDNA] RAG indexing failed for %s: %s", self.account_id, exc)
 
         self._schedule_refresh()
         return profile
@@ -341,9 +341,9 @@ class ToneDNAService:
             try:
                 self.ingest_and_build()
             except Exception as exc:
-                logger.warning("[ToneDNA] Weekly refresh failed for %s: %s", self.user_email, exc)
+                logger.warning("[ToneDNA] Weekly refresh failed for %s: %s", self.account_id, exc)
 
         t = threading.Timer(timedelta(days=7).total_seconds(), _refresh)
         t.daemon = True
         t.start()
-        logger.info("[ToneDNA] Weekly refresh scheduled for %s.", self.user_email)
+        logger.info("[ToneDNA] Weekly refresh scheduled for %s.", self.account_id)

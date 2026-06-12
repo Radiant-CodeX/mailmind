@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { CalendarEvent } from '../lib/types';
 import { fetchCalendar } from '../lib/api';
 
-export function useCalendar() {
+export function useCalendar(enabled = true) {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,11 +25,12 @@ export function useCalendar() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     const timer = setTimeout(() => {
       loadCalendar();
     }, 0);
     return () => clearTimeout(timer);
-  }, [loadCalendar]);
+  }, [enabled, loadCalendar]);
 
   const checkConflict = useCallback((deadlineStr: string | null): CalendarEvent | null => {
     if (!deadlineStr || events.length === 0) return null;

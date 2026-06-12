@@ -2,10 +2,10 @@
 Repository functions — the only place that reads/writes the database.
 =====================================================================
 
-Keeping all persistence behind these functions means the rest of the codebase
-never imports SQLAlchemy directly, and every call is a safe no-op when running
-without a database (dev mode). Each function returns a plain dict (or None) so
-callers are decoupled from ORM objects.
+v3: EmailEnrichment is scoped by account_id (FK to oauth_accounts.id),
+not user_email. All public functions accept account_id; the legacy
+user_email parameter is kept as an alias so call-sites don't all have
+to change at once, but internally we use account_id.
 """
 
 from __future__ import annotations
@@ -34,7 +34,9 @@ _ENRICHMENT_FIELDS = (
 def _row_to_dict(row: EmailEnrichment) -> dict[str, Any]:
     return {
         "email_id": row.email_id,
-        "user_email": row.user_email,
+        "account_id": row.account_id,
+        # Legacy compat key — callers that still read user_email get account_id value
+        "user_email": row.account_id,
         "sender": row.sender,
         "subject": row.subject,
         "masked_body": row.masked_body,
@@ -62,37 +64,36 @@ def upsert_enrichment(
     email_id: str,
     state: dict[str, Any],
     *,
+    account_id: Optional[str] = None,
+    # Legacy alias — callers passing user_email still work
     user_email: Optional[str] = None,
     status: str = "complete",
     enrichment_source: str = "agentic",
     error: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """
-    Insert or update the enrichment row for ``email_id`` from a pipeline state.
-
-    Returns the persisted record as a dict, or None when persistence is off.
-    """
+    """Insert or update the enrichment row for email_id from a pipeline state."""
     if not is_persistence_enabled():
         return None
+
+    # Resolve account_id — prefer explicit, fall back to legacy alias
+    resolved_account_id = account_id or user_email or None
 
     with get_session() as session:
         if session is None:
             return None
 
-        # Always look up by PK to avoid INSERT on records with a different/NULL user_email.
         row = session.get(EmailEnrichment, email_id)
 
         if row is None:
             row = EmailEnrichment(
                 email_id=email_id,
-                user_email=user_email,
+                account_id=resolved_account_id,
                 sender=state.get("sender", "unknown"),
             )
             session.add(row)
         else:
-            # Backfill user_email if the existing row has none (e.g. from an old run).
-            if user_email and not row.user_email:
-                row.user_email = user_email
+            if resolved_account_id and not row.account_id:
+                row.account_id = resolved_account_id
 
         for field in _ENRICHMENT_FIELDS:
             if field in state and state[field] is not None:
@@ -105,18 +106,25 @@ def upsert_enrichment(
         return _row_to_dict(row)
 
 
-def get_enrichment(email_id: str, user_email: Optional[str] = None) -> Optional[dict[str, Any]]:
-    """Fetch one enrichment record scoped to user_email, or None if missing."""
+def get_enrichment(
+    email_id: str,
+    account_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Fetch one enrichment record scoped to account_id, or None if missing."""
     if not is_persistence_enabled():
         return None
+
+    resolved = account_id or user_email or None
+
     with get_session() as session:
         if session is None:
             return None
-        if user_email:
+        if resolved:
             stmt = (
                 select(EmailEnrichment)
                 .where(EmailEnrichment.email_id == email_id)
-                .where(EmailEnrichment.user_email == user_email)
+                .where(EmailEnrichment.account_id == resolved)
             )
             row = session.scalars(stmt).first()
         else:
@@ -125,39 +133,50 @@ def get_enrichment(email_id: str, user_email: Optional[str] = None) -> Optional[
 
 
 def list_enrichments(
-    *, user_email: Optional[str] = None, priority: Optional[str] = None, limit: int = 100, offset: int = 0
+    *,
+    account_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    priority: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List enrichment records scoped to user_email, optionally filtered by priority."""
+    """List enrichment records scoped to account_id, optionally filtered by priority."""
     if not is_persistence_enabled():
         return []
+
+    resolved = account_id or user_email or None
+
     with get_session() as session:
         if session is None:
             return []
         stmt = select(EmailEnrichment).order_by(EmailEnrichment.created_at.desc())
-        if user_email:
-            stmt = stmt.where(EmailEnrichment.user_email == user_email)
+        if resolved:
+            stmt = stmt.where(EmailEnrichment.account_id == resolved)
         if priority:
             stmt = stmt.where(EmailEnrichment.priority == priority)
         stmt = stmt.limit(limit).offset(offset)
         return [_row_to_dict(r) for r in session.scalars(stmt).all()]
 
 
-def delete_enrichment(email_id: str, user_email: Optional[str] = None) -> bool:
-    """
-    Hard-delete an email's enrichment record (GDPR right-to-erasure).
-
-    Returns True if a row was deleted. Always writes an audit entry.
-    """
+def delete_enrichment(
+    email_id: str,
+    account_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> bool:
+    """Hard-delete an email's enrichment record (GDPR right-to-erasure)."""
     if not is_persistence_enabled():
         return False
+
+    resolved = account_id or user_email or None
+
     with get_session() as session:
         if session is None:
             return False
-        if user_email:
+        if resolved:
             stmt = (
                 select(EmailEnrichment)
                 .where(EmailEnrichment.email_id == email_id)
-                .where(EmailEnrichment.user_email == user_email)
+                .where(EmailEnrichment.account_id == resolved)
             )
             row = session.scalars(stmt).first()
         else:
@@ -176,17 +195,21 @@ def write_audit(
     *,
     actor: str = "system",
     details: Optional[dict[str, Any]] = None,
+    account_id: Optional[str] = None,
 ) -> None:
-    """
-    Append a compliance audit entry. Never store raw PII in ``details`` —
-    only categories/counts/metadata.
-    """
+    """Append a compliance audit entry. Never store raw PII in details."""
     if not (settings.audit_log_enabled and is_persistence_enabled()):
         return
     with get_session() as session:
         if session is None:
             return
-        session.add(AuditLog(email_id=email_id, action=action, actor=actor, details=details))
+        session.add(AuditLog(
+            email_id=email_id,
+            action=action,
+            actor=actor,
+            details=details,
+            account_id=account_id,
+        ))
         session.commit()
 
 
@@ -223,6 +246,7 @@ def record_metric(
     *,
     success: bool = True,
     sla_met: bool = True,
+    account_id: Optional[str] = None,
 ) -> None:
     """Persist a per-stage processing metric for SLA reporting."""
     if not is_persistence_enabled():
@@ -231,33 +255,37 @@ def record_metric(
         if session is None:
             return
         session.add(ProcessingMetric(
-            email_id=email_id, stage=stage, duration_ms=duration_ms,
-            success=success, sla_met=sla_met,
+            email_id=email_id,
+            stage=stage,
+            duration_ms=duration_ms,
+            success=success,
+            sla_met=sla_met,
+            account_id=account_id,
         ))
         session.commit()
 
 
-def get_tone_profile(user_email: str) -> Optional[dict[str, Any]]:
-    """Return the Tone DNA profile for user_email, or None if not built yet."""
+def get_tone_profile(account_id: str) -> Optional[dict[str, Any]]:
+    """Return the Tone DNA profile for account_id, or None if not built yet."""
     if not is_persistence_enabled():
         return None
     with get_session() as session:
         if session is None:
             return None
-        row = session.get(ToneProfile, user_email)
+        row = session.get(ToneProfile, account_id)
         return dict(row.profile) if row else None
 
 
-def save_tone_profile(user_email: str, profile: dict[str, Any]) -> None:
-    """Insert or overwrite the Tone DNA profile for user_email."""
+def save_tone_profile(account_id: str, profile: dict[str, Any]) -> None:
+    """Insert or overwrite the Tone DNA profile for account_id."""
     if not is_persistence_enabled():
         return
     with get_session() as session:
         if session is None:
             return
-        row = session.get(ToneProfile, user_email)
+        row = session.get(ToneProfile, account_id)
         if row is None:
-            row = ToneProfile(user_email=user_email, profile=profile,
+            row = ToneProfile(account_id=account_id, profile=profile,
                               sample_size=profile.get("sample_size", 0))
             session.add(row)
         else:
@@ -267,11 +295,7 @@ def save_tone_profile(user_email: str, profile: dict[str, Any]) -> None:
 
 
 def purge_expired(retention_days: Optional[int] = None) -> int:
-    """
-    Delete enrichment rows older than the retention window (data minimisation).
-
-    Returns the number of rows deleted. Intended to be run on a schedule.
-    """
+    """Delete enrichment rows older than the retention window (data minimisation)."""
     if not is_persistence_enabled():
         return 0
     days = retention_days if retention_days is not None else settings.data_retention_days
@@ -285,5 +309,6 @@ def purge_expired(retention_days: Optional[int] = None) -> int:
         session.commit()
         deleted = result.rowcount or 0
     if deleted:
-        write_audit(None, "retention_purge", actor="scheduler", details={"deleted": deleted, "older_than_days": days})
+        write_audit(None, "retention_purge", actor="scheduler",
+                    details={"deleted": deleted, "older_than_days": days})
     return deleted

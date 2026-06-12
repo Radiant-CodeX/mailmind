@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BASE } from '@/lib/api';
+import { BASE, apiFetch } from '@/lib/api';
 
 interface IndexStats {
   indexedEmails: number;
@@ -90,8 +90,8 @@ export function RAGSettingsView() {
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
     const [ragRes, toneRes] = await Promise.allSettled([
-      fetch(`${BASE}/api/rag/stats`),
-      fetch(`${BASE}/api/tone-dna/profile`),
+      apiFetch(`${BASE}/api/rag/stats`),
+      apiFetch(`${BASE}/api/tone-dna/profile`),
     ]);
 
     if (ragRes.status === 'fulfilled' && ragRes.value.ok) {
@@ -128,7 +128,7 @@ export function RAGSettingsView() {
   }, [loadStats]);
 
   const pushSettings = (patch: Record<string, unknown>) => {
-    fetch(`${BASE}/api/rag/settings`, {
+    apiFetch(`${BASE}/api/rag/settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -152,7 +152,7 @@ export function RAGSettingsView() {
     setSuccessMsg(null);
     setErrorMsg(null);
     try {
-      const res = await fetch(`${BASE}/api/tone-dna/build`, { method: 'POST' });
+      const res = await apiFetch(`${BASE}/api/tone-dna/build`, { method: 'POST' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.detail || `HTTP ${res.status}`);

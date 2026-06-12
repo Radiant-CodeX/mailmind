@@ -62,7 +62,7 @@ def export_email_data(email_id: str, current_user: str = Depends(get_current_use
     """
     _require_persistence()
     try:
-        record = repo.get_enrichment(email_id, user_email=current_user)
+        record = repo.get_enrichment(email_id, user_email=current_user.primary_email or current_user.id)
         if record is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No data for this email_id.")
         audit = repo.get_audit_log(email_id)
@@ -89,7 +89,7 @@ def erase_email_data(email_id: str, current_user: str = Depends(get_current_user
     """
     _require_persistence()
     try:
-        deleted = repo.delete_enrichment(email_id, user_email=current_user)
+        deleted = repo.delete_enrichment(email_id, user_email=current_user.primary_email or current_user.id)
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No data for this email_id.")
         return {

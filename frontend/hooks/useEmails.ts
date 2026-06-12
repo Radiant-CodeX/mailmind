@@ -6,6 +6,7 @@ import {
   fetchMailbox,
   triageEmailsBatch,
   triagePageBatch,
+  triagePageStream,
   pollNewEmail,
   moveEmailToTrash,
   restoreEmailFromTrash,
@@ -146,6 +147,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   const [error, setError] = useState<string | null>(null);
   const [selectedEmailId, setSelectedEmailId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [triageProgress, setTriageProgress] = useState(0);
   const [pendingTrash, setPendingTrash] = useState<PendingTrash | null>(null);
   // Lazy-init from the persisted preference (guarded for SSR).
   const [sortKey, setSortKeyState] = useState<SortKey>(() => {
@@ -241,15 +244,39 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     const todo = slice.filter((e) => !e.triage);
     if (todo.length === 0) return;
 
-    console.info(`[triage] Scoring ${todo.length} emails`);
-    try {
-      const scores = (await triagePageBatch(todo.map((e) => ({
-        email_id: e.id, sender: e.sender, subject: e.subject,
-        body: e.body, received_at: e.received_at,
-      })))) as TriageLite[];
+    console.info(`[triage] Scoring ${todo.length} emails via stream`);
+    setIsStreaming(true);
+    setTriageProgress(0);
 
-      const byId: Record<string, TriageLite> = {};
-      todo.forEach((e, i) => { if (scores[i]) byId[e.id] = scores[i]; });
+    const byId: Record<string, TriageLite> = {};
+    let completed = 0;
+
+    try {
+      const stream = triagePageStream(
+        todo.map((e) => ({
+          email_id: e.id,
+          sender: e.sender,
+          subject: e.subject,
+          body: e.body,
+          received_at: e.received_at,
+        }))
+      );
+
+      for await (const event of stream) {
+        if (event.done) break;
+        if (event.email_id && event.priority) {
+          byId[event.email_id] = {
+            composite_score: event.composite_score || 0,
+            priority: event.priority,
+            approval_mode: 'SUGGEST',
+            axes: [],
+            dynamic_weights: {},
+          };
+          completed++;
+          setTriageProgress(completed);
+        }
+      }
+
       writeTriageCache(byId);
 
       const apply = (e: Email) =>
@@ -260,7 +287,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setAllEmails((prev) => prev.map(apply));
       setEmailsRaw((prev) => prev.map(apply));
     } catch (err) {
-      console.warn('[triage] Page triage failed', err);
+      console.warn('[triage] Stream triage failed', err);
+    } finally {
+      setIsStreaming(false);
     }
   }, []); // stable — zero deps, reads only from refs
 
@@ -846,5 +875,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     markRead,
     archiveEmail,
     reportSpam,
+    // Streaming triage progress
+    isStreaming,
+    triageProgress,
   };
 }

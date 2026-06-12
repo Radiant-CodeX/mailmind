@@ -4,6 +4,7 @@ import { EmailListItem } from './EmailListItem';
 import { EmailListSkeleton } from './EmailListSkeleton';
 import { SortMenu } from './SortMenu';
 import { FilterMenu } from './FilterMenu';
+import { TriageStreamingPanel } from '../shared/TriageStreamingPanel';
 import { SortKey, MailFilters } from '../../hooks/useEmails';
 
 interface EmailListProps {
@@ -33,6 +34,9 @@ interface EmailListProps {
   onArchiveEmail?: (id: string) => void;
   onReportSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
+  // Streaming triage progress
+  isStreaming?: boolean;
+  triageProgress?: number;
 }
 
 export function EmailList({
@@ -62,6 +66,8 @@ export function EmailList({
   onArchiveEmail,
   onReportSpam,
   onToggleRead,
+  isStreaming = false,
+  triageProgress = 0,
 }: EmailListProps) {
   // Archive/spam/read actions only make sense in the standard mail folders.
   const showActions = !['Trash', 'Sent', 'Drafts', 'Spam'].includes(activeFolder);
@@ -72,6 +78,15 @@ export function EmailList({
       } bg-[var(--bg-surface)] flex flex-col h-full overflow-hidden`}
       id="email-list"
     >
+      {/* Live triage streaming progress */}
+      {(isStreaming || triageProgress > 0) && (
+        <TriageStreamingPanel
+          totalEmails={emails.length}
+          isStreaming={isStreaming}
+          completedEmails={triageProgress}
+        />
+      )}
+
       {/* Header and counter */}
       <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
         <h2 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2 uppercase tracking-wide">
