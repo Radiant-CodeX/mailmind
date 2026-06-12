@@ -25,9 +25,8 @@ jobs:
           docker push ${{ secrets.AZURE_REGISTRY_SERVER }}/backend:latest
       
       - name: Azure Login
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+        run: |
+          az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
       
       - name: Deploy to Container Instances
         run: |
