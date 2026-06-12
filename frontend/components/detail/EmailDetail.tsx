@@ -327,6 +327,7 @@ interface EmailDetailProps {
   confirmSelectedCommitments: () => void;
   checkConflict: (deadline: string | null) => CalendarEvent | null;
   onClose: () => void;
+  attachments?: Attachment[];
   showPipeline?: boolean;
   provider?: "google" | "microsoft";
 }
