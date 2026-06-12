@@ -359,7 +359,7 @@ def _refresh_google_token(refresh_token: str) -> dict[str, Any] | None:
 
 
 class GmailClient:
-    """Gmail client with the same surface as GraphClient (mock + live).
+    """Gmail client with the same surface as GraphClient (mock + live)."""
 
     def __init__(self, settings_obj=settings, *, access_token: str | None = None, refresh_token: str | None = None):
         self.settings = settings_obj
