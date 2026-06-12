@@ -18,7 +18,7 @@ import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
 import { checkAuthStatus, logoutUser, createCalendarEvent, AccountInfo } from '../../lib/api';
-import { rememberLogin, getRememberMe, Provider } from '../../lib/session';
+import { rememberLogin, getRememberMe, clearRememberedLogin, Provider } from '../../lib/session';
 import { userStorage } from '../../lib/userStorage';
 import { CalendarEvent } from '../../lib/types';
 

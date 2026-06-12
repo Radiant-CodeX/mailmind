@@ -331,6 +331,13 @@ export async function generateEmailDraft(
   return res.json();
 }
 
+/** Fetch attachment metadata for an email. */
+export async function fetchAttachments(emailId: string) {
+  const res = await apiFetch(`${BASE}/api/emails/${encodeURIComponent(emailId)}/attachments`);
+  if (!res.ok) throw new Error("Failed to fetch attachments");
+  return res.json();
+}
+
 /** Trigger a browser download of an email attachment. */
 export function downloadAttachment(
   emailId: string,
@@ -344,7 +351,6 @@ export function downloadAttachment(
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(objectUrl);
 }
 
 /** Check if a new email has arrived — returns latest email id + received_at. */
@@ -359,7 +365,7 @@ export async function pollNewEmail(): Promise<{
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return { has_new: false, latest_id: null, received_at: null };
-    return persistSessionFromResponse(await res.json());
+    return await res.json();
   } catch {
     return { has_new: false, latest_id: null, received_at: null };
   }
@@ -682,7 +688,7 @@ export async function loginPoll(deviceCode: string) {
       throw new Error(errorMessage);
     }
 
-    return persistSessionFromResponse(await res.json());
+    return await res.json();
   } catch (err) {
     throw err;
   }
@@ -730,7 +736,7 @@ export async function microsoftLoginInitiate() {
     } catch {}
     throw new Error(message);
   }
-  return persistSessionFromResponse(await res.json());
+  return await res.json();
 }
 
 export async function microsoftLoginPoll(state: string) {
@@ -747,7 +753,7 @@ export async function microsoftLoginPoll(state: string) {
     } catch {}
     throw new Error(message);
   }
-  return persistSessionFromResponse(await res.json());
+  return await res.json();
 }
 
 export async function googleLoginInitiate(email?: string) {
@@ -766,7 +772,7 @@ export async function googleLoginInitiate(email?: string) {
     }
     throw new Error(message);
   }
-  return persistSessionFromResponse(await res.json());
+  return await res.json();
 }
 
 export async function googleLoginPoll(state: string) {
@@ -785,7 +791,7 @@ export async function googleLoginPoll(state: string) {
     }
     throw new Error(message);
   }
-  return persistSessionFromResponse(await res.json());
+  return await res.json();
 }
 
 // ── Account management (v3) ──────────────────────────────────────────────────

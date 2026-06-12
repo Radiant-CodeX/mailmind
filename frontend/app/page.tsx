@@ -252,7 +252,7 @@ export default function LoginPage() {
       } else {
         handleMicrosoft(true);
       }
-    } catch {
+    } catch (err) {
       setLoading(false);
       setError(err instanceof Error ? err.message : 'Quick login failed. Please try again.');
       if (remembered.provider === "google") {
