@@ -53,6 +53,7 @@ jobs:
             --memory 1.5 \
             --ports 8000 \
             --protocol TCP \
+            --dns-name-label mailmind-backend \
             --environment-variables \
               DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               QUEUE_BACKEND="memory" \
