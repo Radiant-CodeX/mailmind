@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
 
 logger = logging.getLogger(__name__)
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -34,14 +34,7 @@ from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
 from app.services.draft_service import DraftService
 from app.services.graph import GraphClient
-from app.services.mail_provider import (
-    active_email,
-    active_provider,
-    clear_provider,
-    get_mail_client,
-    is_active,
-    set_provider,
-)
+from app.services.account_service import AccountService
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
 from app.services.scorers import (
     ActionTypeScorer,
@@ -60,7 +53,8 @@ router = APIRouter(prefix="/api")
 rate_limit_store: dict[str, list[datetime]] = {}
 
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_default_account
+from app.db.base import get_db
 
 # Cache of evaluation predictions keyed by email text — the golden dataset is
 # fixed, so after the first run every re-run is instant.
@@ -100,26 +94,131 @@ def _validate_approval_token(token: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid approval token")
 
 
-def _current_user_profile(fallback_email: str | None = None) -> dict[str, str | None]:
-    """Best-effort provider profile for the app shell."""
-    profile: dict[str, str | None] = {
-        "email": fallback_email,
-        "display_name": None,
-        "photo_url": None,
-    }
+
+def _finish_oauth_connect(
+    *,
+    request: Request,
+    provider: str,
+    email: str,
+    provider_account_id: str,
+    access_token: str,
+    refresh_token: str,
+    token_expires_at,
+    display_name: str | None,
+    picture_url: str | None = None,
+) -> Response:
+    """
+    Shared post-OAuth logic:
+      1. Upsert User (by provider_account_id dedup)
+      2. Upsert OAuthAccount
+      3. Create Device (from User-Agent)
+      4. Create UserSession + QuickLoginToken
+      5. Return HTMLResponse with mm_session + mm_quick cookies set directly on it
+    """
+    from app.api.deps import _set_quick_cookie, _set_session_cookie
+    from app.db.database import get_db as _get_db
+    from app.db.models import OAuthAccount, User
+    from app.services.session_service import SessionService, DBSessionBackend
+    from app.services.token_encryption import encrypt_token
+
+    db = next(_get_db())
     try:
-        client = get_mail_client()
-        if hasattr(client, "get_user_profile"):
-            provider_profile = client.get_user_profile()
-            if isinstance(provider_profile, dict):
-                profile.update({
-                    "email": provider_profile.get("email") or fallback_email,
-                    "display_name": provider_profile.get("display_name"),
-                    "photo_url": provider_profile.get("photo_url"),
-                })
-    except Exception as exc:
-        logger.warning("[auth] Profile fetch failed: %s", exc)
-    return profile
+        # ── Upsert OAuthAccount (dedup key: provider + provider_account_id) ─
+        account = (
+            db.query(OAuthAccount)
+            .filter_by(provider=provider, provider_account_id=provider_account_id)
+            .first()
+        )
+        if account:
+            user = db.query(User).filter_by(id=account.user_id).first()
+        else:
+            # New account — find or create a User
+            user = User(display_name=display_name, primary_email=email)
+            db.add(user)
+            db.flush()
+            account = OAuthAccount(
+                user_id=user.id,
+                provider=provider,
+                provider_account_id=provider_account_id,
+                account_email=email,
+                is_default=True,
+            )
+            db.add(account)
+            db.flush()
+
+        # Update tokens and display info
+        account.access_token_encrypted = encrypt_token(access_token) if access_token else None
+        account.refresh_token_encrypted = encrypt_token(refresh_token) if refresh_token else None
+        account.token_expires_at = token_expires_at
+        account.account_email = email
+        if picture_url:
+            account.picture_url = picture_url
+        if display_name:
+            account.display_name = display_name
+            user.display_name = display_name
+        user.primary_email = user.primary_email or email
+        from app.services.session_service import _now
+        user.last_login_at = _now()
+        db.flush()
+
+        # ── Device + sessions ─────────────────────────────────────────────
+        ua = request.headers.get("user-agent", "")
+        al = request.headers.get("accept-language", "")
+        device_id = SessionService.get_or_create_device(db, user.id, ua, al)
+
+        svc = SessionService(DBSessionBackend(db))
+        session_token = svc.create_session(user.id)
+        quick_token = svc.create_quick_login(user.id, device_id)
+        logger.info("[oauth_connect] Created session_token (first 20 chars): %s", session_token[:20])
+        logger.info("[oauth_connect] Created quick_token (first 20 chars): %s", quick_token[:20])
+
+        db.commit()
+
+        # Verify tokens were persisted
+        lookup_user = svc.get_user_id_from_session(session_token)
+        logger.info("[oauth_connect] Lookup after commit: user_id=%s (expected %s)", lookup_user, user.id)
+
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
+    html_content = _connected_screen(email, dashboard, provider=provider)
+    # Build a real HTMLResponse and set cookies directly on it — this is the
+    # only reliable way to return both a body AND Set-Cookie headers in FastAPI.
+    resp = HTMLResponse(content=html_content, status_code=200)
+    _set_session_cookie(resp, session_token, settings.session_ttl_seconds)
+    _set_quick_cookie(resp, quick_token, settings.quick_login_ttl_seconds)
+    cookie_headers = [h for h in resp.raw_headers if h[0].lower() == b'set-cookie']
+    logger.info("[_finish_oauth_connect] Set-Cookie headers count=%d headers=%s",
+                len(cookie_headers), [h[1][:60] for h in cookie_headers])
+    return resp
+
+
+def _auth_status_payload(user) -> dict:
+    """Build the /auth/status success response from a User ORM object."""
+    default_account = next(
+        (a for a in (user.accounts or []) if a.is_default),
+        (user.accounts[0] if user.accounts else None),
+    )
+    return {
+        "status": "authenticated",
+        "authenticated": True,
+        "user": {
+            "id": user.id,
+            "display_name": user.display_name,
+            "primary_email": user.primary_email,
+        },
+        "default_account": {
+            "id": default_account.id,
+            "provider": default_account.provider,
+            "email": default_account.account_email,
+            "nickname": default_account.nickname,
+            "color": default_account.color,
+        } if default_account else None,
+    }
 
 
 @router.get("/health")
@@ -158,18 +257,19 @@ def ready() -> dict[str, Any]:
 @router.get("/mailbox", response_model=EmailPage)
 def get_mailbox(
     folder: str = "inbox", limit: int = 50, page_token: str | None = None, q: str | None = None,
-    _user: str = Depends(get_current_user),
+    account=Depends(get_default_account),
 ) -> dict[str, Any]:
     """Paginated listing for any folder, with optional server-side search."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     try:
         return client.list_emails(folder=folder, limit=limit, page_token=page_token, query=q)
     except Exception as e:
+        logger.exception("[mailbox] list failed")
         raise HTTPException(status_code=400, detail=f"Failed to list {folder}: {str(e)}")
 
 
 @router.get("/inbox/poll")
-def poll_new_email(_user: str = Depends(get_current_user)) -> dict[str, Any]:
+def poll_new_email(account=Depends(get_default_account)) -> dict[str, Any]:
     """
     Lightweight new-email check for both Microsoft and Google accounts.
 
@@ -180,7 +280,7 @@ def poll_new_email(_user: str = Depends(get_current_user)) -> dict[str, Any]:
     Cost: 1 Graph/Gmail API call, no LLM, no DB write.
     """
     try:
-        client = get_mail_client()
+        client = AccountService.get_adapter(account)
         # Fetch only 1 email — just the header fields, no body needed
         page = client.list_emails(folder="inbox", limit=1)
         emails = page.get("emails") or []
@@ -200,12 +300,12 @@ def poll_new_email(_user: str = Depends(get_current_user)) -> dict[str, Any]:
 
 @router.get("/emails/{email_id}/attachments/{attachment_id}")
 def download_attachment(email_id: str, attachment_id: str, filename: str = "attachment",
-                        _user: str = Depends(get_current_user)):
+                        account=Depends(get_default_account)):
     """Stream an email attachment for download (Gmail or Microsoft Graph)."""
     import base64
     from fastapi.responses import Response
 
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     if not hasattr(client, "get_attachment"):
         raise HTTPException(status_code=501, detail="Attachments not supported for this provider")
 
@@ -229,16 +329,16 @@ def download_attachment(email_id: str, attachment_id: str, filename: str = "atta
 
 
 @router.get("/emails", response_model=list[EmailPayload])
-def get_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
+def get_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
     """Fetch recent inbox messages from the active provider (Outlook or Gmail)."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     return client.get_inbox_emails(limit=limit)
 
 
 @router.get("/emails/sent", response_model=list[EmailPayload])
-def get_sent_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
+def get_sent_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
     """Fetch recent sent messages from the active provider (Outlook or Gmail)."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     raw_emails = client.fetch_sent_emails(days=30)
 
     formatted = []
@@ -271,30 +371,30 @@ def get_sent_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> 
 
 
 @router.get("/emails/drafts", response_model=list[EmailPayload])
-def get_draft_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
+def get_draft_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
     """Fetch emails from the Drafts folder."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     return client.get_draft_emails(limit=limit)
 
 
 @router.get("/emails/spam", response_model=list[EmailPayload])
-def get_spam_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
+def get_spam_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
     """Fetch emails from the Junk/Spam folder."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     return client.get_spam_emails(limit=limit)
 
 
 @router.get("/emails/trash", response_model=list[EmailPayload])
-def get_trash_emails(limit: int = 10, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
+def get_trash_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
     """Fetch emails from the Deleted Items folder."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     return client.get_trash_emails(limit=limit)
 
 
 @router.post("/emails/{email_id}/reply")
-def send_email_reply(email_id: str, payload: ReplyRequest, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def send_email_reply(email_id: str, payload: ReplyRequest, account=Depends(get_default_account)) -> dict[str, Any]:
     """Send a reply to the specified email via the active provider."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     try:
         client.send_reply(email_id, payload.comment)
         return {"success": True}
@@ -303,63 +403,63 @@ def send_email_reply(email_id: str, payload: ReplyRequest, _user: str = Depends(
 
 
 @router.post("/emails/{email_id}/read")
-def set_read_status(email_id: str, payload: dict[str, Any] | None = None, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def set_read_status(email_id: str, payload: dict[str, Any] | None = None, account=Depends(get_default_account)) -> dict[str, Any]:
     """Mark an email read or unread (default: read)."""
     read = True if payload is None else bool(payload.get("read", True))
     try:
-        get_mail_client().mark_read(email_id, read)
+        AccountService.get_adapter(account).mark_read(email_id, read)
         return {"success": True, "is_read": read}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to update read status: {str(e)}")
 
 
 @router.post("/emails/{email_id}/archive")
-def archive_email(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def archive_email(email_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
     """Archive an email (out of Inbox, not deleted)."""
     try:
-        get_mail_client().archive(email_id)
+        AccountService.get_adapter(account).archive(email_id)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to archive: {str(e)}")
 
 
 @router.post("/emails/{email_id}/spam")
-def report_spam(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def report_spam(email_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
     """Report an email as spam (move to Junk/Spam)."""
     try:
-        get_mail_client().report_spam(email_id)
+        AccountService.get_adapter(account).report_spam(email_id)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to report spam: {str(e)}")
 
 
 @router.post("/emails/{email_id}/forward")
-def forward_email(email_id: str, payload: dict[str, str], _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def forward_email(email_id: str, payload: dict[str, str], account=Depends(get_default_account)) -> dict[str, Any]:
     """Forward an email to another recipient."""
     to = (payload or {}).get("to", "").strip()
     if not to:
         raise HTTPException(status_code=400, detail="'to' recipient is required")
     try:
-        get_mail_client().forward_email(email_id, to, (payload or {}).get("comment", ""))
+        AccountService.get_adapter(account).forward_email(email_id, to, (payload or {}).get("comment", ""))
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to forward: {str(e)}")
 
 
 @router.post("/emails/{email_id}/reply-all")
-def reply_all_email(email_id: str, payload: ReplyRequest, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def reply_all_email(email_id: str, payload: ReplyRequest, account=Depends(get_default_account)) -> dict[str, Any]:
     """Reply to everyone on an email thread."""
     try:
-        get_mail_client().reply_all(email_id, payload.comment)
+        AccountService.get_adapter(account).reply_all(email_id, payload.comment)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to reply all: {str(e)}")
 
 
 @router.post("/emails/{email_id}/restore")
-def restore_email_from_trash(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def restore_email_from_trash(email_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
     """Restore the specified email from Trash back to Inbox."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     try:
         client.restore_from_trash(email_id)
         return {"success": True}
@@ -368,9 +468,9 @@ def restore_email_from_trash(email_id: str, _user: str = Depends(get_current_use
 
 
 @router.post("/emails/{email_id}/trash")
-def move_email_to_trash(email_id: str, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def move_email_to_trash(email_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
     """Move the specified email to the Deleted Items (Trash) folder."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     try:
         client.move_to_trash(email_id)
         return {"success": True}
@@ -379,9 +479,9 @@ def move_email_to_trash(email_id: str, _user: str = Depends(get_current_user)) -
 
 
 @router.post("/emails/compose")
-def compose_email(payload: ComposeRequest, _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def compose_email(payload: ComposeRequest, account=Depends(get_default_account)) -> dict[str, Any]:
     """Compose and send a new email via the active provider."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     try:
         client.send_new_email(
             to=payload.to,
@@ -486,7 +586,6 @@ def login_poll(payload: dict[str, str]) -> dict[str, Any]:
     status_val = state.get("status")
     if status_val == "success":
         _device_flow_status.pop(device_code, None)
-        set_provider("microsoft", state.get("user_principal_name"))
         return {
             "status": "success",
             "authenticated": True,
@@ -610,27 +709,48 @@ def _connected_screen(email: str, dashboard_url: str, provider: str = "microsoft
 </html>"""
 
 
-@router.get("/auth/microsoft/callback", response_class=HTMLResponse)
-def microsoft_callback(request: Request) -> str:
-    """OAuth redirect target — exchanges the code and stores the session."""
+@router.get("/auth/microsoft/callback")
+def microsoft_callback(request: Request) -> Response:
+    """OAuth redirect target — exchanges the code, upserts User/OAuthAccount, issues session cookies."""
     from app.services.graph import exchange_ms_code, ms_auth_status
+
     params = dict(request.query_params)
     state = params.get("state", "")
     if params.get("error"):
         if state:
             ms_auth_status[state] = {"status": "error", "error": params.get("error_description", params["error"])}
-        return f"<html><body><h3>Sign-in failed: {params.get('error')}</h3>You can close this window.</body></html>"
+        return HTMLResponse(
+            content=f"<html><body><h3>Sign-in failed: {params.get('error')}</h3>You can close this window.</body></html>",
+            status_code=400,
+        )
+
     try:
         info = exchange_ms_code(state, params)
-        set_provider("microsoft", info.get("email"))
-        ms_auth_status[state] = {"status": "success", "email": info.get("email")}
-        dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
         email = info.get("email") or ""
-        return _connected_screen(email, dashboard)
+        provider_account_id = info.get("provider_account_id") or info.get("object_id") or email
+
+        resp = _finish_oauth_connect(
+            request=request,
+            provider="microsoft",
+            email=email,
+            provider_account_id=provider_account_id,
+            access_token=info.get("access_token", ""),
+            refresh_token=info.get("refresh_token", ""),
+            token_expires_at=info.get("token_expires_at"),
+            display_name=info.get("display_name"),
+            picture_url=info.get("picture_url") or info.get("picture"),
+        )
+
+        ms_auth_status[state] = {"status": "success", "email": email}
+        return resp
     except Exception as e:
         if state:
             ms_auth_status[state] = {"status": "error", "error": str(e)}
-        return f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>"
+        logger.exception("[ms_callback] failed: %s", e)
+        return HTMLResponse(
+            content=f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>",
+            status_code=400,
+        )
 
 
 @router.post("/auth/microsoft/poll")
@@ -674,27 +794,55 @@ def google_login_initiate(payload: dict[str, str] | None = None) -> dict[str, An
     return {"status": "pending", "auth_url": build_auth_url(state), "state": state}
 
 
-@router.get("/auth/google/callback", response_class=HTMLResponse)
-def google_callback(code: str | None = None, state: str | None = None, error: str | None = None) -> str:
-    """OAuth redirect target — exchanges the code and stores the session."""
+@router.get("/auth/google/callback")
+def google_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+) -> Response:
+    """OAuth redirect target — exchanges the code, upserts User/OAuthAccount, issues session cookies."""
     from app.services.gmail import exchange_code, google_auth_status
 
     if error:
         if state:
             google_auth_status[state] = {"status": "error", "error": error}
-        return f"<html><body><h3>Sign-in failed: {error}</h3>You can close this window.</body></html>"
+        return HTMLResponse(
+            content=f"<html><body><h3>Sign-in failed: {error}</h3>You can close this window.</body></html>",
+            status_code=400,
+        )
     if not code or not state:
-        return "<html><body><h3>Missing code/state</h3></body></html>"
+        return HTMLResponse(content="<html><body><h3>Missing code/state</h3></body></html>", status_code=400)
+
     try:
+        logger.info(f"[google_callback] Received code (prefix: {code[:20]}...), state={state}")
         info = exchange_code(code)
-        set_provider("google", info.get("email"))
-        google_auth_status[state] = {"status": "success", "email": info.get("email")}
-        dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
+        logger.info(f"[google_callback] Successfully exchanged code for {info.get('email')}")
         email = info.get("email") or ""
-        return _connected_screen(email, dashboard, provider="google")
+        provider_account_id = info.get("sub") or email
+
+        resp = _finish_oauth_connect(
+            request=request,
+            provider="google",
+            email=email,
+            provider_account_id=provider_account_id,
+            access_token=info.get("access_token", ""),
+            refresh_token=info.get("refresh_token", ""),
+            token_expires_at=info.get("token_expires_at"),
+            display_name=info.get("display_name") or info.get("name"),
+            picture_url=info.get("picture"),
+        )
+
+        google_auth_status[state] = {"status": "success", "email": email}
+        return resp
     except Exception as e:
-        google_auth_status[state] = {"status": "error", "error": str(e)}
-        return f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>"
+        if state:
+            google_auth_status[state] = {"status": "error", "error": str(e)}
+        logger.exception("[google_callback] failed: %s", e)
+        return HTMLResponse(
+            content=f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>",
+            status_code=400,
+        )
 
 
 @router.post("/auth/google/poll")
@@ -717,99 +865,221 @@ def google_poll(payload: dict[str, str]) -> dict[str, Any]:
     return {"status": "pending", "authenticated": False}
 
 
-@router.post("/auth/quick-login")
-def quick_login(payload: dict[str, str] | None = None) -> dict[str, Any]:
-    """One-tap login for a remembered account — no device code / password.
-
-    Uses the persisted refresh token (Microsoft MSAL cache or Google token) to
-    resume the session silently without requiring the user to re-authenticate.
-    """
-    email = (payload or {}).get("email")
-    provider = (payload or {}).get("provider") or "microsoft"
-
-    # Live Google: resume silently from the persisted Google refresh token.
-    if provider == "google":
-        from app.services.gmail import _refresh_access_token, current_google_email, has_google_session
-        if not has_google_session() or not _refresh_access_token():
-            raise HTTPException(status_code=400, detail="No Google session to resume. Please connect Google again.")
-        set_provider("google", current_google_email() or email)
-        return {"status": "authenticated", "authenticated": True, "user_principal_name": active_email()}
-
-    # Live Microsoft: resume the delegated session silently via the persisted
-    # refresh token. Delegated tokens work with personal accounts and avoid the
-    # app-only Conditional Access block (AADSTS53003).
-    try:
-        info = client.quick_login(email)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    set_provider("microsoft", info.get("user_principal_name") or email)
-    return {
-        "status": "authenticated",
-        "authenticated": True,
-        "user_principal_name": info.get("user_principal_name") or email,
-    }
-
-
 @router.get("/auth/status")
-def auth_status() -> dict[str, Any]:
-    """Check the current login status and user principal name."""
-    from app.services.graph import _user_token_cache
+def auth_status(
+    request: Request,
+    response: Response,
+    mm_session: str | None = Cookie(default=None),
+    mm_quick: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    logger.info(
+        "[auth/status] RAW COOKIE HEADER = %s",
+        request.headers.get("cookie")
+    )
+    """
+    Check authentication status via mm_session cookie only.
+    mm_quick is intentionally NOT auto-rotated here — the user must explicitly
+    press the Quick Login button, which calls POST /auth/quick-login.
+    This ensures session-logout shows the login page rather than silently
+    resuming the session in a new tab.
+    """
+    from app.db.database import get_db as _get_db
+    from app.db.models import User
+    from app.services.session_service import DBSessionBackend, SessionService
 
-    # A logged-out session is never authenticated, even if a resumable refresh
-    # token still exists on disk (that's only used by Quick Login).
-    if not is_active():
-        return {
-            "status": "unauthenticated",
-            "authenticated": False,
-            "user_principal_name": None,
-            "provider": active_provider(),
-        }
+    db = next(_get_db())
+    try:
+        svc = SessionService(DBSessionBackend(db))
 
-    # Live Google session.
-    if active_provider() == "google":
-        from app.services.gmail import current_google_email, has_google_session
-        if has_google_session():
-            email = current_google_email()
-            return {
-                "status": "authenticated",
-                "authenticated": True,
-                "user_principal_name": email,
-                "provider": "google",
-                "profile": _current_user_profile(email),
-            }
-        return {"status": "unauthenticated", "authenticated": False, "user_principal_name": None, "provider": "google"}
+        logger.info("[auth/status] mm_session=%s mm_quick=%s",
+                    bool(mm_session), bool(mm_quick))
 
-    # Live Microsoft session.
-    import time
-    now = time.time()
-    if _user_token_cache["access_token"] and now < (_user_token_cache["expires_at"] - 60):
-        email = _user_token_cache["user_principal_name"] or "authenticated.user@outlook.com"
-        return {
-            "status": "authenticated",
-            "authenticated": True,
-            "user_principal_name": email,
-            "provider": "microsoft",
-            "profile": _current_user_profile(email),
-        }
-    return {
-        "status": "unauthenticated",
-        "authenticated": False,
-        "user_principal_name": None,
-        "provider": "microsoft",
-    }
+        if mm_session:
+            user_id = svc.get_user_id_from_session(mm_session)
+            logger.info("[auth/status] session lookup → user_id=%s", user_id)
+            if user_id:
+                user = db.query(User).filter_by(id=user_id).first()
+                if user:
+                    return _auth_status_payload(user)
+
+        # No valid session — check if quick login is available (but don't activate it).
+        quick_available = False
+        if mm_quick:
+            result = svc.try_quick_login(mm_quick)
+            quick_available = bool(result)
+            logger.info("[auth/status] quick_login_available=%s", quick_available)
+
+        logger.info("[auth/status] → unauthenticated")
+        return {"status": "unauthenticated", "authenticated": False, "user": None,
+                "quick_login_available": quick_available}
+    finally:
+        db.close()
+
+
+@router.post("/auth/quick-login")
+def auth_quick_login(
+    response: Response,
+    mm_quick: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    """
+    Explicit quick-login: validates mm_quick, creates a new session, rotates tokens.
+    Only called when the user explicitly presses the Quick Login button.
+    """
+    from app.api.deps import _set_quick_cookie, _set_session_cookie
+    from app.db.database import get_db as _get_db
+    from app.db.models import User
+    from app.services.session_service import DBSessionBackend, SessionService
+
+    if not mm_quick:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No quick-login token")
+
+    db = next(_get_db())
+    try:
+        svc = SessionService(DBSessionBackend(db))
+        result = svc.try_quick_login(mm_quick)
+        if not result:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Quick-login token expired or invalid")
+
+        user_id, new_quick_token = result
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+        new_session = svc.create_session(user_id)
+        _set_session_cookie(response, new_session, settings.session_ttl_seconds)
+        _set_quick_cookie(response, new_quick_token, settings.quick_login_ttl_seconds)
+        db.commit()
+        logger.info("[quick-login] success for user_id=%s", user_id)
+        return _auth_status_payload(user)
+    finally:
+        db.close()
+
+
+@router.post("/auth/logout-session")
+def auth_logout_session(
+    response: Response,
+    mm_session: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    """
+    Sign out of current session only — keep Quick Login enabled.
+    Invalidates mm_session in the DB, deletes only the mm_session cookie.
+    mm_quick is preserved so the user is signed back in automatically on return.
+    """
+    from app.db.database import get_db as _get_db
+    from app.services.session_service import DBSessionBackend, SessionService
+
+    db = next(_get_db())
+    try:
+        svc = SessionService(DBSessionBackend(db))
+        if mm_session:
+            svc.invalidate_session(mm_session)
+        db.commit()
+    finally:
+        db.close()
+
+    response.delete_cookie("mm_session", path="/")
+    return {"status": "logged_out_session"}
 
 
 @router.post("/auth/logout")
-def auth_logout() -> dict[str, Any]:
-    """Log out the current user session by clearing token cache."""
-    from app.services.gmail import sign_out_google
-    from app.services.graph import _user_token_cache
-    _user_token_cache["access_token"] = None
-    _user_token_cache["expires_at"] = 0.0
-    _user_token_cache["user_principal_name"] = None
-    sign_out_google()  # keeps the refresh token so Quick Login can resume
-    clear_provider()   # reset provider + mark the session logged out
+def auth_logout(
+    response: Response,
+    mm_session: str | None = Cookie(default=None),
+    mm_quick: str | None = Cookie(default=None),
+) -> dict[str, Any]:
+    """
+    Full sign-out — disables Quick Login.
+    Invalidates session + quick-login token in DB, deletes both cookies.
+    User must authenticate via Google/Microsoft OAuth next time.
+    """
+    from app.api.deps import _clear_auth_cookies
+    from app.db.database import get_db as _get_db
+    from app.services.session_service import DBSessionBackend, SessionService
+
+    db = next(_get_db())
+    try:
+        svc = SessionService(DBSessionBackend(db))
+        svc.logout(mm_session, mm_quick)
+        db.commit()
+    finally:
+        db.close()
+
+    _clear_auth_cookies(response, clear_quick=True)
     return {"status": "logged_out"}
+
+
+# ── Account management (v3) ──────────────────────────────────────────────────
+
+
+@router.get("/accounts")
+def list_accounts(
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+) -> list[dict[str, Any]]:
+    """Return all connected email accounts for the signed-in user."""
+    from app.services.account_service import AccountService
+    return AccountService.list_accounts(db, current_user.id)
+
+
+@router.patch("/accounts/{account_id}")
+def update_account(
+    account_id: str,
+    payload: dict[str, Any],
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Update display metadata (nickname, color, sync_enabled) for an account."""
+    from app.services.account_service import AccountService
+    account = AccountService.get_account(db, current_user.id, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    AccountService.update_metadata(
+        db,
+        account,
+        nickname=payload.get("nickname"),
+        color=payload.get("color"),
+        sync_enabled=payload.get("sync_enabled"),
+    )
+    db.commit()
+    return AccountService._serialize(account)
+
+
+@router.post("/accounts/{account_id}/set-default")
+def set_default_account(
+    account_id: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Mark this account as the default (used on fresh tab load)."""
+    from app.services.account_service import AccountService
+    try:
+        AccountService.set_default(db, current_user.id, account_id)
+        db.commit()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"success": True, "default_account_id": account_id}
+
+
+@router.delete("/accounts/{account_id}")
+def disconnect_account(
+    account_id: str,
+    current_user=Depends(get_current_user),
+    db=Depends(get_db),
+) -> dict[str, Any]:
+    """Soft-disconnect an account (wipes tokens, keeps row for audit)."""
+    from app.services.account_service import AccountService
+    account = AccountService.get_account(db, current_user.id, account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found.")
+    AccountService.disconnect(db, account)
+    db.commit()
+    return {"success": True}
+
+
+def get_db():
+    """FastAPI dependency shim — delegates to app.db.database.get_db."""
+    from app.db.database import get_db as _get_db
+    yield from _get_db()
 
 
 @router.get("/webhook", response_class=PlainTextResponse)
@@ -863,12 +1133,12 @@ def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rat
 
 
 @router.post("/classify", response_model=ClassificationResult)
-def classify_text(payload: RAGQuery, current_user: str = Depends(get_current_user)) -> ClassificationResult:
+def classify_text(payload: RAGQuery, current_user=Depends(get_current_user)) -> ClassificationResult:
     """Classify email text to assign priority, category, and confidence."""
     import hashlib
 
     from app.services.cache import classification_cache
-    key = f"classify:{current_user}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"classify:{current_user.id}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = classification_cache.get(key)
     if cached is not None:
         return cached
@@ -881,17 +1151,18 @@ def classify_text(payload: RAGQuery, current_user: str = Depends(get_current_use
 
 
 @router.get("/thread/{thread_id}")
-def fetch_thread(thread_id: str, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
-    """Fetch recent messages for a given thread from the Graph stub client."""
-    fetcher = ThreadFetcher(GraphClient())
+def fetch_thread(thread_id: str, account=Depends(get_default_account)) -> list[dict[str, Any]]:
+    """Fetch recent messages for a given thread from the provider."""
+    client = AccountService.get_adapter(account)
+    fetcher = ThreadFetcher(client)
     return fetcher.fetch(thread_id)
 
 
 @router.get("/calendar", response_model=list[CalendarEvent])
-def fetch_calendar(days: int = 7, _user: str = Depends(get_current_user)) -> list[CalendarEvent]:
+def fetch_calendar(days: int = 7, account=Depends(get_default_account)) -> list[CalendarEvent]:
     """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
     try:
-        fetcher = CalendarFetcher(get_mail_client())
+        fetcher = CalendarFetcher(AccountService.get_adapter(account))
         return fetcher.fetch_next_events(days=days)
     except Exception as e:
         logger.warning(f"Calendar fetch failed: {str(e)}")
@@ -899,7 +1170,7 @@ def fetch_calendar(days: int = 7, _user: str = Depends(get_current_user)) -> lis
 
 
 @router.post("/calendar/event")
-def create_calendar_event(payload: dict[str, Any], _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def create_calendar_event(payload: dict[str, Any], account=Depends(get_default_account)) -> dict[str, Any]:
     """Create a calendar event in the user's Outlook or Google calendar."""
     title = (payload.get("title") or "").strip()
     start = (payload.get("start_time") or "").strip()
@@ -911,7 +1182,7 @@ def create_calendar_event(payload: dict[str, Any], _user: str = Depends(get_curr
     if not start:
         raise HTTPException(status_code=400, detail="start_time is required")
 
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)
     try:
         from datetime import datetime
         start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
@@ -933,31 +1204,31 @@ def create_calendar_event(payload: dict[str, Any], _user: str = Depends(get_curr
 
 
 @router.get("/tasks")
-def list_tasks(limit: int = 20, _user: str = Depends(get_current_user)) -> list[dict[str, Any]]:
+def list_tasks(limit: int = 20, account=Depends(get_default_account)) -> list[dict[str, Any]]:
     """List the user's tasks from the active provider (Microsoft To Do or Google Tasks)."""
-    return get_mail_client().list_tasks(limit=limit)
+    return AccountService.get_adapter(account).list_tasks(limit=limit)
 
 
 @router.post("/tasks")
-def create_task(payload: dict[str, str], _user: str = Depends(get_current_user)) -> dict[str, Any]:
+def create_task(payload: dict[str, str], account=Depends(get_default_account)) -> dict[str, Any]:
     """Create a task in the active provider's task list."""
     title = (payload or {}).get("title", "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
     try:
-        url = get_mail_client().create_todo("manual", title)
+        url = AccountService.get_adapter(account).create_todo("manual", title)
         return {"success": True, "url": url}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to create task: {str(e)}")
 
 
 @router.post("/rag/retrieve", response_model=list[PrecedentItem])
-def rag_retrieve(query: RAGQuery, current_user: str = Depends(get_current_user)) -> list[PrecedentItem]:
+def rag_retrieve(query: RAGQuery, current_user=Depends(get_current_user)) -> list[PrecedentItem]:
     """Retrieve precedent emails similar to the provided email text."""
     import hashlib
 
     from app.services.cache import precedents_cache
-    key = f"retrieve:{current_user}:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"retrieve:{current_user.id}:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
         return cached
@@ -970,12 +1241,12 @@ def rag_retrieve(query: RAGQuery, current_user: str = Depends(get_current_user))
 
 
 @router.post("/rag/inject")
-def rag_inject(query: RAGQuery, current_user: str = Depends(get_current_user)) -> dict[str, Any]:
+def rag_inject(query: RAGQuery, current_user=Depends(get_current_user)) -> dict[str, Any]:
     """Create a prompt that injects precedent email context for response drafting."""
     import hashlib
 
     from app.services.cache import precedents_cache
-    key = f"inject:{current_user}:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"inject:{current_user.id}:{hashlib.sha256(query.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
         return cached
@@ -989,14 +1260,12 @@ def rag_inject(query: RAGQuery, current_user: str = Depends(get_current_user)) -
 
 
 @router.post("/rag/draft", response_model=DraftResponse)
-def generate_draft(payload: DraftRequest, _user: str = Depends(get_current_user)) -> DraftResponse:
+def generate_draft(payload: DraftRequest, account=Depends(get_default_account)) -> DraftResponse:
     """Generate an email response draft using a selected style (standard, formal, or indepth) and context precedents."""
     import hashlib
 
     from app.services.cache import precedents_cache
-    # Include current_user_email in the cache key — different users get different drafts.
-    user_part = (payload.current_user_email or "anon").lower()
-    key = f"draft:{payload.style}:{user_part}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
+    key = f"draft:{payload.style}:{account.id}:{hashlib.sha256(payload.email_text.strip().lower().encode('utf-8')).hexdigest()}"
     cached = precedents_cache.get(key)
     if cached is not None:
         return cached
@@ -1008,6 +1277,7 @@ def generate_draft(payload: DraftRequest, _user: str = Depends(get_current_user)
         sender=payload.sender,
         subject=payload.subject,
         current_user_email=payload.current_user_email,
+        account_id=account.id,
     )
     result = DraftResponse(draft=draft, precedent_citations=citations)
     precedents_cache.set(key, result)
@@ -1016,9 +1286,9 @@ def generate_draft(payload: DraftRequest, _user: str = Depends(get_current_user)
 
 
 @router.post("/commitments/extract", response_model=CommitmentExtractionResponse)
-def extract_commitments(payload: CommitmentExtractionRequest) -> CommitmentExtractionResponse:
+def extract_commitments(payload: CommitmentExtractionRequest, account=Depends(get_default_account)) -> CommitmentExtractionResponse:
     """Extract commitment candidates from masked email text."""
-    service = CommitmentService(get_mail_client())
+    service = CommitmentService(AccountService.get_adapter(account))
     commitments = service.extract(payload.get_text(), payload.thread_summary or "", payload.email_id)
     return CommitmentExtractionResponse(commitments=commitments)
 
@@ -1095,10 +1365,10 @@ def update_rag_settings(payload: dict[str, Any], _user: str = Depends(get_curren
 
 
 @router.post("/commitments/confirm", response_model=CommitmentConfirmResponse)
-def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | None = Header(None)) -> CommitmentConfirmResponse:
+def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | None = Header(None), account=Depends(get_default_account)) -> CommitmentConfirmResponse:
     """Confirm approved commitments and create tasks/calendar events."""
     _validate_approval_token(x_approval_token)
-    service = CommitmentService(get_mail_client())
+    service = CommitmentService(AccountService.get_adapter(account))
     try:
         result = service.confirm(payload.email_id, payload.commitments)
     except HTTPException:
@@ -1167,9 +1437,9 @@ def _make_scorers() -> dict[str, Any]:
     }
 
 
-def _compute_triage(payload: EmailPayload, scorers: dict[str, Any], user_email: str = "") -> TriageResult:
+def _compute_triage(payload: EmailPayload, scorers: dict[str, Any], user_id: str = "") -> TriageResult:
     from app.services.cache import triage_cache
-    key = f"id:{user_email}:{payload.email_id}"
+    key = f"id:{user_id}:{payload.email_id}"
     cached = triage_cache.get(key)
     if cached is not None:
         return cached
@@ -1187,40 +1457,41 @@ def _compute_triage(payload: EmailPayload, scorers: dict[str, Any], user_email: 
 
 
 @router.post("/triage", response_model=TriageResult)
-def triage_email(payload: EmailPayload, current_user: str = Depends(get_current_user)) -> TriageResult:
+def triage_email(payload: EmailPayload, current_user=Depends(get_current_user)) -> TriageResult:
     """Calculate the five-axis triage score for an email."""
-    return _compute_triage(payload, _make_scorers(), current_user)
+    return _compute_triage(payload, _make_scorers(), current_user.id)
 
 
 @router.post("/triage/batch", response_model=list[TriageResult])
-def triage_batch(payloads: list[EmailPayload], current_user: str = Depends(get_current_user)) -> list[TriageResult]:
+def triage_batch(payloads: list[EmailPayload], current_user=Depends(get_current_user)) -> list[TriageResult]:
     """Score many emails in one request (reuses scorers + cache).
 
     Replaces N separate /triage calls with a single round-trip — drastically
     cutting the number of API calls the client makes per page.
     """
     scorers = _make_scorers()
-    return [_compute_triage(p, scorers, current_user) for p in payloads]
+    return [_compute_triage(p, scorers, current_user.id) for p in payloads]
 
 # ── Tone DNA routes ───────────────────────────────────────────────────────────
 
 
 @router.post("/tone-dna/build")
-def build_tone_dna(current_user: str = Depends(get_current_user)) -> dict:
-    """DNA-01: Trigger Tone DNA ingestion from sent mail (current provider)."""
-    svc = ToneDNAService(get_mail_client(), current_user)
+def build_tone_dna(account=Depends(get_default_account)) -> dict:
+    """DNA-01: Trigger Tone DNA ingestion from sent mail for the default account."""
+    svc = ToneDNAService(AccountService.get_adapter(account), account.id)
     profile = svc.ingest_and_build()
     return {
         "status": "built",
+        "account_id": account.id,
         "sample_size": profile.get("sample_size", 0),
         "formality_score": profile["features"]["formality_score"],
         "generated_at": profile["generated_at"],
     }
 
 @router.get("/tone-dna/profile")
-def get_tone_dna_profile(current_user: str = Depends(get_current_user)) -> dict:
-    """Return the current user's Tone DNA profile (or 404 if not yet built)."""
-    profile = _load_tone_profile(current_user)
+def get_tone_dna_profile(account=Depends(get_default_account)) -> dict:
+    """Return the Tone DNA profile for the default account (or 404 if not yet built)."""
+    profile = _load_tone_profile(account.id)
     if not profile:
         raise HTTPException(status_code=404, detail="Tone DNA profile not built yet. POST /api/tone-dna/build first.")
     return profile

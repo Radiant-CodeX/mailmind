@@ -19,9 +19,13 @@ from email.utils import parsedate_to_datetime
 from typing import Any, List
 from urllib.parse import urlencode
 
+import logging
+
 import httpx
 
 from app.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # OAuth + API endpoints
 _AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -104,6 +108,9 @@ def build_auth_url(state: str) -> str:
 
 def exchange_code(code: str) -> dict[str, Any]:
     """Exchange an auth code for tokens and persist the refresh token."""
+
+    logger.info(f"[exchange_code] Attempting to exchange code (prefix: {code[:20]}...)")
+
     data = {
         "code": code,
         "client_id": settings.google_client_id,
@@ -113,6 +120,11 @@ def exchange_code(code: str) -> dict[str, Any]:
     }
     with httpx.Client(timeout=30.0) as client:
         resp = client.post(_TOKEN_URI, data=data)
+
+        if resp.status_code != 200:
+            logger.error(f"[exchange_code] Google token error (code prefix: {code[:20]}...): {resp.status_code}")
+            logger.error(f"[exchange_code] Response body: {resp.text}")
+
         resp.raise_for_status()
         tok = resp.json()
 
@@ -127,7 +139,14 @@ def exchange_code(code: str) -> dict[str, Any]:
         "name": profile.get("name"),
         "picture": profile.get("picture"),
     })
-    return {"email": email}
+    return {
+        "email": email,
+        "sub": profile.get("id") or email,  # Google unique ID
+        "display_name": profile.get("name"),
+        "access_token": tok.get("access_token"),
+        "refresh_token": tok.get("refresh_token"),
+        "token_expires_at": datetime.utcnow() + timedelta(seconds=int(tok.get("expires_in", 3600))),
+    }
 
 
 def _refresh_access_token() -> str | None:
@@ -320,9 +339,51 @@ def _extract_body(payload: dict[str, Any]) -> tuple[str, str]:
 class GmailClient:
     """Gmail client with the same surface as GraphClient (mock + live)."""
 
-    def __init__(self, settings_obj=settings):
+    def __init__(self, settings_obj=settings, *, access_token: str | None = None, refresh_token: str | None = None):
         self.settings = settings_obj
         self.use_mock = bool(self.settings.use_mock_graph)
+        # When tokens are injected at construction (v3 AccountService path),
+        # they take precedence over the global process-level cache.
+        self._injected_access_token = access_token
+        self._injected_refresh_token = refresh_token
+
+    def _get_token(self) -> str:
+        """Return the active access token: injected first, then global cache."""
+        if self._injected_access_token:
+            return self._injected_access_token
+        return _get_access_token()
+
+    def _refresh_injected_token(self) -> str | None:
+        """
+        Refresh an injected (DB-sourced) access token using the injected refresh token.
+        Updates self._injected_access_token so subsequent _get_token() calls use the
+        fresh token. Falls back to the global _refresh_access_token() if no injected
+        refresh token is available.
+        """
+        if self._injected_refresh_token:
+            resp = httpx.post(
+                _TOKEN_URI,
+                data={
+                    "client_id": self.settings.google_client_id,
+                    "client_secret": self.settings.google_client_secret,
+                    "refresh_token": self._injected_refresh_token,
+                    "grant_type": "refresh_token",
+                },
+                timeout=15.0,
+            )
+            tok = resp.json() if resp.status_code == 200 else {}
+            new_token = tok.get("access_token")
+            if new_token:
+                self._injected_access_token = new_token
+                logger.info("[gmail] Injected access token refreshed via injected refresh token")
+                return new_token
+            logger.warning("[gmail] Injected refresh token exchange failed: %s", tok.get("error"))
+
+        # Fall back to global refresh (file-based token store)
+        refreshed = _refresh_access_token()
+        if refreshed:
+            self._injected_access_token = refreshed
+        return refreshed
 
     def get_user_profile(self) -> dict[str, str | None]:
         """Return the signed-in Google profile for display in the app shell."""
@@ -339,7 +400,7 @@ class GmailClient:
             "photo_url": stored.get("picture"),
         }
         try:
-            live = _fetch_profile(_get_access_token())
+            live = _fetch_profile(self._get_token())
             profile["email"] = live.get("email") or profile["email"]
             profile["display_name"] = live.get("name") or profile["display_name"]
             profile["photo_url"] = live.get("picture") or profile["photo_url"]
@@ -354,12 +415,28 @@ class GmailClient:
 
     # ── helpers ──
     def _request(self, method: str, path: str, **kwargs) -> Any:
-        token = _get_access_token()
+        token = self._get_token()
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {token}"
         headers.setdefault("Accept", "application/json")
         with httpx.Client(timeout=30.0) as client:
             resp = client.request(method, f"{_GMAIL_API}{path}", headers=headers, **kwargs)
+
+        # On 401, the access token was rejected by Google — it may have been revoked
+        # or expired server-side (happens after session logout + quick login where the
+        # DB-injected token is stale). Refresh and retry once regardless of whether
+        # the token was injected or came from the global cache.
+        if resp.status_code == 401:
+            logger.info("[gmail] 401 received — refreshing token and retrying")
+            # Clear global cache so _get_access_token() forces a real refresh
+            _token_cache["access_token"] = None
+            _token_cache["expires_at"] = 0.0
+            refreshed = self._refresh_injected_token()
+            if refreshed:
+                headers["Authorization"] = f"Bearer {refreshed}"
+                with httpx.Client(timeout=30.0) as client:
+                    resp = client.request(method, f"{_GMAIL_API}{path}", headers=headers, **kwargs)
+
         _raise_for_gmail(resp)
         if resp.status_code in (202, 204) or not resp.content:
             return None
@@ -623,7 +700,7 @@ class GmailClient:
 
     # ── Calendar / Tasks parity (used by commitment confirmation) ────────────
     def _authed(self, method: str, url: str, **kwargs) -> Any:
-        token = _get_access_token()
+        token = self._get_token()
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = f"Bearer {token}"
         with httpx.Client(timeout=30.0) as client:

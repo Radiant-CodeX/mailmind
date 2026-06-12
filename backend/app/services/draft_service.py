@@ -61,6 +61,7 @@ class DraftService:
         sender: str | None = None,
         subject: str | None = None,
         current_user_email: str | None = None,
+        account_id: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         style = style.lower()
         if style not in ("standard", "formal", "indepth"):
@@ -91,12 +92,12 @@ class DraftService:
         sender_name = self._get_clean_name(sender) if sender else "there"
         user_name = self._get_user_display_name(current_user_email)
 
-        # DNA-04: inject Tone DNA prefix — use the active provider client and current user
+        # DNA-04: inject Tone DNA prefix — keyed by account_id for per-account isolation
         tone_prefix = ""
-        if current_user_email:
+        if account_id:
             try:
                 from app.services.mail_provider import get_mail_client
-                tone_dna = ToneDNAService(get_mail_client(), current_user_email)
+                tone_dna = ToneDNAService(get_mail_client(), account_id)
                 tone_prefix = tone_dna.get_system_prefix(context=email_text)
             except Exception as _e:
                 logger.debug("[DraftService] Tone DNA unavailable: %s", _e)

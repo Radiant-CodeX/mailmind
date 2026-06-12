@@ -27,6 +27,17 @@ def _bool_env(name: str, default: bool) -> bool:
 class Settings:
     """Application configuration loaded from environment variables."""
 
+    # ── Session & token security ───────────────────────────────────────────
+    # SESSION_SECRET_KEY: signs the session token before hashing for storage.
+    # TOKEN_ENCRYPTION_KEY: Fernet key for encrypting OAuth tokens at rest.
+    # Generate both with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    session_secret_key: str = os.getenv("SESSION_SECRET_KEY", "")
+    token_encryption_key: str = os.getenv("TOKEN_ENCRYPTION_KEY", "")
+
+    # Session TTLs
+    session_ttl_seconds: int = int(os.getenv("SESSION_TTL_SECONDS", str(24 * 60 * 60)))       # 24h
+    quick_login_ttl_seconds: int = int(os.getenv("QUICK_LOGIN_TTL_SECONDS", str(7 * 24 * 60 * 60)))  # 7d
+
     webhook_validation_token: str = os.getenv("WEBHOOK_VALIDATION_TOKEN", "")
     webhook_secret: str = os.getenv("WEBHOOK_SECRET", "")
     rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))

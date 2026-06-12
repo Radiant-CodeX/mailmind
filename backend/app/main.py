@@ -84,6 +84,14 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token"],
 )
 
+logger = logging.getLogger(__name__)
+
+logger.info(
+    "is_production=%s frontend_origin=%s",
+    settings.is_production,
+    settings.frontend_origin,
+)
+
 app.include_router(router)
 app.include_router(agent_router)
 app.include_router(monitoring_router, prefix="/api")

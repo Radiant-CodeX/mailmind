@@ -207,9 +207,13 @@ class GraphClient:
 
     internal_domain = "example.com"
 
-    def __init__(self, settings_obj: type(settings) = settings):
+    def __init__(self, settings_obj: type(settings) = settings, *, access_token: str | None = None, refresh_token: str | None = None):
         self.settings = settings_obj
         self.use_mock = bool(self.settings.use_mock_graph)
+        # v3: when tokens are injected at construction, they take precedence
+        # over the process-level _user_token_cache.
+        self._injected_access_token = access_token
+        self._injected_refresh_token = refresh_token
         if not self.use_mock:
             if msal is None:
                 raise RuntimeError("msal package is required for Graph integration; pip install msal")
@@ -234,6 +238,10 @@ class GraphClient:
     def _get_token(self) -> str | None:
         if self.use_mock:
             return None
+
+        # v3: injected token wins over global cache (AccountService path)
+        if self._injected_access_token:
+            return self._injected_access_token
 
         now = time.time()
         # 1. Active user session — proactively refresh _TOKEN_REFRESH_BUFFER seconds
