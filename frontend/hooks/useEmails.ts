@@ -473,6 +473,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setHasMoreOnServer(hasMore);
       setPageIndex(next);
       setEmailsRaw(newEmails);
+      setTotal(page.total || total);
       setSelectedEmailId(null);
 
       triageSlice(newEmails);
