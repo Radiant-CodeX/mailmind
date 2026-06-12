@@ -1,20 +1,18 @@
 /**
- * Remembered-login helper for the Quick Login feature.
+ * Remembered-login helper — stores a UI hint for the Quick Login card.
  *
- * Stores only a non-sensitive hint of the last successful sign-in (mode +
- * display email) so returning users get a one-tap login. No tokens or secrets
- * are persisted here — the actual session lives server-side.
+ * v3: session management is fully server-side (mm_session + mm_quick cookies).
+ * This module only persists a display hint (email + provider) so the login page
+ * can show "Continue as tarun@gmail.com" without asking the user to re-type.
+ *
+ * No tokens, no mode, no TTL management here — all of that is the backend's job.
  */
 
-export type LoginMode = 'mock' | 'live';
 export type Provider = 'microsoft' | 'google';
 
 export interface RememberedLogin {
-  mode: LoginMode;
   provider: Provider;
   email: string;
-  /** ms timestamp of the last successful login */
-  ts: number;
 }
 
 const KEY = 'mailmind_last_login';
@@ -31,40 +29,27 @@ export function setRememberMe(value: boolean): void {
   localStorage.setItem(REMEMBER_KEY, String(value));
 }
 
-/** Quick Login stays available for one week after sign-out, then expires. */
-export const QUICK_LOGIN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
 export function getRememberedLogin(): RememberedLogin | null {
   if (typeof window === 'undefined') return null;
   const raw = localStorage.getItem(KEY);
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as RememberedLogin;
-    if (!parsed || !parsed.mode || !parsed.email) return null;
-    // Expire entries older than the TTL so the card disappears after a week.
-    if (typeof parsed.ts === 'number' && Date.now() - parsed.ts > QUICK_LOGIN_TTL_MS) {
-      localStorage.removeItem(KEY);
-      return null;
-    }
-    // Backward-compat: default provider for entries saved before multi-provider.
-    if (!parsed.provider) parsed.provider = 'microsoft';
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<RememberedLogin> & { mode?: string; ts?: number };
+    if (!parsed || !parsed.email) return null;
+    return {
+      provider: parsed.provider || 'microsoft',
+      email: parsed.email,
+    };
   } catch {
     return null;
   }
 }
 
-export function rememberLogin(
-  mode: LoginMode,
-  email: string | null | undefined,
-  provider: Provider = 'microsoft'
-): void {
+export function rememberLogin(email: string | null | undefined, provider: Provider = 'microsoft'): void {
   if (typeof window === 'undefined') return;
   const entry: RememberedLogin = {
-    mode,
     provider,
     email: email || 'Signed-in user',
-    ts: Date.now(),
   };
   localStorage.setItem(KEY, JSON.stringify(entry));
 }
@@ -74,7 +59,7 @@ export function clearRememberedLogin(): void {
   localStorage.removeItem(KEY);
 }
 
-/** Initials for an avatar chip, e.g. "mock.user@x.com" → "MO". */
+/** Initials for an avatar chip, e.g. "tarun@gmail.com" → "TA". */
 export function initialsFor(email: string): string {
   const name = email.split('@')[0] || email;
   return name.slice(0, 2).toUpperCase();

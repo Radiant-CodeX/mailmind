@@ -17,7 +17,7 @@ import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
-import { checkAuthStatus, logoutUser, createCalendarEvent, UserProfile } from '../../lib/api';
+import { checkAuthStatus, logoutUser, createCalendarEvent, AccountInfo } from '../../lib/api';
 import { rememberLogin, getRememberMe, Provider } from '../../lib/session';
 import { userStorage } from '../../lib/userStorage';
 import { CalendarEvent } from '../../lib/types';
@@ -30,31 +30,47 @@ export default function Home() {
 
   const [authenticated, setAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [userProfile, setUserProfile] = useState<AccountInfo | null>(null);
   const [provider, setProvider] = useState<Provider>('microsoft');
   const [checkingAuth, setCheckingAuth] = useState(true);
+  // Per-tab state — NOT persisted server-side (multi-tab safety).
+  // Initialized from the default account on first auth check.
+  const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
 
-  // Load auth status on mount
+  // Load auth status on mount — retries up to 3× (500ms apart) to handle the
+  // race where cookies from the OAuth popup haven't been flushed to the browser
+  // cookie jar before the dashboard mounts and makes its first request.
   useEffect(() => {
     async function loadAuthStatus() {
-      try {
-        const data = await checkAuthStatus();
-        if (data.authenticated) {
-          setAuthenticated(true);
-          setUserEmail(data.user_principal_name);
-          setUserProfile(data.profile || null);
-          if (data.provider === 'google' || data.provider === 'microsoft') setProvider(data.provider);
-          // Scope all localStorage data to this user — prevents cross-account leaks.
-          if (data.user_principal_name) userStorage.setUser(data.user_principal_name);
-          setCheckingAuth(false);
-        } else {
-          router.push('/');
+      const MAX_ATTEMPTS = 3;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 600));
+        try {
+          const data = await checkAuthStatus();
+          if (data.authenticated) {
+            setAuthenticated(true);
+            const email = data.user?.primary_email ?? data.default_account?.email ?? null;
+            const displayName = data.user?.display_name ?? null;
+            setUserEmail(email);
+            setUserName(displayName);
+            if (data.default_account) {
+              setUserProfile(data.default_account);
+              setCurrentAccountId(data.default_account.id);
+              const p = data.default_account.provider;
+              if (p === 'google' || p === 'microsoft') setProvider(p);
+            }
+            if (email) userStorage.setUser(email);
+            setCheckingAuth(false);
+            return;
+          }
+        } catch (err) {
+          console.error(`Auth check attempt ${attempt + 1} failed:`, err);
         }
-      } catch (err) {
-        console.error('Failed to get auth status', err);
-        router.push('/');
       }
+      // All retries exhausted — redirect to login
+      router.push('/');
     }
     loadAuthStatus();
   }, [router]);
@@ -102,6 +118,8 @@ export default function Home() {
     markRead,
     archiveEmail,
     reportSpam,
+    isStreaming,
+    triageProgress,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   // Opening an email marks it read.
@@ -150,7 +168,7 @@ export default function Home() {
     error: calendarError,
     checkConflict,
     loadCalendar,
-  } = useCalendar();
+  } = useCalendar(authenticated && !checkingAuth);
 
   if (checkingAuth) {
     return (
@@ -168,7 +186,7 @@ export default function Home() {
       // Remember this account for one-tap Quick Login (valid for 1 week) —
       // only when "Remember me" was checked, and only on sign-out.
       if (userEmail && getRememberMe()) {
-        rememberLogin('live', userEmail, provider);
+        rememberLogin(userEmail, provider);
       }
       await logoutUser();
     } catch (err) {
@@ -200,11 +218,13 @@ export default function Home() {
         onToggleCollapse={toggleSidebar}
         authenticated={authenticated}
         userEmail={userEmail}
+        userName={userName}
         userProfile={userProfile}
         provider={provider}
         onLoginClick={() => {}}
         onLogoutClick={handleLogout}
         onComposeClick={() => setIsComposeOpen(true)}
+        onAccountChange={setCurrentAccountId}
       />
 
       {/* Main Workspace Frame */}
@@ -216,71 +236,80 @@ export default function Home() {
         <div className="flex-1 flex overflow-hidden">
           {MAIL_TABS.includes(activeTab) && (
             <>
-              {/* Panel A: Prioritized Inbox (Full width if no mail is selected) */}
-              <EmailList
-                emails={emails}
-                selectedEmailId={selectedEmailId}
-                onSelectEmail={handleSelectEmail}
-                searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
-                sortKey={sortKey}
-                onSortChange={setSortKey}
-                filters={filters}
-                onFiltersChange={setFilters}
-                total={total}
-                pageIndex={pageIndex}
-                pageSize={pageSize}
-                hasNextPage={hasNextPage}
-                hasPrevPage={hasPrevPage}
-                onNextPage={nextPage}
-                onPrevPage={prevPage}
-                loading={loading}
-                onRefresh={refresh}
-                isFullWidth={true}
-                activeFolder={activeFolder}
-                onToggleStar={toggleStar}
-                onTrashEmail={trashEmail}
-                onRestoreEmail={restoreEmail}
-                onArchiveEmail={archiveEmail}
-                onReportSpam={reportSpam}
-                onToggleRead={markRead}
-              />
-
-              {/* Panel B: Email Detailed View (renders side-by-side only if an email is selected) */}
-              {selectedEmailId && (
-                <EmailDetail
-                  key={selectedEmailId}
-                  email={selectedEmail}
-                  loading={detailLoading}
-                  error={detailError}
-                  classification={classification}
-                  triageResult={triageResult}
-                  precedents={precedents}
-                  aiDraft={aiDraft}
-                  setAiDraft={setAiDraft}
-                  isGeneratingDraft={isGeneratingDraft}
-                  generateDraft={generateDraft}
-                  isDraftApproved={isDraftApproved}
-                  setIsDraftApproved={setIsDraftApproved}
-                  activeStyle={activeStyle}
-                  setActiveStyle={setActiveStyle}
-                  isSendingDraft={isSendingDraft}
-                  sendDraft={sendDraft}
-                  
-                  // Commitments Props passed down inline
-                  commitments={commitments}
-                  commitmentsLoading={commitmentsLoading}
-                  commitmentsError={commitmentsError}
-                  confirmingCommitments={confirming}
-                  confirmedCommitments={confirmed}
-                  taskUrls={taskUrls}
-                  eventUrls={eventUrls}
-                  toggleCommitment={toggleCommitment}
-                  confirmSelectedCommitments={confirmSelected}
-                  checkConflict={checkConflict}
-                  onClose={() => setSelectedEmailId(null)}
-                  showPipeline={showPipeline}
+              {/* Panel A: Inbox — 45% when inspector open, full width otherwise */}
+              <div
+                className={`h-full flex flex-col overflow-hidden transition-all duration-200 ${
+                  selectedEmailId ? 'w-[45%] border-r border-[var(--border)]' : 'flex-1'
+                }`}
+              >
+                <EmailList
+                  emails={emails}
+                  selectedEmailId={selectedEmailId}
+                  onSelectEmail={handleSelectEmail}
+                  searchQuery={searchQuery}
+                  onSearchChange={setSearchQuery}
+                  sortKey={sortKey}
+                  onSortChange={setSortKey}
+                  filters={filters}
+                  onFiltersChange={setFilters}
+                  total={total}
+                  pageIndex={pageIndex}
+                  pageSize={pageSize}
+                  hasNextPage={hasNextPage}
+                  hasPrevPage={hasPrevPage}
+                  onNextPage={nextPage}
+                  onPrevPage={prevPage}
+                  loading={loading}
+                  onRefresh={refresh}
+                  isFullWidth={true}
+                  activeFolder={activeFolder}
+                  onToggleStar={toggleStar}
+                  onTrashEmail={trashEmail}
+                  onRestoreEmail={restoreEmail}
+                  onArchiveEmail={archiveEmail}
+                  onReportSpam={reportSpam}
+                  onToggleRead={markRead}
+                  isStreaming={isStreaming}
+                  triageProgress={triageProgress}
                 />
+              </div>
+
+              {/* Panel B: Email inspector — 55% split pane */}
+              {selectedEmailId && (
+                <div className="w-[55%] h-full overflow-hidden">
+                  <EmailDetail
+                    key={selectedEmailId}
+                    email={selectedEmail}
+                    loading={detailLoading}
+                    error={detailError}
+                    classification={classification}
+                    triageResult={triageResult}
+                    precedents={precedents}
+                    aiDraft={aiDraft}
+                    setAiDraft={setAiDraft}
+                    isGeneratingDraft={isGeneratingDraft}
+                    generateDraft={generateDraft}
+                    isDraftApproved={isDraftApproved}
+                    setIsDraftApproved={setIsDraftApproved}
+                    activeStyle={activeStyle}
+                    setActiveStyle={setActiveStyle}
+                    isSendingDraft={isSendingDraft}
+                    sendDraft={sendDraft}
+                    commitments={commitments}
+                    commitmentsLoading={commitmentsLoading}
+                    commitmentsError={commitmentsError}
+                    confirmingCommitments={confirming}
+                    confirmedCommitments={confirmed}
+                    taskUrls={taskUrls}
+                    eventUrls={eventUrls}
+                    toggleCommitment={toggleCommitment}
+                    confirmSelectedCommitments={confirmSelected}
+                    checkConflict={checkConflict}
+                    onClose={() => setSelectedEmailId(null)}
+                    showPipeline={showPipeline}
+                    provider={provider}
+                  />
+                </div>
               )}
             </>
           )}

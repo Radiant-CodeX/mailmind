@@ -15,6 +15,7 @@ import {
   clearRememberedLogin,
   initialsFor,
   getRememberMe,
+  rememberLogin,
   setRememberMe as persistRememberMe,
   RememberedLogin,
   Provider,
@@ -38,12 +39,35 @@ export default function LoginPage() {
   const [googleWaiting, setGoogleWaiting] = useState(false);
   const [msWaiting, setMsWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [signedOutNotice, setSignedOutNotice] = useState<"session" | "full" | null>(null);
   const pollingIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
   const googlePopupRef = React.useRef<Window | null>(null);
   const msPopupRef = React.useRef<Window | null>(null);
 
   useEffect(() => {
     async function init() {
+      const params = new URLSearchParams(window.location.search);
+      const signedOut = params.get("signedOut");
+
+      if (signedOut === "full") {
+        // Full logout: clear remembered login, skip auth check, show plain login
+        clearRememberedLogin();
+        setRemembered(null);
+        setSignedOutNotice("full");
+        setAuthStatus("ready");
+        return;
+      }
+
+      if (signedOut === "session") {
+        // Session-only logout: keep remembered login for Quick Login card,
+        // but DON'T auto-redirect even if mm_quick restores a session
+        setRemembered(getRememberedLogin());
+        setRememberMe(getRememberMe());
+        setSignedOutNotice("session");
+        setAuthStatus("ready");
+        return;
+      }
+
       try {
         const data = await checkAuthStatus();
         if (data.authenticated) {
@@ -77,17 +101,6 @@ export default function LoginPage() {
     // Open the popup SYNCHRONOUSLY to preserve the click gesture.
     msPopupRef.current = window.open("", "ms-login", "width=520,height=680");
     setLoading(true);
-    // Saved Microsoft account → resume silently and go straight to the dashboard.
-    if (!forceOAuth && remembered?.provider === "microsoft") {
-      try {
-        await quickLogin(remembered.email, "microsoft");
-        msPopupRef.current?.close();
-        router.push("/dashboard");
-        return;
-      } catch {
-        /* fall through to the OAuth popup */
-      }
-    }
     try {
       const data = await microsoftLoginInitiate();
       if (data.authenticated) {
@@ -119,6 +132,9 @@ export default function LoginPage() {
           if (pollingIntervalRef.current)
             clearInterval(pollingIntervalRef.current);
           popup?.close();
+          if (data.user_principal_name && getRememberMe()) {
+            rememberLogin(data.user_principal_name, "microsoft");
+          }
           router.push("/dashboard");
         }
       } catch (err) {
@@ -145,18 +161,6 @@ export default function LoginPage() {
       "width=500,height=680",
     );
     setLoading(true);
-    // Saved Google account → resume silently; if it works, close the popup and
-    // go straight to the dashboard (no consent screen).
-    if (!forceOAuth && remembered?.provider === "google") {
-      try {
-        await quickLogin(remembered.email, "google");
-        googlePopupRef.current?.close();
-        router.push("/dashboard");
-        return;
-      } catch {
-        /* session can't resume — use the open popup for full OAuth */
-      }
-    }
     try {
       const data = await googleLoginInitiate(emailHint);
       if (data.authenticated) {
@@ -190,6 +194,9 @@ export default function LoginPage() {
           if (pollingIntervalRef.current)
             clearInterval(pollingIntervalRef.current);
           popup?.close();
+          if (data.user_principal_name && getRememberMe()) {
+            rememberLogin(data.user_principal_name, "google");
+          }
           router.push("/dashboard");
         }
       } catch (err) {
@@ -232,11 +239,20 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     try {
-      await quickLogin(remembered.email, remembered.provider);
-      router.push("/dashboard");
+      // Explicitly activate quick login — validates mm_quick and issues a new session.
+      const data = await quickLogin();
+      if (data.authenticated) {
+        router.push("/dashboard");
+        return;
+      }
+      // mm_quick expired or missing — fall back to full OAuth for the remembered provider.
+      setLoading(false);
+      if (remembered.provider === "google") {
+        handleGoogle(remembered.email, true);
+      } else {
+        handleMicrosoft(true);
+      }
     } catch {
-      // Session can't be resumed silently (token expired/cleared) — fall back to
-      // a full sign-in for the remembered provider instead of showing an error.
       setLoading(false);
       if (remembered.provider === "google") {
         handleGoogle(remembered.email, true);
@@ -246,7 +262,13 @@ export default function LoginPage() {
     }
   };
 
-  const handleForgetAccount = () => {
+  const handleForgetAccount = async () => {
+    try {
+      const { logoutUser } = await import("../lib/api");
+      await logoutUser();
+    } catch (err) {
+      console.error("Failed to forget account:", err);
+    }
     clearRememberedLogin();
     setRemembered(null);
   };
@@ -294,6 +316,17 @@ export default function LoginPage() {
             Co-pilot Studio
           </p>
         </div>
+
+        {signedOutNotice === "session" && (
+          <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-lg text-xs font-semibold text-center">
+            Signed out of this session. Quick Login is still active.
+          </div>
+        )}
+        {signedOutNotice === "full" && (
+          <div className="mb-4 p-3 bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-muted)] rounded-lg text-xs font-semibold text-center">
+            Signed out completely. Please sign in again.
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-lg text-xs font-semibold text-center max-h-32 overflow-y-auto">
