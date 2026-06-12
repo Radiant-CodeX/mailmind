@@ -48,30 +48,25 @@ jobs:
             --registry-login-server ${{ secrets.AZURE_REGISTRY_SERVER }} \
             --registry-username ${{ secrets.AZURE_REGISTRY_USERNAME }} \
             --registry-password ${{ secrets.AZURE_REGISTRY_PASSWORD }} \
+            --os-type Linux \
+            --cpu 1 \
+            --memory 1.5 \
+            --ports 8000 \
+            --protocol TCP \
             --environment-variables \
               DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               QUEUE_BACKEND="memory" \
               APP_ENV="production" \
-              APP_RELEASE="mailmind@2.0.0" \
-              METRICS_ENABLED="true" \
-              AUDIT_LOG_ENABLED="true" \
-              DATA_RETENTION_DAYS="90" \
-              AZURE_TENANT_ID="${{ secrets.AZURE_TENANT_ID }}" \
-              AZURE_CLIENT_ID="${{ secrets.AZURE_CLIENT_ID }}" \
-              AZURE_CLIENT_SECRET="${{ secrets.AZURE_CLIENT_SECRET }}" \
+              AZURE_TENANT_ID="${{ secrets.AZURE_DEPLOY_TENANT_ID }}" \
+              AZURE_CLIENT_ID="${{ secrets.AZURE_DEPLOY_CLIENT_ID }}" \
+              AZURE_CLIENT_SECRET="${{ secrets.AZURE_DEPLOY_CLIENT_SECRET }}" \
               AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
               AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
               GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
               GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               GOOGLE_REDIRECT_URI="${{ secrets.GOOGLE_REDIRECT_URI }}" \
               FRONTEND_ORIGIN="${{ secrets.FRONTEND_ORIGIN }}" \
-              APPROVAL_TOKEN="${{ secrets.APPROVAL_TOKEN }}" \
-              USE_CHROMA="${{ secrets.USE_CHROMA }}" \
-              RATE_LIMIT_PER_MINUTE="${{ secrets.RATE_LIMIT_PER_MINUTE }}" \
-            --ports 8000 \
-            --protocol TCP \
-            --cpu 1 \
-            --memory 1.5
+              APPROVAL_TOKEN="${{ secrets.APPROVAL_TOKEN }}"
 
       - name: Get container URL
         run: |
