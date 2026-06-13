@@ -198,12 +198,34 @@ def _finish_oauth_connect(
     return resp
 
 
-def _auth_status_payload(user) -> dict:
+def _backfill_account_photo(account, db) -> None:
+    """One-time self-heal: fetch + persist the OAuth profile photo when missing.
+
+    Older accounts (and any created before the photo was captured at login) have
+    no picture_url, so the avatar never renders. This fetches it live once, then
+    persists — subsequent status checks skip the network call.
+    """
+    if not account or account.picture_url or db is None:
+        return
+    try:
+        adapter = AccountService.get_adapter(account)
+        profile = adapter.get_user_profile() or {}
+        photo = profile.get("photo_url") or profile.get("picture")
+        if photo:
+            account.picture_url = photo
+            db.commit()
+    except Exception as e:
+        logger.debug("[auth] photo backfill skipped for %s: %s", getattr(account, "id", "?"), e)
+
+
+def _auth_status_payload(user, db=None) -> dict:
     """Build the /auth/status success response from a User ORM object."""
     default_account = next(
         (a for a in (user.accounts or []) if a.is_default),
         (user.accounts[0] if user.accounts else None),
     )
+    if default_account and not default_account.picture_url:
+        _backfill_account_photo(default_account, db)
     return {
         "status": "authenticated",
         "authenticated": True,
@@ -216,6 +238,7 @@ def _auth_status_payload(user) -> dict:
             "id": default_account.id,
             "provider": default_account.provider,
             "email": default_account.account_email,
+            "photo_url": default_account.picture_url,
             "nickname": default_account.nickname,
             "color": default_account.color,
         } if default_account else None,
@@ -287,9 +310,11 @@ def get_mailbox(
     if use_mirror:
         state = mailbox_repo.get_sync_state(account.id, folder)
         if state and state.get("backfill_done"):
-            # Refresh in the background; serve current mirror immediately.
-            background_tasks.add_task(SyncService.delta_sync, account, folder)
             offset = int(page_token) if (page_token and page_token.isdigit()) else 0
+            # Refresh in the background only on the first page — deep pagination
+            # shouldn't re-trigger a full delta sync on every click.
+            if offset == 0:
+                background_tasks.add_task(SyncService.delta_sync, account, folder)
             return mailbox_repo.list_page(account.id, folder, limit=limit, offset=offset)
         # Mirror not ready yet → backfill in the background for next time.
         background_tasks.add_task(SyncService.backfill, account, folder)
@@ -1001,7 +1026,7 @@ def auth_status(
             if user_id:
                 user = db.query(User).filter_by(id=user_id).first()
                 if user:
-                    return _auth_status_payload(user)
+                    return _auth_status_payload(user, db)
 
         # No valid session — check if quick login is available (but don't activate it).
         quick_available = False
@@ -1051,7 +1076,7 @@ def auth_quick_login(
         _set_quick_cookie(response, new_quick_token, settings.quick_login_ttl_seconds)
         db.commit()
         logger.info("[quick-login] success for user_id=%s", user_id)
-        return _auth_status_payload(user)
+        return _auth_status_payload(user, db)
     finally:
         db.close()
 

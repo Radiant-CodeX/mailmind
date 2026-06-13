@@ -562,6 +562,89 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     triageSlice(slice);
   }, [triageSlice]);
 
+  // Prefetch the NEXT page's envelopes in the background so forward navigation
+  // is instant (the slow part is the server round-trip, not the render). Runs
+  // silently: no spinner, no visible-page change. Triage still happens lazily
+  // when the user actually lands on the page (envelopes show immediately).
+  const prefetchingRef = useRef(false);
+  const prefetchNextPage = useCallback(async () => {
+    if (prefetchingRef.current) return;
+    // Already have the next page loaded → nothing to prefetch.
+    const nextStart = (pageIndexRef.current + 1) * PAGE_SIZE;
+    if (nextStart < allEmailsRef.current.length) return;
+    if (!hasMoreOnServerRef.current) return;
+    const token = nextPageTokenRef.current;
+    if (!token) return;
+    prefetchingRef.current = true;
+    try {
+      const page = await fetchMailbox(
+        folderParam(activeFolderRef.current), PAGE_SIZE, token, searchRef.current,
+      );
+      const newEmails = mapRaw((page.emails || []) as unknown as RawEmail[]);
+      if (newEmails.length === 0) {
+        hasMoreOnServerRef.current = false;
+        nextPageTokenRef.current = null;
+        setHasMoreOnServer(false);
+        setTotal(allEmailsRef.current.length);
+        return;
+      }
+      const combined = [...allEmailsRef.current, ...newEmails];
+      const newToken = page.next_page_token || null;
+      nextPageTokenRef.current = newToken;
+      allEmailsRef.current = combined;
+      fetchOffsetRef.current = fetchOffsetRef.current + newEmails.length;
+      hasMoreOnServerRef.current = !!newToken;
+      writeEmailCache(activeFolderRef.current, combined, newToken);
+      setAllEmails(combined);
+      setHasMoreOnServer(!!newToken);
+      if (!newToken) setTotal(combined.length);
+    } catch {
+      /* prefetch is best-effort — a failure just means the click pays the cost */
+    } finally {
+      prefetchingRef.current = false;
+    }
+  }, [mapRaw]);
+
+  // Non-destructive refresh: fetch the newest page, merge any genuinely new
+  // emails onto the top, and KEEP every page the user has already loaded plus
+  // their current position. The old behaviour reset to page 1 and dropped the
+  // count to ~20, which discarded in-flight loads — this preserves them.
+  const refreshInbox = useCallback(async () => {
+    const folder = activeFolderRef.current;
+    setLoading(true);
+    try {
+      const page = await fetchMailbox(
+        folderParam(folder), PAGE_SIZE, null, searchRef.current,
+      );
+      const fresh = mapRaw((page.emails || []) as unknown as RawEmail[]);
+      const existingIds = new Set(allEmailsRef.current.map((e) => e.id));
+      const newOnes = fresh.filter((e) => !existingIds.has(e.id));
+
+      // Nothing new → just refresh the visible slice's flags/triage in place.
+      const combined = newOnes.length
+        ? [...newOnes, ...allEmailsRef.current]
+        : allEmailsRef.current;
+      allEmailsRef.current = combined;
+      setAllEmails(combined);
+
+      const start = pageIndexRef.current * PAGE_SIZE;
+      const slice = combined.slice(start, start + PAGE_SIZE);
+      emailsRef.current = slice;
+      setEmailsRaw(slice);
+      writeEmailCache(folder, combined, nextPageTokenRef.current);
+
+      if (newOnes.length) {
+        setTotal((prev) => prev + newOnes.length);
+        triageSlice(newOnes);
+      }
+    } catch (err) {
+      console.error('[inbox] refresh failed', err);
+      setError(err instanceof Error ? err.message : 'Refresh failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [mapRaw, triageSlice]);
+
   const hasNextPage = (pageIndex + 1) * PAGE_SIZE < allEmails.length || hasMoreOnServer;
   const hasPrevPage = pageIndex > 0;
 
@@ -583,6 +666,14 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     const id = setTimeout(() => loadEmails(), delay);
     return () => clearTimeout(id);
   }, [activeFolder, enabled, searchQuery]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prefetch the next page shortly after the current page settles, so clicking
+  // "Next" is instant. Re-runs whenever the visible page or loaded set changes.
+  useEffect(() => {
+    if (!enabled) return;
+    const t = setTimeout(() => { prefetchNextPage(); }, 350);
+    return () => clearTimeout(t);
+  }, [pageIndex, allEmails.length, enabled, prefetchNextPage]);
 
   // Smart new-email polling — uses lightweight /api/inbox/poll (1 API call,
   // no body fetching). Only triggers a full reload when a new email arrives.
@@ -932,7 +1023,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     prevPage,
     loading,
     error,
-    refresh: () => loadEmails(false, false), // manual refresh respects cache
+    refresh: refreshInbox, // non-destructive: merges new mail, keeps loaded pages
     toggleStar,
     trashEmail,
     undoTrash,
