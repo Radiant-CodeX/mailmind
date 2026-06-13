@@ -295,7 +295,7 @@ export default function LoginPage() {
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary px-4"
+      className="flex flex-col min-h-screen w-screen items-center justify-center gap-6 bg-bg-base text-text-primary px-4 py-10 overflow-y-auto"
       id="login-workspace"
     >
       <div className="relative w-full max-w-md bg-base-100 border border-base-300 rounded-2xl shadow-2xl p-8 overflow-hidden">
@@ -600,9 +600,11 @@ export default function LoginPage() {
           </div>
         )}
 
-      {/* Footer */}
-      <footer className="absolute bottom-0 left-0 right-0 border-t border-base-300 px-6 py-5 bg-base-100">
-        <div className="max-w-2xl mx-auto flex items-center justify-between gap-4 text-xs text-base-content/50">
+      </div>
+
+      {/* Footer — normal flow, below the card so it never overlaps the buttons */}
+      <footer className="w-full max-w-md px-2">
+        <div className="flex items-center justify-between gap-4 text-xs text-base-content/50">
           <div>© {new Date().getFullYear()} MailMind</div>
           <div className="flex items-center gap-4">
             <Link href="/privacy" className="hover:text-base-content/70 transition-colors">
@@ -615,7 +617,6 @@ export default function LoginPage() {
           </div>
         </div>
       </footer>
-      </div>
     </div>
   );
 }

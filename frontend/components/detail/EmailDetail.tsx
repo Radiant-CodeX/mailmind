@@ -366,6 +366,7 @@ export function EmailDetail({
 }: EmailDetailProps) {
   const [isDraftExpanded, setIsDraftExpanded] = useState(false);
   const [isCommitmentsExpanded, setIsCommitmentsExpanded] = useState(false);
+  const [isTriageExpanded, setIsTriageExpanded] = useState(false);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -544,6 +545,38 @@ export function EmailDetail({
         {/* ── AI pipeline accordions ────────────────────────────────────── */}
         {showPipeline && (
           <div className="divide-y divide-base-200">
+
+            {/* Triage Breakdown — full 5-axis explainability (visible, not hover-only) */}
+            {triageResult && (
+              <div className="bg-base-100">
+                <button
+                  onClick={() => setIsTriageExpanded(!isTriageExpanded)}
+                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-base-200/30 transition-colors text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-500 border border-purple-500/20 flex items-center justify-center shrink-0">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold text-base-content uppercase tracking-widest">Triage Breakdown</p>
+                      <p className="text-[10px] text-base-content/60 mt-0.5">
+                        Composite {Math.round(triageResult.composite_score)} · {triageResult.axes?.length ?? 0} scoring axes
+                      </p>
+                    </div>
+                  </div>
+                  <svg className={`w-4 h-4 text-base-content/60 transition-transform duration-200 ${isTriageExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {isTriageExpanded && (
+                  <div className="border-t border-base-200 bg-base-300/20 px-4 py-4">
+                    <TriageExplainer triage={triageResult} classification={classification} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* AI Draft */}
             <div className="bg-base-100">

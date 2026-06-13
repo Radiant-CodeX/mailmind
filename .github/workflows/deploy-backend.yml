@@ -61,9 +61,9 @@ jobs:
               COOKIE_SECURE="false" \
               HSTS_ENABLED="false" \
               USE_MOCK_GRAPH="false" \
-              AZURE_TENANT_ID="${{ secrets.AZURE_DEPLOY_TENANT_ID }}" \
-              AZURE_CLIENT_ID="${{ secrets.AZURE_DEPLOY_CLIENT_ID }}" \
-              AZURE_CLIENT_SECRET="${{ secrets.AZURE_DEPLOY_CLIENT_SECRET }}" \
+              AZURE_TENANT_ID="${{ secrets.AZURE_LOGIN_TENANT_ID }}" \
+              AZURE_CLIENT_ID="${{ secrets.AZURE_LOGIN_CLIENT_ID }}" \
+              AZURE_CLIENT_SECRET="${{ secrets.AZURE_LOGIN_CLIENT_SECRET }}" \
               AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
               AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
               GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \

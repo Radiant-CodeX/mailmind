@@ -42,7 +42,12 @@ export function TriageExplainer({ triage, classification }: TriageExplainerProps
 
       {/* Axis Scores List */}
       <div className="space-y-3.5">
-        {triage.axes.map((axis) => {
+        {(!triage.axes || triage.axes.length === 0) && (
+          <p className="text-[10px] text-base-content/60 italic">
+            Per-axis breakdown not available for this email (scored from cache or a fast-path classifier).
+          </p>
+        )}
+        {(triage.axes ?? []).map((axis) => {
           const pct = Math.round(axis.raw_score * 100);
           return (
             <div key={axis.axis} className="space-y-1" id={`axis-row-${axis.axis}`}>

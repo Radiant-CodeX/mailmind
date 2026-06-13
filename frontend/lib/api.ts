@@ -692,6 +692,25 @@ export async function composeEmail(payload: {
   return res.json();
 }
 
+/** Generate a brand-new email body from a prompt, using Tone DNA + RAG. */
+export async function composeDraftWithAI(payload: {
+  prompt: string;
+  recipient?: string;
+  subject?: string;
+}): Promise<{ draft: string; precedent_citations: { subject: string; similarity: number }[] }> {
+  const res = await apiFetch(`${BASE}/api/rag/compose-draft`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: payload.prompt,
+      recipient: payload.recipient || null,
+      subject: payload.subject || null,
+    }),
+  });
+  if (!res.ok) throw new Error("Failed to generate AI draft");
+  return res.json();
+}
+
 export async function loginInitiate() {
   const res = await apiFetch(`${BASE}/api/auth/login-initiate`, {
     method: "POST",

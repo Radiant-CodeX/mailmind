@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 audit = logging.getLogger("mailmind.audit")
@@ -1337,6 +1338,36 @@ def generate_draft(payload: DraftRequest, account=Depends(get_default_account)) 
     precedents_cache.set(key, result)
     return result
 
+
+class ComposeDraftRequest(BaseModel):
+    prompt: str
+    recipient: str | None = None
+    subject: str | None = None
+    current_user_email: str | None = None
+
+
+@router.post("/rag/compose-draft", response_model=DraftResponse)
+def compose_draft(payload: ComposeDraftRequest, account=Depends(get_default_account)) -> DraftResponse:
+    """Compose a brand-new email from a prompt, using Tone DNA + RAG (for the Compose window)."""
+    import time as _time
+    from app.monitoring.live_metrics import live_metrics
+    _start = _time.perf_counter()
+    service = DraftService()
+    try:
+        draft, citations = service.generate_compose(
+            prompt=payload.prompt,
+            recipient=payload.recipient,
+            subject=payload.subject,
+            current_user_email=payload.current_user_email,
+            account_id=account.id,
+        )
+        live_metrics.record_llm(success=True)
+    except Exception:
+        live_metrics.record_llm(success=False)
+        raise
+    finally:
+        live_metrics.record_latency("draft", (_time.perf_counter() - _start) * 1000)
+    return DraftResponse(draft=draft, precedent_citations=citations)
 
 
 @router.post("/commitments/extract", response_model=CommitmentExtractionResponse)

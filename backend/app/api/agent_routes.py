@@ -262,8 +262,11 @@ def _run_triage_for_email(request: TriageOnlyRequest, user_email: str = "") -> d
     from app.services.cache import triage_cache_store
 
     # ── Level 1: Redis cache (sub-ms) ────────────────────────────────────────
+    # Only short-circuit when the cached entry has the full axis breakdown. The
+    # inbox streaming/batch path caches composite-only results (no axes), so a
+    # cache hit without axes must fall through and recompute for the detail view.
     cached = triage_cache_store.get(request.email_id, user_email=user_email)
-    if cached and cached.get("priority"):
+    if cached and cached.get("priority") and cached.get("axes"):
         logger.info("[triage] Redis hit for %s", request.email_id)
         return {**cached, "_cached": "redis"}
 
@@ -273,7 +276,9 @@ def _run_triage_for_email(request: TriageOnlyRequest, user_email: str = "") -> d
         cached_score = existing.get("composite_score") or 0.0
         # Skip the DB hit if composite_score == 0.0 — this indicates a broken
         # prior run (e.g. before the max_tokens fix). Re-triage to get real score.
-        if cached_score > 0.0:
+        # Also require axes to be present: the inbox batch path persists
+        # composite-only rows, and the detail view needs the full breakdown.
+        if cached_score > 0.0 and existing.get("axes"):
             logger.info("[triage] DB hit for %s (score=%.1f)", request.email_id, cached_score)
             result = {
                 "email_id": request.email_id,
