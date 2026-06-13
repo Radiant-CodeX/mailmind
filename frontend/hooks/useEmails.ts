@@ -115,6 +115,29 @@ interface RawEmail {
   triage?: Email['triage'];
   is_read?: boolean;
   has_attachments?: boolean;
+  // Inline triage from the server-side mirror (DB read path). Present when the
+  // email has already been enriched → lets us skip the triage stream for it.
+  priority?: string;
+  approval_mode?: string;
+  axes?: TriageLite['axes'];
+}
+
+/**
+ * Resolve an email's triage from (in priority order): an explicit triage object,
+ * inline priority from the DB mirror, the local triage cache, else null.
+ */
+function resolveTriage(e: RawEmail, cached?: TriageLite): TriageLite | undefined {
+  if (e.triage) return e.triage;
+  if (e.priority) {
+    return {
+      priority: e.priority,
+      composite_score: e.composite_score || 0,
+      approval_mode: e.approval_mode || 'SUGGEST',
+      axes: e.axes || [],
+      dynamic_weights: {},
+    } as TriageLite;
+  }
+  return cached || undefined;
 }
 
 export interface PendingTrash {
@@ -149,6 +172,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   const [searchQuery, setSearchQuery] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [triageProgress, setTriageProgress] = useState(0);
+  // Number of emails actually being LLM-triaged (cache hits / learned hints excluded).
+  const [triageActive, setTriageActive] = useState(0);
   const [pendingTrash, setPendingTrash] = useState<PendingTrash | null>(null);
   // Lazy-init from the persisted preference (guarded for SSR).
   const [sortKey, setSortKeyState] = useState<SortKey>(() => {
@@ -209,15 +234,15 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     const tcache = readTriageCache();
     return raw.map((e) => {
       const id = e.email_id || e.id || '';
-      const cachedT = tcache[id];
+      const triage = resolveTriage(e, tcache[id]);
       return {
         id,
         sender: e.sender,
         subject: e.subject,
         body: e.body,
         received_at: e.received_at,
-        composite_score: cachedT ? Math.round(cachedT.composite_score) : (e.composite_score || 0),
-        triage: e.triage || cachedT || null,
+        composite_score: triage ? Math.round(triage.composite_score) : (e.composite_score || 0),
+        triage,
         html_body: e.html_body || undefined,
         attachments: e.attachments || undefined,
         isRead: e.is_read ?? true,
@@ -247,9 +272,13 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     console.info(`[triage] Scoring ${todo.length} emails via stream`);
     setIsStreaming(true);
     setTriageProgress(0);
+    setTriageActive(0);
 
     const byId: Record<string, TriageLite> = {};
     let completed = 0;
+    // Tracks how many real LLM triages are still in flight. The server sends a
+    // {to_triage: N} meta event once cache hits / learned hints are resolved.
+    let llmRemaining = 0;
 
     try {
       const stream = triagePageStream(
@@ -264,6 +293,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
 
       for await (const event of stream) {
         if (event.done) break;
+        if (event.to_triage !== undefined) {
+          llmRemaining = event.to_triage;
+          setTriageActive(llmRemaining);
+          continue;
+        }
         if (event.email_id && event.priority) {
           byId[event.email_id] = {
             composite_score: event.composite_score || 0,
@@ -274,6 +308,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
           };
           completed++;
           setTriageProgress(completed);
+          // Only count down for genuine LLM results, not cache/learned hits.
+          if (!event.cached) {
+            llmRemaining = Math.max(0, llmRemaining - 1);
+            setTriageActive(llmRemaining);
+          }
         }
       }
 
@@ -290,6 +329,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       console.warn('[triage] Stream triage failed', err);
     } finally {
       setIsStreaming(false);
+      setTriageActive(0);
     }
   }, []); // stable — zero deps, reads only from refs
 
@@ -297,12 +337,12 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     const tcache = readTriageCache();
     return rawList.map((e) => {
       const id = e.email_id || e.id || '';
-      const cachedT = tcache[id];
+      const triage = resolveTriage(e, tcache[id]);
       return {
         id, sender: e.sender, subject: e.subject, body: e.body,
         received_at: e.received_at,
-        composite_score: cachedT ? Math.round(cachedT.composite_score) : (e.composite_score || 0),
-        triage: e.triage || cachedT || null,
+        composite_score: triage ? Math.round(triage.composite_score) : (e.composite_score || 0),
+        triage,
         html_body: e.html_body || undefined,
         attachments: e.attachments || undefined,
         isRead: e.is_read ?? true,
@@ -396,7 +436,10 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       writeEmailCache(folder, mapped, newToken);
 
       setAllEmails(mapped);
-      setTotal(page.total || mapped.length);
+      // If the server says there are no more pages, the true total is exactly
+      // what we loaded — don't trust the provider's inflated estimate
+      // (Graph @odata.count / Gmail resultSizeEstimate can overcount).
+      setTotal(hasMore ? (page.total || mapped.length) : mapped.length);
       setFetchOffset(mapped.length);
       setHasMoreOnServer(hasMore);
       setPageIndex(0);
@@ -449,6 +492,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
         hasMoreOnServerRef.current = false;
         nextPageTokenRef.current = null;
         setHasMoreOnServer(false);
+        // Reached the end — the real total is everything we've loaded, not the
+        // provider's overcounted estimate.
+        setTotal(allEmailsRef.current.length);
         return;
       }
 
@@ -473,7 +519,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setHasMoreOnServer(hasMore);
       setPageIndex(next);
       setEmailsRaw(newEmails);
-      setTotal(page.total || total);
+      // Once the server reports no more pages, the accumulated count IS the
+      // real total — clamp to it so the pager never claims more than exist.
+      setTotal(hasMore ? (page.total || total) : combined.length);
       setSelectedEmailId(null);
 
       triageSlice(newEmails);
@@ -879,5 +927,6 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     // Streaming triage progress
     isStreaming,
     triageProgress,
+    triageActive,
   };
 }

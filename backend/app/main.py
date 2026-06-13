@@ -13,6 +13,7 @@ from app.api.compliance_routes import router as compliance_router
 from app.api.feedback_routes import router as feedback_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.routes import router
+from app.api.sync_routes import router as sync_router
 from app.config.settings import settings
 from app.db.base import init_db
 from app.middleware import (
@@ -135,3 +136,5 @@ app.include_router(agent_router)
 app.include_router(monitoring_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(compliance_router)
+# sync_router carries its own prefixes (/webhooks/graph and /api/subscriptions/*)
+app.include_router(sync_router)

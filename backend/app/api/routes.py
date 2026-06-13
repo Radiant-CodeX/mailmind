@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -255,18 +255,80 @@ def ready() -> dict[str, Any]:
     return {"ready": overall, "checks": checks, "mode": "mock" if settings.use_mock_graph else "live"}
 
 
+def _mirror_flags(email_id: str, *, is_read: bool | None = None,
+                  is_starred: bool | None = None, state: str | None = None) -> None:
+    """Best-effort: reflect a local action on the mailbox mirror immediately."""
+    try:
+        from app.db import mailbox_repo
+        mailbox_repo.update_flags(email_id, is_read=is_read, is_starred=is_starred, state=state)
+    except Exception as e:
+        logger.debug("[mirror] flag update skipped for %s: %s", email_id, e)
+
+
 @router.get("/mailbox", response_model=EmailPage)
 def get_mailbox(
+    background_tasks: BackgroundTasks,
     folder: str = "inbox", limit: int = 50, page_token: str | None = None, q: str | None = None,
     account=Depends(get_default_account),
 ) -> dict[str, Any]:
-    """Paginated listing for any folder, with optional server-side search."""
+    """
+    Paginated listing for any folder.
+
+    Inbox (no search) is served from the **server-side mirror** when it has been
+    backfilled — fast, exact counts, triage attached — and a background delta
+    sync is kicked off to keep it fresh. First-ever load (mirror empty) falls
+    back to the live provider and triggers a backfill so subsequent loads are
+    instant. Search and non-inbox folders always go live.
+    """
+    from app.db import mailbox_repo
+    from app.services.sync_service import SyncService
+
+    use_mirror = folder == "inbox" and not q
+    if use_mirror:
+        state = mailbox_repo.get_sync_state(account.id, folder)
+        if state and state.get("backfill_done"):
+            # Refresh in the background; serve current mirror immediately.
+            background_tasks.add_task(SyncService.delta_sync, account, folder)
+            offset = int(page_token) if (page_token and page_token.isdigit()) else 0
+            return mailbox_repo.list_page(account.id, folder, limit=limit, offset=offset)
+        # Mirror not ready yet → backfill in the background for next time.
+        background_tasks.add_task(SyncService.backfill, account, folder)
+
     client = AccountService.get_adapter(account)
     try:
         return client.list_emails(folder=folder, limit=limit, page_token=page_token, query=q)
     except Exception as e:
         logger.exception("[mailbox] list failed")
         raise HTTPException(status_code=400, detail=f"Failed to list {folder}: {str(e)}")
+
+
+@router.post("/mailbox/sync")
+def trigger_mailbox_sync(
+    background_tasks: BackgroundTasks,
+    folder: str = "inbox",
+    account=Depends(get_default_account),
+) -> dict[str, Any]:
+    """Force a background sync of the mirror (delta if backfilled, else backfill)."""
+    from app.db import mailbox_repo
+    from app.services.sync_service import SyncService
+
+    state = mailbox_repo.get_sync_state(account.id, folder)
+    if state and state.get("backfill_done"):
+        background_tasks.add_task(SyncService.delta_sync, account, folder)
+        mode = "delta"
+    else:
+        background_tasks.add_task(SyncService.backfill, account, folder)
+        mode = "backfill"
+    return {"queued": True, "mode": mode, "backfill_done": bool(state and state.get("backfill_done"))}
+
+
+@router.get("/mailbox/sync-status")
+def mailbox_sync_status(folder: str = "inbox", account=Depends(get_default_account)) -> dict[str, Any]:
+    """Report mirror sync state (backfill_done, last_synced_at, exact count)."""
+    from app.db import mailbox_repo
+    return mailbox_repo.get_sync_state(account.id, folder) or {
+        "backfill_done": False, "message_count": 0, "last_status": "idle",
+    }
 
 
 @router.get("/inbox/poll")
@@ -422,6 +484,7 @@ def set_read_status(email_id: str, payload: dict[str, Any] | None = None, accoun
     read = True if payload is None else bool(payload.get("read", True))
     try:
         AccountService.get_adapter(account).mark_read(email_id, read)
+        _mirror_flags(email_id, is_read=read)
         return {"success": True, "is_read": read}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to update read status: {str(e)}")
@@ -432,6 +495,7 @@ def archive_email(email_id: str, account=Depends(get_default_account)) -> dict[s
     """Archive an email (out of Inbox, not deleted)."""
     try:
         AccountService.get_adapter(account).archive(email_id)
+        _mirror_flags(email_id, state="deleted")  # leaves the inbox view
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to archive: {str(e)}")
@@ -442,6 +506,7 @@ def report_spam(email_id: str, account=Depends(get_default_account)) -> dict[str
     """Report an email as spam (move to Junk/Spam)."""
     try:
         AccountService.get_adapter(account).report_spam(email_id)
+        _mirror_flags(email_id, state="deleted")  # leaves the inbox view
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to report spam: {str(e)}")
@@ -487,6 +552,7 @@ def move_email_to_trash(email_id: str, account=Depends(get_default_account)) -> 
     client = AccountService.get_adapter(account)
     try:
         client.move_to_trash(email_id)
+        _mirror_flags(email_id, state="deleted")  # leaves the inbox view
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to move email to trash: {str(e)}")

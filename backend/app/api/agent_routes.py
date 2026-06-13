@@ -568,6 +568,10 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
             else:
                 misses.append((i, req))
 
+        # Tell the client exactly how many emails actually need LLM triage
+        # (cache hits + learned-sender hints above are already resolved).
+        yield f'data: {json.dumps({"to_triage": len(misses)})}\n\n'
+
         # ── Run LLM for misses in parallel, emit as they complete ──────────
         if misses:
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
