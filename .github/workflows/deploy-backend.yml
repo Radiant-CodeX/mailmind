@@ -58,6 +58,9 @@ jobs:
               DATABASE_URL="${{ secrets.DATABASE_URL }}" \
               QUEUE_BACKEND="memory" \
               APP_ENV="production" \
+              COOKIE_SECURE="false" \
+              HSTS_ENABLED="false" \
+              USE_MOCK_GRAPH="false" \
               AZURE_TENANT_ID="${{ secrets.AZURE_DEPLOY_TENANT_ID }}" \
               AZURE_CLIENT_ID="${{ secrets.AZURE_DEPLOY_CLIENT_ID }}" \
               AZURE_CLIENT_SECRET="${{ secrets.AZURE_DEPLOY_CLIENT_SECRET }}" \

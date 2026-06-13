@@ -1,0 +1,99 @@
+<svg viewBox="0 0 1200 780" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .lbl{font-size:14px;font-weight:600}
+    .ep{font-size:12px;fill:#7c3aed;font-weight:700;font-family:Consolas,monospace}
+    .li{font-size:11.5px;fill:#334155}
+    .edge{stroke:#475569;stroke-width:2;fill:none;marker-end:url(#arrow)}
+  </style>
+
+  <text x="600" y="46" text-anchor="middle" class="title">Email Open → Parallel AI Pipeline</text>
+  <text x="600" y="72" text-anchor="middle" class="sub">useEmailDetail fires 6 calls via Promise.all — every call is cache-first</text>
+
+  <!-- select -->
+  <rect x="440" y="100" width="320" height="70" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="600" y="128" text-anchor="middle" class="lbl" fill="#1e3a8a">User clicks email → handleSelectEmail()</text>
+  <text x="600" y="150" text-anchor="middle" class="li">setSelectedEmailId · if unread → markRead()</text>
+
+  <line x1="600" y1="170" x2="600" y2="205" class="edge"/>
+  <rect x="470" y="206" width="260" height="40" rx="20" fill="#0f172a"/>
+  <text x="600" y="231" text-anchor="middle" class="lbl" fill="#ffffff">Promise.all — 6 parallel calls</text>
+
+  <!-- fan -->
+  <line x1="600" y1="246" x2="150" y2="296" class="edge"/>
+  <line x1="600" y1="246" x2="380" y2="296" class="edge"/>
+  <line x1="600" y1="246" x2="600" y2="296" class="edge"/>
+  <line x1="600" y1="246" x2="820" y2="296" class="edge"/>
+  <line x1="600" y1="246" x2="1050" y2="296" class="edge"/>
+
+  <!-- call 1 -->
+  <rect x="30" y="298" width="240" height="120" rx="12" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="150" y="322" text-anchor="middle" class="lbl" fill="#166534">1 · Classification</text>
+  <text x="150" y="342" text-anchor="middle" class="ep">POST /api/classify</text>
+  <text x="46" y="366" class="li">GPT-4o → CRITICAL /</text>
+  <text x="46" y="384" class="li">HIGH / NORMAL</text>
+  <text x="46" y="406" class="li">cache: classify:{user}:sha256</text>
+
+  <!-- call 2 -->
+  <rect x="290" y="298" width="240" height="120" rx="12" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="410" y="322" text-anchor="middle" class="lbl" fill="#166534">2 · Triage</text>
+  <text x="410" y="342" text-anchor="middle" class="ep">POST /api/triage</text>
+  <text x="306" y="366" class="li">returns TriageResult</text>
+  <text x="306" y="384" class="li">usually cached from</text>
+  <text x="306" y="402" class="li">batch fetch → instant</text>
+
+  <!-- call 3 -->
+  <rect x="550" y="298" width="240" height="120" rx="12" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="670" y="322" text-anchor="middle" class="lbl" fill="#166534">3 · Commitments</text>
+  <text x="670" y="342" text-anchor="middle" class="ep">/commitments/extract</text>
+  <text x="566" y="366" class="li">PII mask → GPT-4o</text>
+  <text x="566" y="384" class="li">structured JSON:</text>
+  <text x="566" y="402" class="li">tasks + deadlines</text>
+
+  <!-- call 4 -->
+  <rect x="810" y="298" width="240" height="120" rx="12" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="930" y="322" text-anchor="middle" class="lbl" fill="#115e59">4 · Calendar</text>
+  <text x="930" y="342" text-anchor="middle" class="ep">GET /api/calendar</text>
+  <text x="826" y="366" class="li">fetch events (7d)</text>
+  <text x="826" y="384" class="li">cache 5 min</text>
+  <text x="826" y="402" class="li">conflict detection</text>
+
+  <!-- call 5 -->
+  <rect x="940" y="440" width="240" height="120" rx="12" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="1060" y="464" text-anchor="middle" class="lbl" fill="#115e59">5 · RAG Retrieve</text>
+  <text x="1060" y="484" text-anchor="middle" class="ep">POST /api/rag/retrieve</text>
+  <text x="956" y="508" class="li">embed → ChromaDB</text>
+  <text x="956" y="526" class="li">cosine top-5</text>
+  <text x="956" y="544" class="li">precedents + scores</text>
+
+  <!-- call 6 -->
+  <rect x="680" y="440" width="240" height="120" rx="12" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="800" y="464" text-anchor="middle" class="lbl" fill="#166534">6 · Draft Generation</text>
+  <text x="800" y="484" text-anchor="middle" class="ep">POST /api/rag/draft</text>
+  <text x="696" y="508" class="li">precedent injection +</text>
+  <text x="696" y="526" class="li">Tone DNA → GPT-4o</text>
+  <text x="696" y="544" class="li">3 styles cached</text>
+
+  <line x1="1050" y1="418" x2="1060" y2="438" class="edge"/>
+  <line x1="820" y1="418" x2="800" y2="438" class="edge"/>
+
+  <!-- merge -->
+  <line x1="150" y1="418" x2="500" y2="610" class="edge"/>
+  <line x1="410" y1="418" x2="540" y2="610" class="edge"/>
+  <line x1="670" y1="418" x2="600" y2="610" class="edge"/>
+  <line x1="930" y1="418" x2="660" y2="610" class="edge"/>
+  <line x1="800" y1="560" x2="640" y2="610" class="edge"/>
+  <line x1="1060" y1="560" x2="700" y2="610" class="edge"/>
+
+  <rect x="400" y="612" width="400" height="70" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
+  <text x="600" y="640" text-anchor="middle" class="lbl" fill="#1e3a8a">EmailDetail renders fully enriched</text>
+  <text x="600" y="662" text-anchor="middle" class="li">axes · classification · draft · commitments · conflicts</text>
+
+  <text x="600" y="720" text-anchor="middle" class="li" font-style="italic">Background "enriching" flag keeps the UI responsive while commitment + RAG resolve · every endpoint requires auth</text>
+</svg>

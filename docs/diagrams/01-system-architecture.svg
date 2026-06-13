@@ -1,0 +1,121 @@
+<svg viewBox="0 0 1200 860" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .tier{font-size:13px;font-weight:700;letter-spacing:1px}
+    .lbl{font-size:14px;font-weight:600}
+    .li{font-size:12.5px;fill:#334155}
+    .edge{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    .elbl{font-size:12px;fill:#475569;font-style:italic}
+  </style>
+
+  <text x="600" y="46" text-anchor="middle" class="title">MailMind — System Architecture</text>
+  <text x="600" y="72" text-anchor="middle" class="sub">Two-tier system · Next.js 16 / React 19 frontend · FastAPI + LangGraph backend</text>
+
+  <!-- FRONTEND TIER -->
+  <rect x="60" y="100" width="1080" height="130" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="80" y="124" class="tier" fill="#1d4ed8">FRONTEND — Next.js 16 / React 19 · DaisyUI v5 / Tailwind v4</text>
+  <g>
+    <rect x="100" y="140" width="230" height="70" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="215" y="170" text-anchor="middle" class="lbl" fill="#1e3a8a">Login / OAuth UI</text>
+    <text x="215" y="190" text-anchor="middle" class="li">Provider detect · popup</text>
+
+    <rect x="360" y="140" width="230" height="70" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="475" y="170" text-anchor="middle" class="lbl" fill="#1e3a8a">Inbox · EmailList</text>
+    <text x="475" y="190" text-anchor="middle" class="li">Triage badges · search</text>
+
+    <rect x="620" y="140" width="230" height="70" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="735" y="170" text-anchor="middle" class="lbl" fill="#1e3a8a">EmailDetail · DraftPanel</text>
+    <text x="735" y="190" text-anchor="middle" class="li">Axes · 3-style drafts</text>
+
+    <rect x="880" y="140" width="230" height="70" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="995" y="170" text-anchor="middle" class="lbl" fill="#1e3a8a">Calendar · Tasks · RAG</text>
+    <text x="995" y="190" text-anchor="middle" class="li">Hooks-based state</text>
+  </g>
+
+  <line x1="600" y1="230" x2="600" y2="272" class="edge"/>
+  <text x="612" y="256" class="elbl">HTTPS · HttpOnly cookie (mm_session / mm_quick)</text>
+
+  <!-- API TIER -->
+  <rect x="60" y="276" width="1080" height="120" rx="14" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="80" y="300" class="tier" fill="#6d28d9">BACKEND — FastAPI API Routers (auth enforced on every data endpoint)</text>
+  <g>
+    <rect x="90"  y="318" width="155" height="58" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="167" y="352" text-anchor="middle" class="lbl" fill="#5b21b6">Auth</text>
+    <rect x="262" y="318" width="155" height="58" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="339" y="352" text-anchor="middle" class="lbl" fill="#5b21b6">Email</text>
+    <rect x="434" y="318" width="155" height="58" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="511" y="352" text-anchor="middle" class="lbl" fill="#5b21b6">Agent / AI</text>
+    <rect x="606" y="318" width="155" height="58" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="683" y="352" text-anchor="middle" class="lbl" fill="#5b21b6">RAG</text>
+    <rect x="778" y="318" width="155" height="58" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="855" y="352" text-anchor="middle" class="lbl" fill="#5b21b6">Calendar</text>
+    <rect x="950" y="318" width="155" height="58" rx="9" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="1027" y="352" text-anchor="middle" class="lbl" fill="#5b21b6">Compliance</text>
+  </g>
+
+  <line x1="600" y1="396" x2="600" y2="438" class="edge"/>
+  <text x="612" y="422" class="elbl">orchestrates pipeline + services</text>
+
+  <!-- TIER 3: PIPELINE + DATA -->
+  <rect x="60" y="442" width="540" height="380" rx="14" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="466" class="tier" fill="#15803d">LANGGRAPH AGENTIC PIPELINE + CORE SERVICES</text>
+
+  <rect x="90" y="482" width="220" height="320" rx="10" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="200" y="506" text-anchor="middle" class="lbl" fill="#166534">LangGraph DAG</text>
+  <text x="110" y="534" class="li">1 · ingest_node</text>
+  <text x="110" y="558" class="li">2 · triage_node (5-axis)</text>
+  <text x="110" y="582" class="li">3 · commitment_node</text>
+  <text x="110" y="606" class="li">4 · calendar_node</text>
+  <text x="110" y="630" class="li">5 · rag_node</text>
+  <text x="110" y="654" class="li">6 · gate_node (human)</text>
+  <text x="110" y="690" class="li" font-style="italic" fill="#475569">Autonomous, multi-step</text>
+  <text x="110" y="708" class="li" font-style="italic" fill="#475569">reasoning under</text>
+  <text x="110" y="726" class="li" font-style="italic" fill="#475569">human supervision</text>
+
+  <rect x="330" y="482" width="250" height="320" rx="10" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="455" y="506" text-anchor="middle" class="lbl" fill="#166534">Core Services</text>
+  <text x="350" y="534" class="li">ClassificationService</text>
+  <text x="350" y="558" class="li">CommitmentService</text>
+  <text x="350" y="582" class="li">DraftService</text>
+  <text x="350" y="606" class="li">ToneDNAService</text>
+  <text x="350" y="630" class="li">RetrievalService</text>
+  <text x="350" y="654" class="li">5 × Scorers</text>
+  <text x="350" y="678" class="li">GraphClient / GmailClient</text>
+  <text x="350" y="702" class="li">PII Masking</text>
+
+  <rect x="620" y="442" width="520" height="380" rx="14" fill="#f0fdfa" stroke="#14b8a6" stroke-width="2"/>
+  <text x="640" y="466" class="tier" fill="#0f766e">DATA · INFRA · EXTERNAL</text>
+
+  <rect x="650" y="482" width="220" height="62" rx="9" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="760" y="508" text-anchor="middle" class="lbl" fill="#115e59">ChromaDB</text>
+  <text x="760" y="528" text-anchor="middle" class="li">Vector store · 1536-dim</text>
+
+  <rect x="890" y="482" width="220" height="62" rx="9" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="1000" y="508" text-anchor="middle" class="lbl" fill="#115e59">SQL DB</text>
+  <text x="1000" y="528" text-anchor="middle" class="li">SQLAlchemy ORM</text>
+
+  <rect x="650" y="558" width="220" height="62" rx="9" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="760" y="584" text-anchor="middle" class="lbl" fill="#115e59">Cache + Async Queue</text>
+  <text x="760" y="604" text-anchor="middle" class="li">TTL · webhook + poll</text>
+
+  <rect x="890" y="558" width="220" height="62" rx="9" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="1000" y="584" text-anchor="middle" class="lbl" fill="#115e59">OpenAI GPT-4o</text>
+  <text x="1000" y="604" text-anchor="middle" class="li">PII-masked calls only</text>
+
+  <rect x="650" y="634" width="460" height="62" rx="9" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="880" y="660" text-anchor="middle" class="lbl" fill="#115e59">Mail Providers — unified interface</text>
+  <text x="880" y="680" text-anchor="middle" class="li">Gmail API · Microsoft Graph API</text>
+
+  <rect x="650" y="710" width="460" height="86" rx="9" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="880" y="736" text-anchor="middle" class="lbl" fill="#991b1b">Security Layer</text>
+  <text x="880" y="758" text-anchor="middle" class="li">Fernet token encryption · SHA-256 session hashes</text>
+  <text x="880" y="778" text-anchor="middle" class="li">Per-account RAG / Tone isolation · audit + retention</text>
+
+  <line x1="600" y1="630" x2="650" y2="630" class="edge"/>
+</svg>

@@ -1,44 +1,19 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const THEMES = [
-  'light',
-  'dark',
-  'cupcake',
-  'bumblebee',
-  'emerald',
-  'corporate',
-  'synthwave',
-  'retro',
-  'cyberpunk',
-  'valentine',
-  'halloween',
-  'garden',
-  'forest',
-  'aqua',
-  'lofi',
-  'pastel',
-  'fantasy',
-  'wireframe',
-  'black',
-  'luxury',
-  'dracula',
-  'cmyk',
-  'autumn',
-  'business',
-  'acid',
-  'lemonade',
-  'night',
-  'coffee',
-  'winter',
-  'dim',
-  'nord',
-  'sunset',
+  'light', 'dark', 'cupcake', 'bumblebee', 'emerald', 'corporate',
+  'synthwave', 'retro', 'cyberpunk', 'valentine', 'halloween', 'garden',
+  'forest', 'aqua', 'lofi', 'pastel', 'fantasy', 'wireframe', 'black',
+  'luxury', 'dracula', 'cmyk', 'autumn', 'business', 'acid', 'lemonade',
+  'night', 'coffee', 'winter', 'dim', 'nord', 'sunset',
 ];
 
 export function ThemeSelector() {
   const [currentTheme, setCurrentTheme] = useState<string>('dark');
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('theme') || 'dark';
@@ -46,47 +21,56 @@ export function ThemeSelector() {
     document.documentElement.setAttribute('data-theme', saved);
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen]);
+
   const handleThemeChange = (theme: string) => {
     setCurrentTheme(theme);
     localStorage.setItem('theme', theme);
     document.documentElement.setAttribute('data-theme', theme);
+    setIsOpen(false);
   };
 
   return (
-    <div className="dropdown dropdown-end">
+    <div ref={containerRef} className="relative">
       <button
-        tabIndex={0}
-        className="btn btn-ghost btn-circle btn-sm"
-        title="Theme selector"
+        onClick={() => setIsOpen((v) => !v)}
+        className="btn btn-ghost btn-sm gap-1.5 px-2"
+        title="Change theme"
         aria-label="Change theme"
+        aria-expanded={isOpen}
       >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          className="w-5 h-5"
-        >
-          <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8zm0-14a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V7a1 1 0 0 0-1-1z" />
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+        </svg>
+        <span className="text-xs capitalize hidden sm:inline">{currentTheme}</span>
+        <svg className={`w-3 h-3 transition-transform duration-150 ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      <ul
-        tabIndex={0}
-        className="dropdown-content z-[1] p-2 shadow bg-base-100 rounded-box w-52 grid grid-cols-2 gap-1"
-      >
-        {THEMES.map((theme) => (
-          <li key={theme}>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-1 z-50 bg-base-100 border border-base-300 rounded-box shadow-lg w-52 p-2 grid grid-cols-2 gap-1 max-h-72 overflow-y-auto">
+          {THEMES.map((theme) => (
             <button
+              key={theme}
               onClick={() => handleThemeChange(theme)}
-              className={`btn btn-sm btn-ghost w-full justify-start ${
-                currentTheme === theme ? 'btn-active' : ''
-              }`}
-              title={`Switch to ${theme} theme`}
+              className={`btn btn-xs btn-ghost w-full justify-start capitalize ${currentTheme === theme ? 'btn-active' : ''}`}
             >
-              <span className="capitalize text-xs">{theme}</span>
+              {theme}
             </button>
-          </li>
-        ))}
-      </ul>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
