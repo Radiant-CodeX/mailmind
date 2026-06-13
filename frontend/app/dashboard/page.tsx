@@ -172,7 +172,6 @@ export default function Home() {
     triageProgress,
     triageActive,
     triageTotal,
-    patchEmailTriage,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const scoreFor = (p: Priority): number =>
@@ -402,8 +401,6 @@ export default function Home() {
                     error={detailError}
                     classification={classification}
                     triageResult={triageResult}
-                    onRetriage={retriage}
-                    isRetriaging={isRetriaging}
                     precedents={precedents}
                     aiDraft={aiDraft}
                     setAiDraft={setAiDraft}

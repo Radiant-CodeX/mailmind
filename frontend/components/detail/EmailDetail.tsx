@@ -305,8 +305,6 @@ interface EmailDetailProps {
   error: string | null;
   classification: ClassificationResult | null;
   triageResult: TriageResult | null;
-  onRetriage?: () => void;
-  isRetriaging?: boolean;
   precedents: PrecedentItem[];
   aiDraft: string | null;
   setAiDraft: (val: string) => void;
@@ -340,8 +338,6 @@ export function EmailDetail({
   error,
   classification,
   triageResult,
-  onRetriage,
-  isRetriaging,
   precedents,
   aiDraft,
   setAiDraft,
@@ -370,9 +366,7 @@ export function EmailDetail({
 }: EmailDetailProps) {
   const [isDraftExpanded, setIsDraftExpanded] = useState(false);
   const [isCommitmentsExpanded, setIsCommitmentsExpanded] = useState(false);
-  // Default-open so the 5-axis breakdown is always visible when an email opens
-  // (the panel remounts per email via key={selectedEmailId}).
-  const [isTriageExpanded, setIsTriageExpanded] = useState(true);
+  const [isTriageExpanded, setIsTriageExpanded] = useState(false);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -555,48 +549,27 @@ export function EmailDetail({
             {/* Triage Breakdown — full 5-axis explainability (visible, not hover-only) */}
             {triageResult && (
               <div className="bg-base-100">
-                <div className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-base-200/30 transition-colors">
-                  <button
-                    onClick={() => setIsTriageExpanded(!isTriageExpanded)}
-                    className="flex items-center gap-3 text-left cursor-pointer flex-1 min-w-0"
-                  >
+                <button
+                  onClick={() => setIsTriageExpanded(!isTriageExpanded)}
+                  className="w-full flex items-center justify-between px-4 py-3.5 hover:bg-base-200/30 transition-colors text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
                     <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-500 border border-purple-500/20 flex items-center justify-center shrink-0">
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                       </svg>
                     </div>
-                    <div className="min-w-0">
+                    <div>
                       <p className="text-[11px] font-bold text-base-content uppercase tracking-widest">Triage Breakdown</p>
                       <p className="text-[10px] text-base-content/60 mt-0.5">
                         Composite {Math.round(triageResult.composite_score)} · {triageResult.axes?.length ?? 0} scoring axes
                       </p>
                     </div>
-                  </button>
-                  <div className="flex items-center gap-1.5 shrink-0 pl-2">
-                    {onRetriage && (
-                      <button
-                        onClick={onRetriage}
-                        disabled={isRetriaging}
-                        title="Re-triage this email (fresh LLM scoring)"
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider text-purple-600 bg-purple-500/10 border border-purple-500/20 hover:bg-purple-500/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                      >
-                        <svg className={`w-3 h-3 ${isRetriaging ? "animate-spin" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        {isRetriaging ? "Scoring…" : "Re-triage"}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setIsTriageExpanded(!isTriageExpanded)}
-                      className="p-1 cursor-pointer"
-                      aria-label={isTriageExpanded ? "Collapse" : "Expand"}
-                    >
-                      <svg className={`w-4 h-4 text-base-content/60 transition-transform duration-200 ${isTriageExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
                   </div>
-                </div>
+                  <svg className={`w-4 h-4 text-base-content/60 transition-transform duration-200 ${isTriageExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
                 {isTriageExpanded && (
                   <div className="border-t border-base-200 bg-base-300/20 px-4 py-4">
                     <TriageExplainer triage={triageResult} classification={classification} />
