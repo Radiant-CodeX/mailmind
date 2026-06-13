@@ -428,6 +428,61 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
     return [r for r in results if r is not None]
 
 
+class PriorityOverrideRequest(BaseModel):
+    """User correction to an email's triage priority (the feedback loop)."""
+    email_id: str
+    sender: str
+    override_priority: str  # CRITICAL / HIGH / MEDIUM / LOW / DONE
+    original_priority: str | None = None
+
+
+@router.post("/triage/override")
+def override_priority(request: PriorityOverrideRequest, current_user=Depends(get_current_user)) -> dict[str, Any]:
+    """
+    Record a manual priority override and feed it into the triage loop.
+
+    Persists the correction, updates the email's enrichment row, and invalidates
+    the triage cache so the new priority is reflected immediately. Future emails
+    from the same sender can then be triaged faster via the learned hint.
+    """
+    valid = {"CRITICAL", "HIGH", "MEDIUM", "LOW", "DONE"}
+    new_priority = (request.override_priority or "").strip().upper()
+    if new_priority not in valid:
+        raise HTTPException(status_code=400, detail=f"override_priority must be one of {sorted(valid)}")
+
+    user_key = current_user.primary_email or current_user.id
+
+    record = repo.record_priority_override(
+        request.email_id,
+        request.sender,
+        new_priority,
+        original_priority=request.original_priority,
+        user_id=current_user.id,
+        account_id=user_key,
+    )
+
+    # Invalidate the cached triage entry so the corrected priority takes effect.
+    try:
+        from app.services.cache import triage_cache_store
+        cached = triage_cache_store.get(request.email_id, user_email=user_key)
+        if cached:
+            updated = {**cached}
+            if new_priority != "DONE":
+                updated["priority"] = new_priority
+                updated["approval_mode"] = "GATE" if new_priority == "CRITICAL" else "SUGGEST"
+            updated["status"] = "done" if new_priority == "DONE" else updated.get("status")
+            triage_cache_store.set(request.email_id, updated, user_email=user_key)
+    except Exception as e:
+        logger.debug("[override] cache update skipped: %s", e)
+
+    return {
+        "ok": True,
+        "email_id": request.email_id,
+        "priority": new_priority,
+        "persisted": record is not None,
+    }
+
+
 @router.post("/triage-page-stream")
 async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Depends(get_current_user)) -> StreamingResponse:
     """
@@ -451,6 +506,29 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
 
         # ── Emit cache hits immediately ────────────────────────────────────
         for i, req in enumerate(requests):
+            # Feedback loop: if the user has consistently overridden this
+            # sender's priority, adopt it instantly and skip cache + LLM.
+            hint = repo.get_sender_priority_hint(req.sender, account_id=user_key)
+            if hint and hint != "DONE":
+                r = {
+                    "email_id": req.email_id,
+                    "priority": hint,
+                    "composite_score": {"CRITICAL": 90, "HIGH": 65, "MEDIUM": 40, "LOW": 10}.get(hint, 40),
+                    "approval_mode": "GATE" if hint == "CRITICAL" else "SUGGEST",
+                    "axes": [],
+                    "_cached": "learned",
+                }
+                results[i] = r
+                payload = {
+                    "email_id": req.email_id,
+                    "priority": hint,
+                    "composite_score": r["composite_score"],
+                    "cached": True,
+                    "learned": True,
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+                continue
+
             cached = triage_cache_store.get(req.email_id, user_email=user_key)
             if cached and cached.get("priority"):
                 results[i] = {**cached, "_cached": "redis"}

@@ -20,10 +20,11 @@ import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
 import { useCommitments } from '../../hooks/useCommitments';
 import { useCalendar } from '../../hooks/useCalendar';
-import { checkAuthStatus, logoutUser, createCalendarEvent, AccountInfo } from '../../lib/api';
+import { checkAuthStatus, logoutUser, createCalendarEvent, overrideEmailPriority, AccountInfo } from '../../lib/api';
 import { rememberLogin, getRememberMe, clearRememberedLogin, Provider } from '../../lib/session';
 import { userStorage } from '../../lib/userStorage';
-import { CalendarEvent } from '../../lib/types';
+import { CalendarEvent, Priority } from '../../lib/types';
+import { OverridePriority } from '../../components/inbox/PriorityOverrideMenu';
 
 export default function Home() {
   const router = useRouter();
@@ -44,10 +45,42 @@ export default function Home() {
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [doneEmailIds, setDoneEmailIds] = useState<Set<string>>(new Set());
+  // Local priority overrides (id → priority) so the badge updates instantly
+  // while the correction is persisted + fed into the triage loop server-side.
+  const [priorityOverrides, setPriorityOverrides] = useState<Record<string, Priority>>({});
 
   const markEmailDone = (id: string) => {
     setDoneEmailIds((prev) => new Set([...prev, id]));
   };
+
+  const handleOverridePriority = (
+    id: string,
+    sender: string,
+    next: OverridePriority,
+    current: Priority,
+  ) => {
+    // Optimistic UI: DONE hides the badge, anything else recolors it.
+    if (next === 'DONE') {
+      markEmailDone(id);
+    } else {
+      setPriorityOverrides((prev) => ({ ...prev, [id]: next }));
+    }
+    overrideEmailPriority({
+      email_id: id,
+      sender,
+      override_priority: next,
+      original_priority: current,
+    }).catch((err) => {
+      console.error('Priority override failed:', err);
+      // Roll back the optimistic change on failure.
+      if (next === 'DONE') {
+        setDoneEmailIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+      } else {
+        setPriorityOverrides((prev) => { const n = { ...prev }; delete n[id]; return n; });
+      }
+    });
+  };
+
 
   // Load auth status on mount — retries up to 3× (500ms apart) to handle the
   // race where cookies from the OAuth popup haven't been flushed to the browser
@@ -138,6 +171,24 @@ export default function Home() {
     isStreaming,
     triageProgress,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
+
+  const scoreFor = (p: Priority): number =>
+    ({ CRITICAL: 90, HIGH: 65, MEDIUM: 40, LOW: 10 } as Record<Priority, number>)[p];
+
+  // Apply local overrides to the emails before rendering the list.
+  const displayEmails = React.useMemo(
+    () =>
+      emails.map((e) => {
+        const ov = priorityOverrides[e.id];
+        if (!ov) return e;
+        return {
+          ...e,
+          composite_score: scoreFor(ov),
+          triage: e.triage ? { ...e.triage, priority: ov, composite_score: scoreFor(ov) } : e.triage,
+        };
+      }),
+    [emails, priorityOverrides],
+  );
 
   // Opening an email marks it read.
   const handleSelectEmail = (id: string) => {
@@ -275,7 +326,7 @@ export default function Home() {
                 }`}
               >
                 <EmailList
-                  emails={emails}
+                  emails={displayEmails}
                   selectedEmailId={selectedEmailId}
                   onSelectEmail={handleSelectEmail}
                   searchQuery={searchQuery}
@@ -302,6 +353,7 @@ export default function Home() {
                   onReportSpam={reportSpam}
                   onToggleRead={markRead}
                   onMarkDone={markEmailDone}
+                  onOverridePriority={handleOverridePriority}
                   doneEmailIds={doneEmailIds}
                   isStreaming={isStreaming}
                   triageProgress={triageProgress}

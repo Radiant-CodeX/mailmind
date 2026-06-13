@@ -1,6 +1,7 @@
 import React from 'react';
 import { Email, Priority } from '../../lib/types';
 import { PriorityBadge } from './PriorityBadge';
+import { PriorityOverrideMenu, OverridePriority } from './PriorityOverrideMenu';
 
 interface EmailListItemProps {
   email: Email;
@@ -13,13 +14,14 @@ interface EmailListItemProps {
   onSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
   onMarkDone?: (id: string) => void;
+  onOverridePriority?: (id: string, sender: string, priority: OverridePriority, current: Priority) => void;
   isFullWidth: boolean;
   /** Whether triage scoring applies to this folder (false for Sent/Drafts/etc). */
   triageApplies?: boolean;
   isDone?: boolean;
 }
 
-export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, onMarkDone, isFullWidth, triageApplies = true, isDone = false }: EmailListItemProps) {
+export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, onMarkDone, onOverridePriority, isFullWidth, triageApplies = true, isDone = false }: EmailListItemProps) {
   const isUnread = email.isRead === false;
   // Triage score is still being computed when the folder uses triage but this
   // email has no triage object yet — show a shimmer instead of a misleading 0.
@@ -209,7 +211,16 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
             {!isDone && (scorePending ? (
               <span className="px-2 py-0.5 w-12 h-5 rounded bg-base-200 animate-pulse" title="Scoring…" />
             ) : triageApplies && (
-              <PriorityBadge priority={priority} />
+              onOverridePriority ? (
+                <PriorityOverrideMenu
+                  current={priority}
+                  onOverride={(p) => onOverridePriority(email.id, email.sender, p, priority)}
+                >
+                  <PriorityBadge priority={priority} />
+                </PriorityOverrideMenu>
+              ) : (
+                <PriorityBadge priority={priority} />
+              )
             ))}
 
             <button
@@ -299,7 +310,16 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
         ) : scorePending ? (
           <span className="px-2 py-0.5 w-12 h-5 rounded bg-base-200 animate-pulse" title="Scoring…" />
         ) : triageApplies ? (
-          <PriorityBadge priority={priority} />
+          onOverridePriority ? (
+            <PriorityOverrideMenu
+              current={priority}
+              onOverride={(p) => onOverridePriority(email.id, email.sender, p, priority)}
+            >
+              <PriorityBadge priority={priority} />
+            </PriorityOverrideMenu>
+          ) : (
+            <PriorityBadge priority={priority} />
+          )
         ) : null}
         <button
           onClick={(e) => {

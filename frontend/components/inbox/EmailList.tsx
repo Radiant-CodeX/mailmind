@@ -35,6 +35,7 @@ interface EmailListProps {
   onReportSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
   onMarkDone?: (id: string) => void;
+  onOverridePriority?: (id: string, sender: string, priority: import('./PriorityOverrideMenu').OverridePriority, current: import('../../lib/types').Priority) => void;
   doneEmailIds?: Set<string>;
   // Streaming triage progress
   isStreaming?: boolean;
@@ -69,6 +70,7 @@ export function EmailList({
   onReportSpam,
   onToggleRead,
   onMarkDone,
+  onOverridePriority,
   doneEmailIds,
   isStreaming = false,
   triageProgress = 0,
@@ -82,8 +84,8 @@ export function EmailList({
       } bg-base-100 flex flex-col h-full overflow-hidden`}
       id="email-list"
     >
-      {/* Live triage streaming progress */}
-      {(isStreaming || triageProgress > 0) && (
+      {/* Live triage streaming progress — only while actively triaging */}
+      {isStreaming && (
         <TriageStreamingPanel
           totalEmails={emails.length}
           isStreaming={isStreaming}
@@ -201,6 +203,7 @@ export function EmailList({
               onSpam={showActions ? onReportSpam : undefined}
               onToggleRead={showActions ? onToggleRead : undefined}
               onMarkDone={showActions ? onMarkDone : undefined}
+              onOverridePriority={showActions ? onOverridePriority : undefined}
               isDone={doneEmailIds?.has(email.id)}
               isFullWidth={isFullWidth}
               triageApplies={['Inbox', 'Starred', 'Important'].includes(activeFolder)}
