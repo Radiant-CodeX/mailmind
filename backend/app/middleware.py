@@ -26,7 +26,15 @@ class SecurityHeadersMiddleware:
             return
 
         from app.config.settings import settings
-        is_https = scope.get("scheme") == "https"
+
+        # Check scheme: either from the request itself, or from X-Forwarded-Proto
+        # (set by Cloudflare Flexible SSL or other TLS-terminating proxies)
+        scheme = scope.get("scheme", "http")
+        headers = dict(scope.get("headers", []))
+        forwarded_proto = headers.get(b"x-forwarded-proto", b"").decode("utf-8").lower()
+        if forwarded_proto in ("http", "https"):
+            scheme = forwarded_proto
+        is_https = scheme == "https"
 
         async def send_with_security_headers(message):
             if message["type"] == "http.response.start":
