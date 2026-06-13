@@ -536,6 +536,25 @@ export async function fetchMailbox(
   return res.json();
 }
 
+/** Fetch one email's full content (rich html_body + attachments) on open.
+ *  The mirror serves only a snippet, so the detail view calls this for the
+ *  formatted HTML body and attachment list. */
+export async function fetchMailboxMessage(emailId: string): Promise<{
+  email_id: string;
+  sender: string;
+  subject: string;
+  body: string;
+  html_body: string | null;
+  received_at: string | null;
+  is_read: boolean;
+  has_attachments: boolean;
+  attachments: { attachment_id: string; filename: string; mime_type: string; size: number }[];
+}> {
+  const res = await apiFetch(`${BASE}/api/mailbox/message/${encodeURIComponent(emailId)}`);
+  if (!res.ok) throw new Error(`Failed to fetch message (${res.status})`);
+  return res.json();
+}
+
 export async function fetchSentEmails(limit = 10) {
   const res = await apiFetch(`${BASE}/api/emails/sent?limit=${limit}`);
   if (!res.ok) throw new Error("Sent emails fetch failed");

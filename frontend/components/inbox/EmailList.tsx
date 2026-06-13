@@ -13,6 +13,8 @@ interface EmailListProps {
   onSelectEmail: (id: string) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
+  /** Priority distribution shown as chips where the search bar used to be. */
+  priorityCounts?: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number };
   sortKey?: SortKey;
   onSortChange?: (key: SortKey) => void;
   filters?: MailFilters;
@@ -52,6 +54,7 @@ export function EmailList({
   onSelectEmail,
   searchQuery,
   onSearchChange,
+  priorityCounts,
   sortKey = 'normal',
   onSortChange,
   filters,
@@ -151,35 +154,32 @@ export function EmailList({
         </div>
       </div>
 
-      {/* Search Input */}
-      <div className="p-3 bg-base-100 border-b border-base-200">
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="Search email body, sender..."
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 rounded-md bg-base-200 border border-base-300 text-xs text-base-content placeholder-base-content/60 focus:outline-none focus:border-primary transition-all font-medium"
-            id="inbox-search"
-          />
-          <div className="absolute left-2.5 top-2.5 text-base-content/60 pointer-events-none">
-            <svg
-              className="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
+      {/* Priority distribution — replaced the search bar. Shows how many of the
+          loaded emails fall into each triage priority. */}
+      {priorityCounts && (
+        <div className="p-3 bg-base-100 border-b border-base-200">
+          <div className="flex items-center gap-2">
+            {([
+              { key: 'CRITICAL', label: 'Critical', dot: 'bg-red-500', text: 'text-red-500', ring: 'border-red-500/20 bg-red-500/5' },
+              { key: 'HIGH', label: 'High', dot: 'bg-orange-500', text: 'text-orange-500', ring: 'border-orange-500/20 bg-orange-500/5' },
+              { key: 'MEDIUM', label: 'Medium', dot: 'bg-amber-500', text: 'text-amber-500', ring: 'border-amber-500/20 bg-amber-500/5' },
+              { key: 'LOW', label: 'Low', dot: 'bg-slate-400', text: 'text-slate-400', ring: 'border-slate-400/20 bg-slate-400/5' },
+            ] as const).map((p) => (
+              <div
+                key={p.key}
+                className={`flex-1 flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-lg border ${p.ring}`}
+                title={`${priorityCounts[p.key]} ${p.label} ${priorityCounts[p.key] === 1 ? 'email' : 'emails'}`}
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.dot}`} />
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-base-content/60 truncate">{p.label}</span>
+                </span>
+                <span className={`text-xs font-extrabold tabular-nums ${p.text}`}>{priorityCounts[p.key]}</span>
+              </div>
+            ))}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Email List container */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">

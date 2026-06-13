@@ -386,6 +386,26 @@ def poll_new_email(account=Depends(get_default_account)) -> dict[str, Any]:
         return {"has_new": False, "latest_id": None, "error": str(e)}
 
 
+@router.get("/mailbox/message/{email_id}")
+def get_mailbox_message(email_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
+    """
+    Fetch one message's FULL content (rich html_body + attachments) on demand.
+
+    The mirror stores only an envelope + snippet for speed, so the detail view
+    calls this when an email is opened to get the formatted HTML body and the
+    attachment list.
+    """
+    client = AccountService.get_adapter(account)
+    try:
+        msg = client.get_message(email_id)
+    except Exception as e:
+        logger.warning("[mailbox] get_message failed for %s: %s", email_id, e)
+        raise HTTPException(status_code=502, detail=f"Failed to fetch message: {str(e)}")
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return msg
+
+
 @router.get("/emails/{email_id}/attachments")
 def list_attachments(email_id: str, _user: str = Depends(get_current_user)) -> list[dict]:
     """Return attachment metadata (id, filename, mime_type, size) for an email."""

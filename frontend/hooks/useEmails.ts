@@ -320,8 +320,12 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
           byId[event.email_id] = {
             composite_score: event.composite_score || 0,
             priority: event.priority,
-            approval_mode: 'SUGGEST',
-            axes: [],
+            approval_mode: event.approval_mode || 'SUGGEST',
+            // Inline axes from the stream → detail view shows the 5-axis
+            // breakdown instantly with no extra round-trip.
+            axes: event.axes || [],
+            email_type: event.email_type,
+            triage_reasoning: event.triage_reasoning,
             dynamic_weights: {},
           };
           completed++;

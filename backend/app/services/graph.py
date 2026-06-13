@@ -633,6 +633,52 @@ class GraphClient:
         next_token = str(skip + limit) if len(emails) == limit and (skip + limit) < total else None
         return {"emails": emails, "next_page_token": next_token, "total": total}
 
+    def get_message(self, email_id: str) -> dict[str, Any] | None:
+        """Fetch a single message fully formatted (rich html_body + attachments).
+
+        Used by the detail view: the mirror stores only a snippet, so opening an
+        email fetches the full content on demand.
+        """
+        if self.use_mock:
+            for m in self.get_inbox_emails(limit=50):
+                if m.get("email_id") == email_id:
+                    return m
+            return None
+        prefix = self._get_prefix()
+        msg = self._request(
+            "GET",
+            f"{prefix}/messages/{email_id}"
+            "?$select=id,subject,from,sender,receivedDateTime,isRead,hasAttachments,body,conversationId",
+            headers={"Prefer": 'outlook.body-content-type="html"'},
+        )
+        if not msg:
+            return None
+        from_obj = msg.get("from") or msg.get("sender")
+        sender = "unknown@example.com"
+        if from_obj and "emailAddress" in from_obj:
+            sender = from_obj["emailAddress"].get("address", sender)
+        body_obj = msg.get("body") or {}
+        content = body_obj.get("content", "")
+        content_type = (body_obj.get("contentType") or "").lower()
+        if content_type == "html" and content:
+            html_body = content
+            plain_body = _graph_html_to_text(content)
+        else:
+            html_body = None
+            plain_body = content or msg.get("bodyPreview", "")
+        attachments = self.list_attachments(email_id) if msg.get("hasAttachments") else []
+        return {
+            "email_id": msg.get("id"),
+            "sender": sender,
+            "subject": msg.get("subject", ""),
+            "body": plain_body,
+            "html_body": html_body,
+            "received_at": msg.get("receivedDateTime"),
+            "is_read": bool(msg.get("isRead", True)),
+            "has_attachments": bool(msg.get("hasAttachments", False)),
+            "attachments": attachments,
+        }
+
     def list_inbox_delta(
         self, delta_link: str | None = None, *, folder: str = "inbox", max_pages: int = 40
     ) -> dict[str, Any]:

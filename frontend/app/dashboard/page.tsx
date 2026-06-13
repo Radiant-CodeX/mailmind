@@ -193,6 +193,17 @@ export default function Home() {
     [emails, priorityOverrides],
   );
 
+  // Priority distribution for the visible page — drives the count chips that
+  // replaced the search bar at the top of the list.
+  const priorityCounts = React.useMemo(() => {
+    const c = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+    for (const e of displayEmails) {
+      const p = e.triage?.priority as keyof typeof c | undefined;
+      if (p && p in c) c[p] += 1;
+    }
+    return c;
+  }, [displayEmails]);
+
   // Opening an email marks it read.
   const handleSelectEmail = (id: string) => {
     setSelectedEmailId(id);
@@ -220,7 +231,20 @@ export default function Home() {
     sendDraft,
     retriage,
     isRetriaging,
+    fullContent,
   } = useEmailDetail(selectedEmail, showPipeline, userEmail, patchEmailTriage);
+
+  // Merge the on-open full content (rich html_body) over the list email, which
+  // from the mirror only carries a snippet. Keeps the detail view formatted.
+  const detailEmail = React.useMemo(() => {
+    if (!selectedEmail) return null;
+    if (!fullContent) return selectedEmail;
+    return {
+      ...selectedEmail,
+      html_body: fullContent.html_body ?? selectedEmail.html_body,
+      body: fullContent.body || selectedEmail.body,
+    };
+  }, [selectedEmail, fullContent]);
 
   // Auto-mark email as Done when a reply is successfully sent
   useEffect(() => {
@@ -336,6 +360,7 @@ export default function Home() {
                   onSelectEmail={handleSelectEmail}
                   searchQuery={searchQuery}
                   onSearchChange={setSearchQuery}
+                  priorityCounts={priorityCounts}
                   sortKey={sortKey}
                   onSortChange={setSortKey}
                   filters={filters}
@@ -372,7 +397,7 @@ export default function Home() {
                 <div className="w-[55%] h-full overflow-hidden">
                   <EmailDetail
                     key={selectedEmailId}
-                    email={selectedEmail}
+                    email={detailEmail}
                     loading={detailLoading}
                     error={detailError}
                     classification={classification}
