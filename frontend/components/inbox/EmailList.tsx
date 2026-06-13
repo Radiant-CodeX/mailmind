@@ -42,6 +42,8 @@ interface EmailListProps {
   triageProgress?: number;
   /** Emails actively being LLM-triaged (cache hits excluded). */
   triageActive?: number;
+  /** Total LLM triage jobs in this batch (from to_triage meta event). */
+  triageTotal?: number;
 }
 
 export function EmailList({
@@ -77,6 +79,7 @@ export function EmailList({
   isStreaming = false,
   triageProgress = 0,
   triageActive = 0,
+  triageTotal = 0,
 }: EmailListProps) {
   // Archive/spam/read actions only make sense in the standard mail folders.
   const showActions = !['Trash', 'Sent', 'Drafts', 'Spam'].includes(activeFolder);
@@ -88,7 +91,7 @@ export function EmailList({
       id="email-list"
     >
       {/* Live triage streaming progress — counts only real LLM triage work */}
-      <TriageStreamingPanel count={triageActive} />
+      <TriageStreamingPanel count={triageActive} total={triageTotal} done={triageProgress} />
 
       {/* Header and counter */}
       <div className="p-4 border-b border-base-200 flex items-center justify-between">

@@ -174,6 +174,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   const [triageProgress, setTriageProgress] = useState(0);
   // Number of emails actually being LLM-triaged (cache hits / learned hints excluded).
   const [triageActive, setTriageActive] = useState(0);
+  // Total LLM triage jobs in this batch (set once from to_triage meta event).
+  const [triageTotal, setTriageTotal] = useState(0);
   const [pendingTrash, setPendingTrash] = useState<PendingTrash | null>(null);
   // Lazy-init from the persisted preference (guarded for SSR).
   const [sortKey, setSortKeyState] = useState<SortKey>(() => {
@@ -273,6 +275,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     setIsStreaming(true);
     setTriageProgress(0);
     setTriageActive(0);
+    setTriageTotal(0);
 
     const byId: Record<string, TriageLite> = {};
     let completed = 0;
@@ -296,6 +299,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
         if (event.to_triage !== undefined) {
           llmRemaining = event.to_triage;
           setTriageActive(llmRemaining);
+          setTriageTotal(event.to_triage);
           continue;
         }
         if (event.email_id && event.priority) {
@@ -928,5 +932,6 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     isStreaming,
     triageProgress,
     triageActive,
+    triageTotal,
   };
 }

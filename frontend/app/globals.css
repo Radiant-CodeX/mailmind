@@ -68,3 +68,13 @@ body {
 .animate-shimmer {
   animation: shimmer 5s linear infinite;
 }
+
+/* Triage progress bar: sliding shimmer on the leading edge */
+@keyframes shimmerSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.animate-shimmer-slide {
+  animation: shimmerSlide 1.2s ease-in-out infinite;
+}
