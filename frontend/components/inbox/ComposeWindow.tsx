@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { composeEmail } from '../../lib/api';
+import { composeEmail, composeDraftWithAI } from '../../lib/api';
 
 interface ComposeWindowProps {
   onClose: () => void;
@@ -19,6 +19,11 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  // AI draft state
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [isDrafting, setIsDrafting] = useState(false);
+  const [showAiBar, setShowAiBar] = useState(false);
 
   // Field validation states
   const [validationErrors, setValidationErrors] = useState<{ to?: string; subject?: string; body?: string }>({});
@@ -86,6 +91,28 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
       setError(errorMessage);
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleAiDraft = async () => {
+    if (!aiPrompt.trim()) {
+      setError('Tell the AI what you want to say first.');
+      return;
+    }
+    setError(null);
+    setIsDrafting(true);
+    try {
+      const result = await composeDraftWithAI({
+        prompt: aiPrompt,
+        recipient: to || undefined,
+        subject: subject || undefined,
+      });
+      setBody(result.draft);
+      setValidationErrors((prev) => ({ ...prev, body: undefined }));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'AI draft failed. Please try again.');
+    } finally {
+      setIsDrafting(false);
     }
   };
 
@@ -286,6 +313,68 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
               </div>
               {validationErrors.subject && (
                 <span className="text-[9px] font-semibold text-red-500">{validationErrors.subject}</span>
+              )}
+            </div>
+
+            {/* AI Draft bar */}
+            <div className="flex flex-col gap-1.5">
+              {!showAiBar ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAiBar(true)}
+                  disabled={isSending}
+                  className="self-start flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 border border-primary/20 text-primary text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                  id="btn-compose-ai-toggle"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Draft with AI
+                </button>
+              ) : (
+                <div className="flex flex-col gap-1.5 p-2.5 rounded-lg bg-primary/5 border border-primary/20 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-primary uppercase tracking-wider flex items-center gap-1">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      AI Co-Pilot · Tone DNA + RAG
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAiBar(false)}
+                      className="text-[10px] font-bold text-base-content/60 hover:text-red-500 transition-colors cursor-pointer"
+                      title="Hide AI draft"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <textarea
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    disabled={isDrafting || isSending}
+                    placeholder="e.g. Ask Ravi to reschedule Friday's review to Monday, keep it friendly"
+                    rows={2}
+                    className="w-full p-2 rounded bg-base-100 border border-base-300 text-[11px] text-base-content leading-relaxed focus:outline-none focus:border-primary resize-none font-medium custom-scrollbar"
+                    id="compose-ai-prompt"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAiDraft}
+                    disabled={isDrafting || isSending}
+                    className="self-end flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary hover:opacity-90 text-base-100 text-[10px] font-bold transition-all cursor-pointer disabled:opacity-50"
+                    id="btn-compose-ai-generate"
+                  >
+                    {isDrafting ? (
+                      <>
+                        <span className="w-3 h-3 border-2 border-base-100 border-t-transparent animate-spin rounded-full" />
+                        Drafting in your voice...
+                      </>
+                    ) : (
+                      <>Generate{body ? ' (replaces body)' : ''}</>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
 

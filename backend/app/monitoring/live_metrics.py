@@ -132,8 +132,8 @@ class _LiveMetrics:
           • parallel   = measured end-to-end wall-clock median (what we actually
             achieve by overlapping them)
 
-        Falls back to representative reference figures (5.8s → 2.8s) until real
-        runs are recorded, so the demo card is never empty.
+        Returns measured=False with zeroed figures until enough real runs are
+        recorded — we never fabricate staged numbers.
         """
         pct = self.latency_percentiles()["per_stage"]
         sequential_ms = sum(s["p50"] for s in pct.values())
@@ -143,9 +143,6 @@ class _LiveMetrics:
         parallel_ms = self._percentile(runs, 50) if runs else 0.0
 
         measured = sequential_ms > 0 and parallel_ms > 0
-        if not measured:
-            # reference numbers from local benchmarking — clearly flagged
-            sequential_ms, parallel_ms = 5800.0, 2800.0
 
         speedup_x = round(sequential_ms / parallel_ms, 2) if parallel_ms else 0.0
         saved_pct = round((1 - parallel_ms / sequential_ms) * 100, 1) if sequential_ms else 0.0

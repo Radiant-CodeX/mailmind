@@ -161,11 +161,21 @@ export function MetricsView() {
                     ? 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20'
                     : 'text-amber-500 bg-amber-500/10 border-amber-500/20'
                 }`}>
-                  {data.speedup.measured ? `MEASURED · ${data.speedup.runs} runs` : 'REFERENCE'}
+                  {data.speedup.measured ? `MEASURED · ${data.speedup.runs} runs` : 'AWAITING DATA'}
                 </span>
               </div>
 
-              {/* Comparison bars */}
+              {/* Comparison bars — only render once we have real measured runs */}
+              {!data.speedup.measured ? (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <p className="text-sm font-bold text-base-content/70">Collecting real pipeline runs…</p>
+                  <p className="text-[11px] text-base-content/50 mt-1 max-w-md">
+                    Open a few emails to let the enrichment pipeline run. This card shows measured
+                    sequential-vs-parallel timings — no staged numbers.
+                  </p>
+                </div>
+              ) : (
+              <>
               <div className="space-y-3">
                 {/* Sequential */}
                 <div>
@@ -209,6 +219,8 @@ export function MetricsView() {
                   <span className="text-[10px] text-base-content/50 font-bold ml-1">TIME SAVED</span>
                 </div>
               </div>
+              </>
+              )}
             </div>
 
             {/* ── Gauges row ── */}
