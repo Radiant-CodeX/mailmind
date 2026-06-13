@@ -360,6 +360,38 @@ class Feedback(Base):
     )
 
 
+class TriagePriorityOverride(Base):
+    """
+    A user-supplied correction to an email's triage priority.
+
+    Each row is one override event ("this CRITICAL email is actually DONE").
+    Beyond updating the single email, these rows form a feedback loop: future
+    emails from the same sender can be short-circuited to the learned priority,
+    making triage both faster and more aligned with the user's judgment.
+    """
+
+    __tablename__ = "triage_priority_override"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # account scope (legacy: primary_email) used to match the triage path's key
+    account_id: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    email_id: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    sender: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    original_priority: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # CRITICAL / HIGH / MEDIUM / LOW / DONE
+    override_priority: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+    __table_args__ = (
+        Index("ix_override_account_sender", "account_id", "sender"),
+    )
+
+
 class ProcessingMetric(Base):
     """Per-stage latency and SLA outcome for one email's processing."""
 

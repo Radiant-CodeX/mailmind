@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 
 from app.config.settings import settings
 from app.db.base import get_session, is_persistence_enabled
-from app.db.models import AuditLog, EmailEnrichment, ProcessingMetric, ToneProfile
+from app.db.models import AuditLog, EmailEnrichment, ProcessingMetric, ToneProfile, TriagePriorityOverride
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +211,115 @@ def write_audit(
             account_id=account_id,
         ))
         session.commit()
+
+
+def record_priority_override(
+    email_id: str,
+    sender: str,
+    override_priority: str,
+    *,
+    original_priority: Optional[str] = None,
+    user_id: Optional[str] = None,
+    account_id: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """
+    Persist a user's triage-priority correction and apply it to the email's
+    enrichment row. Returns the override as a dict, or None when persistence
+    is disabled.
+
+    The stored row also feeds ``get_sender_priority_hint`` so subsequent emails
+    from the same sender can be triaged faster and more accurately.
+    """
+    if not is_persistence_enabled():
+        return None
+
+    norm_sender = (sender or "").strip().lower()
+    override_priority = (override_priority or "").strip().upper()
+
+    with get_session() as session:
+        if session is None:
+            return None
+
+        row = TriagePriorityOverride(
+            email_id=email_id,
+            sender=norm_sender,
+            original_priority=original_priority,
+            override_priority=override_priority,
+            user_id=user_id,
+            account_id=account_id,
+        )
+        session.add(row)
+
+        # Reflect the override on the canonical enrichment record so the inbox
+        # and detail views show the corrected priority immediately.
+        enrichment = session.get(EmailEnrichment, email_id)
+        if enrichment is not None:
+            if override_priority == "DONE":
+                enrichment.status = "done"
+            else:
+                enrichment.priority = override_priority
+                enrichment.approval_mode = "GATE" if override_priority == "CRITICAL" else "SUGGEST"
+
+        session.commit()
+        result = {
+            "id": row.id,
+            "email_id": email_id,
+            "sender": norm_sender,
+            "override_priority": override_priority,
+            "original_priority": original_priority,
+        }
+
+    write_audit(
+        email_id,
+        "priority_override",
+        actor="user",
+        details={"from": original_priority, "to": override_priority},
+        account_id=account_id,
+    )
+    return result
+
+
+def get_sender_priority_hint(
+    sender: str,
+    *,
+    account_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Return the learned priority for a sender based on prior overrides, or None.
+
+    This is the read side of the triage feedback loop: if the user has recently
+    corrected this sender's emails to a consistent priority, future emails can
+    skip scoring and adopt that priority directly. We only return a hint when
+    the most recent overrides for the sender agree, to avoid acting on noise.
+    """
+    if not is_persistence_enabled():
+        return None
+
+    norm_sender = (sender or "").strip().lower()
+    if not norm_sender:
+        return None
+
+    with get_session() as session:
+        if session is None:
+            return None
+        stmt = (
+            select(TriagePriorityOverride.override_priority)
+            .where(TriagePriorityOverride.sender == norm_sender)
+        )
+        if account_id:
+            stmt = stmt.where(TriagePriorityOverride.account_id == account_id)
+        elif user_id:
+            stmt = stmt.where(TriagePriorityOverride.user_id == user_id)
+        stmt = stmt.order_by(TriagePriorityOverride.created_at.desc()).limit(3)
+        recent = [r for r in session.scalars(stmt).all()]
+
+    if not recent:
+        return None
+    # Only act when the latest signals are unanimous.
+    if all(p == recent[0] for p in recent):
+        return recent[0]
+    return None
 
 
 def get_audit_log(email_id: str, limit: int = 200) -> list[dict[str, Any]]:

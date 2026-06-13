@@ -692,6 +692,22 @@ export async function composeEmail(payload: {
   return res.json();
 }
 
+/** Override an email's triage priority and feed the correction into the triage loop. */
+export async function overrideEmailPriority(payload: {
+  email_id: string;
+  sender: string;
+  override_priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'DONE';
+  original_priority?: string;
+}): Promise<{ ok: boolean; priority: string; persisted: boolean }> {
+  const res = await apiFetch(`${BASE}/api/agent/triage/override`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to override priority');
+  return res.json();
+}
+
 /** Generate a brand-new email body from a prompt, using Tone DNA + RAG. */
 export async function composeDraftWithAI(payload: {
   prompt: string;
