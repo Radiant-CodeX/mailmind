@@ -170,7 +170,7 @@ def _finish_oauth_connect(
         svc = SessionService(DBSessionBackend(db))
         session_token = svc.create_session(user.id)
         quick_token = svc.create_quick_login(user.id, device_id)
-        logger.info("[oauth_connect] Created session_token (first 20 chars): %s", session_token[:20])
+        logger.info("[oauth_connect] Created session for user_id=%s", user.id)
         logger.info("[oauth_connect] Created quick_token (first 20 chars): %s", quick_token[:20])
 
         db.commit()
@@ -193,8 +193,7 @@ def _finish_oauth_connect(
     _set_session_cookie(resp, session_token, settings.session_ttl_seconds)
     _set_quick_cookie(resp, quick_token, settings.quick_login_ttl_seconds)
     cookie_headers = [h for h in resp.raw_headers if h[0].lower() == b'set-cookie']
-    logger.info("[_finish_oauth_connect] Set-Cookie headers count=%d headers=%s",
-                len(cookie_headers), [h[1][:60] for h in cookie_headers])
+    logger.info("[_finish_oauth_connect] Set-Cookie headers count=%d", len(cookie_headers))
     return resp
 
 
@@ -517,13 +516,13 @@ def compose_email(payload: ComposeRequest, account=Depends(get_default_account))
 
 
 @router.get("/teams")
-def list_teams() -> list[dict[str, Any]]:
+def list_teams(current_user=Depends(get_current_user)) -> list[dict[str, Any]]:
     """List the Teams the signed-in user belongs to."""
     return GraphClient().list_teams()
 
 
 @router.post("/teams/message")
-def post_teams_message(payload: dict[str, str]) -> dict[str, Any]:
+def post_teams_message(payload: dict[str, str], current_user=Depends(get_current_user)) -> dict[str, Any]:
     """Post a message to a Teams channel."""
     team_id = payload.get("team_id")
     channel_id = payload.get("channel_id")
@@ -538,7 +537,7 @@ def post_teams_message(payload: dict[str, str]) -> dict[str, Any]:
 
 
 @router.post("/teams/meeting")
-def create_teams_meeting(payload: dict[str, str]) -> dict[str, Any]:
+def create_teams_meeting(payload: dict[str, str], current_user=Depends(get_current_user)) -> dict[str, Any]:
     """Create a Teams online meeting and return its join URL."""
     subject = payload.get("subject", "MailMind Meeting")
     try:
@@ -600,11 +599,12 @@ def login_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
     status_val = state.get("status")
     if status_val == "success":
         _device_flow_status.pop(device_code, None)
+        # Never return tokens in the body — session is delivered via the
+        # HttpOnly mm_session cookie set during the OAuth callback.
         return {
             "status": "success",
             "authenticated": True,
-            "user_principal_name": email,
-            "session_token": session_token,
+            "user_principal_name": state.get("email"),
         }
     if status_val == "error":
         _device_flow_status.pop(device_code, None)
@@ -1153,7 +1153,7 @@ async def graph_webhook_receive(request: Request) -> dict[str, Any]:
 
 
 @router.post("/ingest", response_model=IngestResponse)
-def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rate_limit)) -> IngestResponse:
+def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rate_limit), current_user=Depends(get_current_user)) -> IngestResponse:
     """Ingest a validated email payload and place it onto the processing queue."""
     message = QueueMessage(
         email_id=payload.email_id,
@@ -1177,9 +1177,19 @@ def classify_text(payload: RAGQuery, current_user=Depends(get_current_user)) -> 
     if cached is not None:
         return cached
 
+    import time as _time
+    from app.monitoring.live_metrics import live_metrics
+    _start = _time.perf_counter()
     classifier = ClassificationService()
     masked = mask_pii(payload.email_text)
-    result = classifier.classify(masked)
+    try:
+        result = classifier.classify(masked)
+        live_metrics.record_llm(success=True)
+    except Exception:
+        live_metrics.record_llm(success=False)
+        raise
+    finally:
+        live_metrics.record_latency("triage", (_time.perf_counter() - _start) * 1000)
     classification_cache.set(key, result)
     return result
 
@@ -1304,15 +1314,25 @@ def generate_draft(payload: DraftRequest, account=Depends(get_default_account)) 
     if cached is not None:
         return cached
 
+    import time as _time
+    from app.monitoring.live_metrics import live_metrics
+    _start = _time.perf_counter()
     service = DraftService()
-    draft, citations = service.generate_draft(
-        email_text=payload.email_text,
-        style=payload.style,
-        sender=payload.sender,
-        subject=payload.subject,
-        current_user_email=payload.current_user_email,
-        account_id=account.id,
-    )
+    try:
+        draft, citations = service.generate_draft(
+            email_text=payload.email_text,
+            style=payload.style,
+            sender=payload.sender,
+            subject=payload.subject,
+            current_user_email=payload.current_user_email,
+            account_id=account.id,
+        )
+        live_metrics.record_llm(success=True)
+    except Exception:
+        live_metrics.record_llm(success=False)
+        raise
+    finally:
+        live_metrics.record_latency("draft", (_time.perf_counter() - _start) * 1000)
     result = DraftResponse(draft=draft, precedent_citations=citations)
     precedents_cache.set(key, result)
     return result
@@ -1322,8 +1342,18 @@ def generate_draft(payload: DraftRequest, account=Depends(get_default_account)) 
 @router.post("/commitments/extract", response_model=CommitmentExtractionResponse)
 def extract_commitments(payload: CommitmentExtractionRequest, account=Depends(get_default_account)) -> CommitmentExtractionResponse:
     """Extract commitment candidates from masked email text."""
+    import time as _time
+    from app.monitoring.live_metrics import live_metrics
+    _start = _time.perf_counter()
     service = CommitmentService(AccountService.get_adapter(account))
-    commitments = service.extract(payload.get_text(), payload.thread_summary or "", payload.email_id)
+    try:
+        commitments = service.extract(payload.get_text(), payload.thread_summary or "", payload.email_id)
+        live_metrics.record_llm(success=True)
+    except Exception:
+        live_metrics.record_llm(success=False)
+        raise
+    finally:
+        live_metrics.record_latency("commitments", (_time.perf_counter() - _start) * 1000)
     return CommitmentExtractionResponse(commitments=commitments)
 
 
@@ -1413,7 +1443,7 @@ def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | Non
 
 
 @router.get("/evaluate")
-def evaluate_model():
+def evaluate_model(current_user=Depends(get_current_user)):
     """Evaluate model performance against a golden dataset."""
     dataset_path = Path("golden_dataset.json")
     if not dataset_path.exists():
@@ -1535,12 +1565,12 @@ def get_tone_dna_profile(account=Depends(get_default_account)) -> dict:
 
 
 @router.get("/alerts")
-def get_alerts() -> list:
+def get_alerts(current_user=Depends(get_current_user)) -> list:
     """CMT-06/07: Return queued T-24h and chase draft alerts."""
     return alert_queue
 
 @router.post("/alerts/{idx}/resolve")
-def resolve_alert(idx: int) -> dict:
+def resolve_alert(idx: int, current_user=Depends(get_current_user)) -> dict:
     if idx >= len(alert_queue):
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Alert not found")

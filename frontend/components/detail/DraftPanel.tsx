@@ -86,19 +86,19 @@ export function DraftPanel({
   // ── Sent successfully ────────────────────────────────────────────────────
   if (isApproved) {
     return (
-      <div className="p-5 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg text-left animate-fade-in">
-        <div className="flex items-center gap-2 text-[var(--text-primary)] mb-2">
+      <div className="p-5 bg-base-200 border border-base-300 rounded-lg text-left animate-fade-in">
+        <div className="flex items-center gap-2 text-base-content mb-2">
           <svg className="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <span className="text-sm font-bold tracking-tight">Draft Approved & Sent Successfully</span>
         </div>
-        <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+        <p className="text-xs text-base-content/60 leading-relaxed">
           The email response has been transmitted and queued for delivery.
         </p>
         <button
           onClick={() => setIsApproved(false)}
-          className="mt-3 text-xs text-[var(--accent-primary)] hover:underline font-semibold cursor-pointer"
+          className="mt-3 text-xs text-primary hover:underline font-semibold cursor-pointer"
         >
           View sent text
         </button>
@@ -109,19 +109,19 @@ export function DraftPanel({
   // ── Rejected ─────────────────────────────────────────────────────────────
   if (gateStep === 'rejected') {
     return (
-      <div className="p-5 bg-[var(--bg-elevated)] border border-red-500/20 rounded-lg text-left animate-fade-in">
+      <div className="p-5 bg-base-200 border border-red-500/20 rounded-lg text-left animate-fade-in">
         <div className="flex items-center gap-2 mb-2">
           <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
           </svg>
-          <span className="text-sm font-bold text-[var(--text-primary)]">Draft Discarded</span>
+          <span className="text-sm font-bold text-base-content">Draft Discarded</span>
         </div>
-        <p className="text-xs text-[var(--text-muted)] leading-relaxed">
+        <p className="text-xs text-base-content/60 leading-relaxed">
           The draft was not sent. You can generate a new one or close this panel.
         </p>
         <button
           onClick={() => setGateStep('idle')}
-          className="mt-3 text-xs text-[var(--accent-primary)] hover:underline font-semibold cursor-pointer"
+          className="mt-3 text-xs text-primary hover:underline font-semibold cursor-pointer"
         >
           ← Back to draft
         </button>
@@ -160,15 +160,15 @@ export function DraftPanel({
       btn: 'bg-amber-600 hover:bg-amber-700 text-white',
     },
     normal: {
-      border: 'border-[var(--border)]',
-      bg: 'bg-[var(--bg-elevated)]/50',
+      border: 'border-base-300',
+      bg: 'bg-base-200/50',
       iconBg: 'bg-blue-500/10 border-blue-500/20',
       icon: 'text-blue-400',
       label: '✉ Confirm Send',
-      labelColor: 'text-[var(--text-primary)]',
-      scoreColor: 'text-[var(--text-muted)]',
-      dot: 'bg-[var(--text-muted)]/40',
-      btn: 'bg-[var(--accent-primary)] hover:opacity-90 text-[var(--bg-surface)]',
+      labelColor: 'text-base-content',
+      scoreColor: 'text-base-content/60',
+      dot: 'bg-base-content/60/40',
+      btn: 'bg-primary hover:opacity-90 text-base-100',
     },
   }[severity];
 
@@ -188,7 +188,7 @@ export function DraftPanel({
               <p className={`text-[12px] font-bold uppercase tracking-wider mb-1 ${severityStyles.labelColor}`}>
                 {severityStyles.label}
               </p>
-              <p className="text-[12px] text-[var(--text-primary)] leading-relaxed">
+              <p className="text-[12px] text-base-content leading-relaxed">
                 {severity === 'normal'
                   ? 'You are about to send an AI-generated reply. Review the draft below before confirming.'
                   : <>
@@ -203,7 +203,7 @@ export function DraftPanel({
               {triageReasons && triageReasons.length > 0 && (
                 <ul className="mt-2 space-y-0.5">
                   {triageReasons.map((r, i) => (
-                    <li key={i} className="text-[11px] text-[var(--text-muted)] flex items-center gap-1.5">
+                    <li key={i} className="text-[11px] text-base-content/60 flex items-center gap-1.5">
                       <span className={`w-1 h-1 rounded-full shrink-0 ${severityStyles.dot}`} />
                       {r}
                     </li>
@@ -216,10 +216,10 @@ export function DraftPanel({
 
         {/* Draft preview (read-only) */}
         <div>
-          <p className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-2">
+          <p className="text-[10px] font-bold text-base-content/60 uppercase tracking-widest mb-2">
             Draft to be sent:
           </p>
-          <div className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg p-3 text-xs text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar">
+          <div className="bg-base-200 border border-base-300 rounded-lg p-3 text-xs text-base-content leading-relaxed whitespace-pre-wrap max-h-48 overflow-y-auto custom-scrollbar">
             {draft}
           </div>
         </div>
@@ -229,14 +229,14 @@ export function DraftPanel({
           <button
             onClick={handleReject}
             disabled={gateLoading}
-            className="px-4 py-2 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] hover:border-red-500/40 rounded-lg transition-all cursor-pointer disabled:opacity-50"
+            className="px-4 py-2 text-xs font-bold text-base-content/60 hover:text-base-content border border-base-300 hover:border-red-500/40 rounded-lg transition-all cursor-pointer disabled:opacity-50"
           >
             Discard Draft
           </button>
           <button
             onClick={() => setGateStep('idle')}
             disabled={gateLoading}
-            className="px-4 py-2 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] rounded-lg transition-all cursor-pointer disabled:opacity-50"
+            className="px-4 py-2 text-xs font-bold text-base-content/60 hover:text-base-content border border-base-300 rounded-lg transition-all cursor-pointer disabled:opacity-50"
           >
             ← Edit First
           </button>
@@ -268,15 +268,15 @@ export function DraftPanel({
   return (
     <div className="text-left animate-fade-in">
       {/* Style tabs */}
-      <div className="flex border-b border-[var(--border-subtle)] mb-4 gap-1">
+      <div className="flex border-b border-base-200 mb-4 gap-1">
         {(['standard', 'formal', 'indepth'] as const).map((style) => (
           <button
             key={style}
             onClick={() => setActiveStyle(style)}
             className={`px-4 py-2 text-xs font-bold border-b-2 transition-all cursor-pointer capitalize ${
               activeStyle === style
-                ? 'border-[var(--accent-primary)] text-[var(--accent-primary)]'
-                : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                ? 'border-primary text-primary'
+                : 'border-transparent text-base-content/60 hover:text-base-content'
             }`}
           >
             {style === 'indepth' ? 'In-depth' : style}
@@ -297,15 +297,15 @@ export function DraftPanel({
       )}
 
       {!draft ? (
-        <div className="p-6 text-center bg-[var(--bg-elevated)]/30 border border-dashed border-[var(--border)] rounded-lg">
-          <p className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed max-w-md mx-auto">
+        <div className="p-6 text-center bg-base-200/30 border border-dashed border-base-300 rounded-lg">
+          <p className="text-xs text-base-content/60 mb-4 leading-relaxed max-w-md mx-auto">
             {activeStyle === 'standard' && 'Standard reply builds a brief, helpful template answering the main inquiry directly.'}
             {activeStyle === 'formal' && 'Formal reply applies structured, professional business language with formal greetings.'}
             {activeStyle === 'indepth' && 'In-depth reply breaks down details point-by-point, structuring action items and next steps.'}
           </p>
           <button
             onClick={() => onGenerate(activeStyle)}
-            className="py-2.5 px-4 bg-[var(--accent-primary)] hover:opacity-90 text-[var(--bg-surface)] rounded-lg text-xs font-bold transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer"
+            className="py-2.5 px-4 bg-primary hover:opacity-90 text-base-100 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -316,15 +316,15 @@ export function DraftPanel({
       ) : (
         <div className="animate-fade-in">
           <div className="flex items-center justify-between mb-3">
-            <h4 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider flex items-center gap-1.5">
-              <svg className="w-4 h-4 text-[var(--accent-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <h4 className="text-xs font-bold text-base-content uppercase tracking-wider flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
               AI-Generated {activeStyle === 'indepth' ? 'In-depth' : activeStyle} Draft
             </h4>
             <button
               onClick={() => onGenerate(activeStyle)}
-              className="text-[10px] font-semibold text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all cursor-pointer font-mono"
+              className="text-[10px] font-semibold text-base-content/60 hover:text-base-content transition-all cursor-pointer font-mono"
             >
               REGENERATE
             </button>
@@ -347,7 +347,7 @@ export function DraftPanel({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={8}
-            className="w-full p-3 rounded bg-[var(--bg-elevated)] border border-[var(--border)] text-xs text-[var(--text-primary)] leading-relaxed focus:outline-none focus:border-[var(--accent-primary)] resize-y min-h-[140px] font-medium custom-scrollbar"
+            className="w-full p-3 rounded bg-base-200 border border-base-300 text-xs text-base-content leading-relaxed focus:outline-none focus:border-primary resize-y min-h-[140px] font-medium custom-scrollbar"
           />
 
           <div className="mt-3 flex items-center justify-between">
@@ -364,7 +364,7 @@ export function DraftPanel({
             <button
               onClick={handleSendClick}
               disabled={isSending}
-              className="py-2 px-4 bg-[var(--accent-primary)] hover:opacity-90 disabled:opacity-50 text-[var(--bg-surface)] rounded text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
+              className="py-2 px-4 bg-primary hover:opacity-90 disabled:opacity-50 text-base-100 rounded text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
             >
               {isSending ? (
                 <>

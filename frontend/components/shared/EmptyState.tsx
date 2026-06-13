@@ -14,9 +14,9 @@ export function EmptyState({
   return (
     <div className="flex flex-col items-center justify-center p-8 text-center h-full max-w-md mx-auto" id="empty-state">
       {icon ? (
-        <div className="mb-4 text-[var(--text-muted)]">{icon}</div>
+        <div className="mb-4 text-base-content/60">{icon}</div>
       ) : (
-        <div className="mb-4 p-4 rounded-full bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-muted)]">
+        <div className="mb-4 p-4 rounded-full bg-base-200 border border-base-300 text-base-content/60">
           <svg
             className="w-8 h-8"
             fill="none"
@@ -33,8 +33,8 @@ export function EmptyState({
           </svg>
         </div>
       )}
-      <h3 className="text-lg font-medium text-[var(--text-primary)] mb-2">{title}</h3>
-      <p className="text-sm text-[var(--text-muted)] leading-relaxed">{description}</p>
+      <h3 className="text-lg font-medium text-base-content mb-2">{title}</h3>
+      <p className="text-sm text-base-content/60 leading-relaxed">{description}</p>
     </div>
   );
 }

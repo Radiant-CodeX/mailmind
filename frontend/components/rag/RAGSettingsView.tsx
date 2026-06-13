@@ -60,7 +60,7 @@ function formalityLabel(score: number): string {
 
 function formalityColor(score: number): string {
   if (score >= 0.6) return 'text-blue-500';
-  if (score >= 0.45) return 'text-[var(--accent-primary)]';
+  if (score >= 0.45) return 'text-primary';
   return 'text-amber-500';
 }
 
@@ -173,14 +173,14 @@ export function RAGSettingsView() {
 
   return (
     <div
-      className="flex-1 bg-[var(--bg-base)] flex flex-col h-full overflow-hidden text-left p-6"
+      className="flex-1 bg-base-300 flex flex-col h-full overflow-hidden text-left p-6"
       id="rag-settings-view"
     >
       {/* ── Page header ────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
-          <h2 className="text-xl font-bold text-[var(--text-primary)]">AI Knowledge Base</h2>
-          <p className="text-xs text-[var(--text-muted)] mt-1 max-w-md">
+          <h2 className="text-xl font-bold text-base-content">AI Knowledge Base</h2>
+          <p className="text-xs text-base-content/60 mt-1 max-w-md">
             MailMind analyses your last 30 days of sent mail to build a writing-style profile and a
             vector index. Both are used when generating draft replies.
           </p>
@@ -190,7 +190,7 @@ export function RAGSettingsView() {
         <button
           onClick={handleSync}
           disabled={busy}
-          className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-[var(--accent-primary)] hover:opacity-90 text-[var(--bg-surface)] rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm"
+          className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-primary hover:opacity-90 text-base-100 rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm"
         >
           {syncing ? <><MiniSpinner /> Syncing…</> : <><RefreshIcon spinning={false} /> Sync Knowledge Base</>}
         </button>
@@ -213,10 +213,10 @@ export function RAGSettingsView() {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
 
         {/* ── Left: Retrieval settings ─────────────────────────────── */}
-        <div className="lg:col-span-2 bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg flex flex-col overflow-hidden shadow-sm">
-          <div className="p-4 border-b border-[var(--border-subtle)]">
-            <h3 className="text-sm font-bold text-[var(--text-primary)]">Retrieval Settings</h3>
-            <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+        <div className="lg:col-span-2 bg-base-100 border border-base-300 rounded-lg flex flex-col overflow-hidden shadow-sm">
+          <div className="p-4 border-b border-base-200">
+            <h3 className="text-sm font-bold text-base-content">Retrieval Settings</h3>
+            <p className="text-[10px] text-base-content/60 mt-0.5">
               Changes apply immediately — no restart needed.
             </p>
           </div>
@@ -227,12 +227,12 @@ export function RAGSettingsView() {
             <div className="space-y-3">
               <div className="flex items-baseline justify-between">
                 <div>
-                  <span className="text-xs font-semibold text-[var(--text-primary)]">Match Threshold</span>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                  <span className="text-xs font-semibold text-base-content">Match Threshold</span>
+                  <p className="text-[10px] text-base-content/60 mt-0.5">
                     Minimum cosine similarity required for a past email to be surfaced as a precedent.
                   </p>
                 </div>
-                <span className="font-mono text-base font-bold text-[var(--accent-primary)] ml-4 shrink-0">
+                <span className="font-mono text-base font-bold text-primary ml-4 shrink-0">
                   {similarityThreshold.toFixed(2)}
                 </span>
               </div>
@@ -243,9 +243,9 @@ export function RAGSettingsView() {
                 step="0.01"
                 value={similarityThreshold}
                 onChange={(e) => updateSimilarityThreshold(parseFloat(e.target.value))}
-                className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-[var(--accent-primary)] focus:outline-none"
+                className="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none"
               />
-              <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
+              <div className="flex justify-between text-[10px] text-base-content/60">
                 <span>← Broader matches (0.50)</span>
                 <span>Exact matches only (0.95) →</span>
               </div>
@@ -253,10 +253,10 @@ export function RAGSettingsView() {
 
             {/* Max docs */}
             <div className="space-y-2">
-              <label className="text-xs font-semibold text-[var(--text-primary)] block">
+              <label className="text-xs font-semibold text-base-content block">
                 Max Indexed Documents
               </label>
-              <p className="text-[10px] text-[var(--text-muted)]">
+              <p className="text-[10px] text-base-content/60">
                 The vector index keeps at most this many emails. Older entries are evicted when the
                 limit is reached.
               </p>
@@ -267,28 +267,28 @@ export function RAGSettingsView() {
                 step={100}
                 value={maxIndexSize}
                 onChange={(e) => updateMaxIndexSize(parseInt(e.target.value) || 0)}
-                className="w-36 p-2 rounded bg-[var(--bg-elevated)] border border-[var(--border)] text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-primary)] font-mono font-medium"
+                className="w-36 p-2 rounded bg-base-200 border border-base-300 text-xs text-base-content focus:outline-none focus:border-primary font-mono font-medium"
               />
             </div>
 
             {/* PII masking demo */}
-            <div className="p-4 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-3">
+            <div className="p-4 rounded-lg bg-base-200 border border-base-200 space-y-3">
               <div>
-                <h4 className="text-xs font-bold text-[var(--text-primary)]">PII Masking</h4>
-                <p className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                <h4 className="text-xs font-bold text-base-content">PII Masking</h4>
+                <p className="text-[10px] text-base-content/60 mt-0.5">
                   Emails are scrubbed before they enter the vector store — no raw contact data is ever persisted.
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <span className="text-[10px] text-[var(--text-muted)] block mb-1">Original text</span>
-                  <div className="p-2.5 rounded bg-[var(--bg-base)] border border-[var(--border-subtle)] text-[var(--text-primary)]/80 text-[11px] leading-relaxed font-mono">
+                  <span className="text-[10px] text-base-content/60 block mb-1">Original text</span>
+                  <div className="p-2.5 rounded bg-base-300 border border-base-200 text-base-content/80 text-[11px] leading-relaxed font-mono">
                     Contact john@acme.com or call +1-555-0199.
                   </div>
                 </div>
                 <div>
-                  <span className="text-[10px] text-[var(--text-muted)] block mb-1">Stored in vector DB</span>
-                  <div className="p-2.5 rounded bg-[var(--bg-base)] border border-[var(--border-subtle)] text-[var(--accent-success)] text-[11px] font-mono leading-relaxed">
+                  <span className="text-[10px] text-base-content/60 block mb-1">Stored in vector DB</span>
+                  <div className="p-2.5 rounded bg-base-300 border border-base-200 text-success text-[11px] font-mono leading-relaxed">
                     Contact [EMAIL] or call [PHONE].
                   </div>
                 </div>
@@ -299,16 +299,16 @@ export function RAGSettingsView() {
         </div>
 
         {/* ── Right: Status panel ──────────────────────────────────── */}
-        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-lg flex flex-col overflow-hidden shadow-sm">
-          <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-            <h3 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
+        <div className="bg-base-100 border border-base-300 rounded-lg flex flex-col overflow-hidden shadow-sm">
+          <div className="p-4 border-b border-base-200 flex items-center justify-between">
+            <h3 className="text-xs font-bold text-base-content uppercase tracking-wider">
               Status
             </h3>
             <button
               onClick={loadStats}
               disabled={busy}
               title="Refresh stats"
-              className="text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40 transition-colors cursor-pointer"
+              className="text-base-content/60 hover:text-base-content disabled:opacity-40 transition-colors cursor-pointer"
             >
               <RefreshIcon spinning={statsLoading && !syncing} />
             </button>
@@ -318,22 +318,22 @@ export function RAGSettingsView() {
 
             {syncing ? (
               <div className="flex flex-col items-center justify-center py-12 gap-3">
-                <span className="inline-block w-7 h-7 border-2 border-[var(--border)] border-t-[var(--accent-primary)] rounded-full animate-spin" />
-                <p className="text-[11px] text-[var(--text-muted)] text-center leading-relaxed">
+                <span className="inline-block w-7 h-7 border-2 border-base-300 border-t-primary rounded-full animate-spin" />
+                <p className="text-[11px] text-base-content/60 text-center leading-relaxed">
                   Fetching sent mail<br />and rebuilding knowledge base…
                 </p>
               </div>
             ) : statsLoading ? (
               <div className="flex flex-col items-center justify-center py-12 gap-3">
-                <span className="inline-block w-7 h-7 border-2 border-[var(--border)] border-t-[var(--accent-primary)] rounded-full animate-spin" />
-                <p className="text-[11px] text-[var(--text-muted)]">Loading…</p>
+                <span className="inline-block w-7 h-7 border-2 border-base-300 border-t-primary rounded-full animate-spin" />
+                <p className="text-[11px] text-base-content/60">Loading…</p>
               </div>
             ) : (
               <>
                 {/* Tone DNA card */}
-                <div className="rounded-lg border border-[var(--border-subtle)] overflow-hidden">
-                  <div className="px-3 py-2 bg-[var(--bg-elevated)] flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-[var(--text-primary)] uppercase tracking-wider">
+                <div className="rounded-lg border border-base-200 overflow-hidden">
+                  <div className="px-3 py-2 bg-base-200 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-base-content uppercase tracking-wider">
                       Tone DNA
                     </span>
                     {toneStats.status === 'built' ? (
@@ -350,31 +350,31 @@ export function RAGSettingsView() {
                   {toneStats.status === 'built' && toneStats.formality !== null ? (
                     <div className="p-3 space-y-2.5">
                       <div className="flex justify-between text-xs">
-                        <span className="text-[var(--text-muted)]">Writing style</span>
+                        <span className="text-base-content/60">Writing style</span>
                         <span className={`font-semibold ${formalityColor(toneStats.formality)}`}>
                           {formalityLabel(toneStats.formality)}
-                          <span className="text-[var(--text-muted)] font-normal ml-1">
+                          <span className="text-base-content/60 font-normal ml-1">
                             ({toneStats.formality.toFixed(2)})
                           </span>
                         </span>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-[var(--text-muted)]">Emails analysed</span>
-                        <span className="font-mono font-semibold text-[var(--text-primary)]">
+                        <span className="text-base-content/60">Emails analysed</span>
+                        <span className="font-mono font-semibold text-base-content">
                           {toneStats.sampleSize}
                         </span>
                       </div>
                       <div className="flex justify-between text-xs">
-                        <span className="text-[var(--text-muted)]">Last built</span>
-                        <span className="font-mono text-[10px] text-[var(--text-primary)]">
+                        <span className="text-base-content/60">Last built</span>
+                        <span className="font-mono text-[10px] text-base-content">
                           {toneStats.lastBuilt}
                         </span>
                       </div>
                     </div>
                   ) : (
-                    <p className="p-3 text-[11px] text-[var(--text-muted)] leading-relaxed">
+                    <p className="p-3 text-[11px] text-base-content/60 leading-relaxed">
                       No profile yet. Click{' '}
-                      <span className="font-semibold text-[var(--text-primary)]">
+                      <span className="font-semibold text-base-content">
                         Sync Knowledge Base
                       </span>{' '}
                       to build one.
@@ -383,29 +383,29 @@ export function RAGSettingsView() {
                 </div>
 
                 {/* RAG index card */}
-                <div className="rounded-lg border border-[var(--border-subtle)] overflow-hidden">
-                  <div className="px-3 py-2 bg-[var(--bg-elevated)] flex items-center justify-between">
-                    <span className="text-[10px] font-bold text-[var(--text-primary)] uppercase tracking-wider">
+                <div className="rounded-lg border border-base-200 overflow-hidden">
+                  <div className="px-3 py-2 bg-base-200 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-base-content uppercase tracking-wider">
                       RAG Index
                     </span>
                     <StatusPill ok={indexStats.dbStatus === 'healthy'} />
                   </div>
                   <div className="p-3 space-y-2.5">
                     <div className="flex justify-between text-xs">
-                      <span className="text-[var(--text-muted)]">Indexed emails</span>
-                      <span className="font-mono font-semibold text-[var(--text-primary)]">
+                      <span className="text-base-content/60">Indexed emails</span>
+                      <span className="font-mono font-semibold text-base-content">
                         {indexStats.indexedEmails}
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-[var(--text-muted)]">Storage</span>
-                      <span className="font-mono font-semibold text-[var(--text-primary)]">
+                      <span className="text-base-content/60">Storage</span>
+                      <span className="font-mono font-semibold text-base-content">
                         {indexStats.storageLabel}
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-[var(--text-muted)]">Last synced</span>
-                      <span className="font-mono text-[10px] text-[var(--text-primary)]">
+                      <span className="text-base-content/60">Last synced</span>
+                      <span className="font-mono text-[10px] text-base-content">
                         {indexStats.lastIndexed}
                       </span>
                     </div>
@@ -413,9 +413,9 @@ export function RAGSettingsView() {
                 </div>
 
                 {/* How it works blurb */}
-                <div className="p-3 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-1">
-                  <p className="text-[10px] font-semibold text-[var(--text-primary)]">How sync works</p>
-                  <p className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                <div className="p-3 rounded-lg bg-base-200 border border-base-200 space-y-1">
+                  <p className="text-[10px] font-semibold text-base-content">How sync works</p>
+                  <p className="text-[10px] text-base-content/60 leading-relaxed">
                     Fetches 30 days of sent mail once. The same emails feed both the Tone DNA stylometric
                     profile and the RAG vector index — no duplicate network calls.
                   </p>
@@ -425,11 +425,11 @@ export function RAGSettingsView() {
           </div>
 
           {/* Secondary sync button */}
-          <div className="p-4 border-t border-[var(--border-subtle)]">
+          <div className="p-4 border-t border-base-200">
             <button
               onClick={handleSync}
               disabled={busy}
-              className="w-full py-2.5 bg-[var(--accent-primary)] hover:opacity-90 text-[var(--bg-surface)] rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-primary hover:opacity-90 text-base-100 rounded-lg text-xs font-bold transition-all disabled:opacity-50 cursor-pointer shadow-sm flex items-center justify-center gap-2"
             >
               {syncing ? <><MiniSpinner /> Syncing…</> : 'Sync Knowledge Base'}
             </button>

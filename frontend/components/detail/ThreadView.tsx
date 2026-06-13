@@ -36,7 +36,7 @@ export function ThreadView({ emailId }: ThreadViewProps) {
 
   if (loading) {
     return (
-      <div className="py-4 text-center text-xs text-[var(--text-muted)] font-medium">
+      <div className="py-4 text-center text-xs text-base-content/60 font-medium">
         Loading thread timeline...
       </div>
     );
@@ -45,10 +45,10 @@ export function ThreadView({ emailId }: ThreadViewProps) {
   if (messages.length === 0) return null;
 
   return (
-    <div className="mt-6 border-t border-[var(--border)] pt-6 text-left" id="thread-view">
-      <h4 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider mb-4 flex items-center gap-1.5">
+    <div className="mt-6 border-t border-base-300 pt-6 text-left" id="thread-view">
+      <h4 className="text-xs font-bold text-base-content uppercase tracking-wider mb-4 flex items-center gap-1.5">
         <svg
-          className="w-4 h-4 text-[var(--accent-primary)]"
+          className="w-4 h-4 text-primary"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -64,14 +64,14 @@ export function ThreadView({ emailId }: ThreadViewProps) {
         Thread History
       </h4>
 
-      <div className="relative border-l border-[var(--border)] pl-4 ml-2 space-y-4">
+      <div className="relative border-l border-base-300 pl-4 ml-2 space-y-4">
         {messages.map((msg, idx) => (
           <div key={idx} className="relative">
             {/* Dot marker */}
-            <div className="absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full bg-[var(--accent-primary)] border-2 border-[var(--bg-base)]"></div>
+            <div className="absolute -left-[21px] top-1.5 w-2.5 h-2.5 rounded-full bg-primary border-2 border-base-300"></div>
             
             <div className="text-xs">
-              <div className="flex items-center justify-between gap-2 text-[var(--text-muted)] font-medium mb-1">
+              <div className="flex items-center justify-between gap-2 text-base-content/60 font-medium mb-1">
                 <span>{msg.sender}</span>
                 <span className="font-mono text-[10px]">
                   {new Date(msg.timestamp).toLocaleDateString(undefined, {
@@ -82,9 +82,9 @@ export function ThreadView({ emailId }: ThreadViewProps) {
                   })}
                 </span>
               </div>
-              <div className="p-3 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-lg">
-                <h5 className="font-semibold text-[var(--text-primary)] mb-1">{msg.subject}</h5>
-                <p className="text-[var(--text-muted)] leading-relaxed">{msg.body}</p>
+              <div className="p-3 bg-base-100 border border-base-200 rounded-lg">
+                <h5 className="font-semibold text-base-content mb-1">{msg.subject}</h5>
+                <p className="text-base-content/60 leading-relaxed">{msg.body}</p>
               </div>
             </div>
           </div>

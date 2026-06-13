@@ -104,7 +104,7 @@ def erase_email_data(email_id: str, current_user: str = Depends(get_current_user
 
 
 @router.get("/email/{email_id}/audit")
-def get_email_audit(email_id: str) -> dict:
+def get_email_audit(email_id: str, current_user=Depends(get_current_user)) -> dict:
     """Return the processing audit trail for one email (no raw PII)."""
     _require_persistence()
     try:
@@ -114,7 +114,7 @@ def get_email_audit(email_id: str) -> dict:
 
 
 @router.post("/purge")
-def purge_retention(retention_days: int | None = None) -> dict:
+def purge_retention(retention_days: int | None = None, current_user=Depends(get_current_user)) -> dict:
     """
     Run the data-retention purge: delete enrichment older than the retention
     window (default ``settings.data_retention_days``). Intended for a scheduler

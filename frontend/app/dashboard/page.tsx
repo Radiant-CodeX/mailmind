@@ -11,7 +11,10 @@ import { RAGSettingsView } from '../../components/rag/RAGSettingsView';
 import { ComposeWindow } from '../../components/inbox/ComposeWindow';
 import { TrashToast } from '../../components/shared/TrashToast';
 import { EvaluationView } from '../../components/evaluation/EvaluationView';
+import { MetricsView } from '../../components/metrics/MetricsView';
 import { TasksView } from '../../components/tasks/TasksView';
+import { FeedbackModal } from '../../components/shared/FeedbackModal';
+import { OnboardingFlow } from '../../components/onboarding/OnboardingFlow';
 
 import { useEmails } from '../../hooks/useEmails';
 import { useEmailDetail } from '../../hooks/useEmailDetail';
@@ -38,6 +41,8 @@ export default function Home() {
   // Initialized from the default account on first auth check.
   const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
   const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   // Load auth status on mount — retries up to 3× (500ms apart) to handle the
   // race where cookies from the OAuth popup haven't been flushed to the browser
@@ -61,7 +66,14 @@ export default function Home() {
               const p = data.default_account.provider;
               if (p === 'google' || p === 'microsoft') setProvider(p);
             }
-            if (email) userStorage.setUser(email);
+            if (email) {
+              userStorage.setUser(email);
+              // Show onboarding for first-time users (keyed per email)
+              const onboardedKey = `mailmind_onboarded_${email}`;
+              if (!localStorage.getItem(onboardedKey)) {
+                setShowOnboarding(true);
+              }
+            }
             setCheckingAuth(false);
             return;
           }
@@ -70,7 +82,7 @@ export default function Home() {
         }
       }
       // All retries exhausted — redirect to login
-      router.push('/');
+      router.push('/login');
     }
     loadAuthStatus();
   }, [router]);
@@ -177,8 +189,8 @@ export default function Home() {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary">
         <div className="text-center">
-          <div className="w-8 h-8 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mx-auto mb-4"></div>
-          <p className="text-xs text-[var(--text-muted)] font-medium">Checking authorization status...</p>
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin mx-auto mb-4"></div>
+          <p className="text-xs text-base-content/60 font-medium">Checking authorization status...</p>
         </div>
       </div>
     );
@@ -231,6 +243,7 @@ export default function Home() {
         onLogoutClick={handleLogout}
         onComposeClick={() => setIsComposeOpen(true)}
         onAccountChange={setCurrentAccountId}
+        onFeedbackClick={() => setIsFeedbackOpen(true)}
       />
 
       {/* Main Workspace Frame */}
@@ -244,8 +257,9 @@ export default function Home() {
             <>
               {/* Panel A: Inbox — 45% when inspector open, full width otherwise */}
               <div
+                id="email-list-panel"
                 className={`h-full flex flex-col overflow-hidden transition-all duration-200 ${
-                  selectedEmailId ? 'w-[45%] border-r border-[var(--border)]' : 'flex-1'
+                  selectedEmailId ? 'w-[45%] border-r border-base-300' : 'flex-1'
                 }`}
               >
                 <EmailList
@@ -340,6 +354,7 @@ export default function Home() {
           {activeTab === 'RAG Settings' && <RAGSettingsView />}
           {activeTab === 'Tasks' && <TasksView />}
           {activeTab === 'Evaluation' && <EvaluationView />}
+          {activeTab === 'Metrics' && <MetricsView />}
         </div>
       </div>
 
@@ -358,6 +373,24 @@ export default function Home() {
           onClose={() => {
             setIsComposeOpen(false);
             refresh();
+          }}
+        />
+      )}
+
+      <FeedbackModal
+        isOpen={isFeedbackOpen}
+        onClose={() => setIsFeedbackOpen(false)}
+      />
+
+      {showOnboarding && (
+        <OnboardingFlow
+          userEmail={userEmail}
+          userName={userName}
+          onComplete={({ role, goals }) => {
+            setShowOnboarding(false);
+            if (userEmail) {
+              localStorage.setItem(`mailmind_onboarded_${userEmail}`, JSON.stringify({ role, goals, ts: Date.now() }));
+            }
           }}
         />
       )}

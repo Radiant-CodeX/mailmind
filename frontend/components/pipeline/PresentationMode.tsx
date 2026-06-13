@@ -52,13 +52,13 @@ export function PresentationMode({
           <p className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500">
             MailMind
           </p>
-          <p className="text-2xl text-[var(--text-muted)]">
+          <p className="text-2xl text-base-content/60">
             6-Node LangGraph Pipeline
           </p>
           <div className="flex justify-center gap-2">
             <span className="text-xl">🤖 + 🧠 + ⚡</span>
           </div>
-          <p className="text-lg text-[var(--text-muted)] max-w-2xl mx-auto">
+          <p className="text-lg text-base-content/60 max-w-2xl mx-auto">
             Intelligent email triage, task extraction, and draft generation
             powered by GPT-4o with human-in-the-loop approval.
           </p>
@@ -86,28 +86,28 @@ export function PresentationMode({
       subtitle: email?.subject || 'Email details',
       content: email && (
         <div className="max-w-4xl mx-auto space-y-4">
-          <div className="bg-[var(--bg-elevated)] rounded-lg p-6 space-y-3">
+          <div className="bg-base-200 rounded-lg p-6 space-y-3">
             <div>
-              <p className="text-xs text-[var(--text-muted)] uppercase font-bold tracking-wider">
+              <p className="text-xs text-base-content/60 uppercase font-bold tracking-wider">
                 From
               </p>
-              <p className="text-xl font-semibold text-[var(--text-primary)]">
+              <p className="text-xl font-semibold text-base-content">
                 {email.sender}
               </p>
             </div>
             <div>
-              <p className="text-xs text-[var(--text-muted)] uppercase font-bold tracking-wider">
+              <p className="text-xs text-base-content/60 uppercase font-bold tracking-wider">
                 Subject
               </p>
-              <p className="text-xl font-semibold text-[var(--text-primary)]">
+              <p className="text-xl font-semibold text-base-content">
                 {email.subject}
               </p>
             </div>
-            <div className="pt-3 border-t border-[var(--border-subtle)]">
-              <p className="text-xs text-[var(--text-muted)] uppercase font-bold tracking-wider mb-2">
+            <div className="pt-3 border-t border-base-200">
+              <p className="text-xs text-base-content/60 uppercase font-bold tracking-wider mb-2">
                 Body
               </p>
-              <p className="text-base text-[var(--text-primary)] leading-relaxed line-clamp-6">
+              <p className="text-base text-base-content leading-relaxed line-clamp-6">
                 {email.body}
               </p>
             </div>
@@ -135,24 +135,24 @@ export function PresentationMode({
             {commitments.map((commitment, i) => (
               <div
                 key={i}
-                className="bg-[var(--bg-elevated)] rounded-lg p-4 border border-[var(--border-subtle)] space-y-2"
+                className="bg-base-200 rounded-lg p-4 border border-base-200 space-y-2"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <p className="text-lg font-semibold text-[var(--text-primary)]">
+                    <p className="text-lg font-semibold text-base-content">
                       {commitment.commitment}
                     </p>
                     {commitment.deadline && (
-                      <p className="text-sm text-[var(--text-muted)] mt-1">
+                      <p className="text-sm text-base-content/60 mt-1">
                         📅 Due: {new Date(commitment.deadline).toLocaleString()}
                       </p>
                     )}
                   </div>
                   <div className="text-right ml-4">
-                    <div className="text-sm font-bold text-[var(--text-primary)]">
+                    <div className="text-sm font-bold text-base-content">
                       {Math.round(commitment.confidence * 100)}%
                     </div>
-                    <div className="text-xs text-[var(--text-muted)]">confidence</div>
+                    <div className="text-xs text-base-content/60">confidence</div>
                   </div>
                 </div>
                 {commitment.conflict_badge && (
@@ -164,7 +164,7 @@ export function PresentationMode({
             ))}
           </div>
         ) : (
-          <div className="text-center py-12 text-[var(--text-muted)]">
+          <div className="text-center py-12 text-base-content/60">
             No commitments detected in this email.
           </div>
         ),
@@ -175,11 +175,11 @@ export function PresentationMode({
       subtitle: 'Tone DNA matched to your style',
       content: draftReply && (
         <div className="max-w-4xl mx-auto">
-          <div className="bg-[var(--bg-elevated)] rounded-lg p-6 border border-[var(--border-subtle)]">
-            <div className="text-[var(--text-muted)] text-xs uppercase font-bold tracking-wider mb-3">
+          <div className="bg-base-200 rounded-lg p-6 border border-base-200">
+            <div className="text-base-content/60 text-xs uppercase font-bold tracking-wider mb-3">
               Generated Reply
             </div>
-            <p className="text-lg leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap">
+            <p className="text-lg leading-relaxed text-base-content whitespace-pre-wrap">
               {draftReply}
             </p>
           </div>
@@ -213,8 +213,8 @@ export function PresentationMode({
               </p>
             </div>
 
-            <div className="bg-[var(--bg-elevated)] rounded-lg p-4 border border-[var(--border-subtle)] text-sm space-y-2">
-              <p className="text-[var(--text-muted)] font-semibold">Decision:</p>
+            <div className="bg-base-200 rounded-lg p-4 border border-base-200 text-sm space-y-2">
+              <p className="text-base-content/60 font-semibold">Decision:</p>
               {approved ? (
                 <p className="text-emerald-600 dark:text-emerald-400 font-bold">
                   ✅ User approved — actions will proceed
@@ -237,19 +237,19 @@ export function PresentationMode({
         <div className="max-w-4xl mx-auto grid grid-cols-2 gap-4">
           <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-6 text-center">
             <p className="text-4xl font-bold text-blue-600 dark:text-blue-400">1.4s</p>
-            <p className="text-sm text-[var(--text-muted)] mt-2">Total Pipeline Time</p>
+            <p className="text-sm text-base-content/60 mt-2">Total Pipeline Time</p>
           </div>
           <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-6 text-center">
             <p className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">✅</p>
-            <p className="text-sm text-[var(--text-muted)] mt-2">SLA Met (1.5s target)</p>
+            <p className="text-sm text-base-content/60 mt-2">SLA Met (1.5s target)</p>
           </div>
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-6 text-center">
             <p className="text-4xl font-bold text-purple-600 dark:text-purple-400">6/6</p>
-            <p className="text-sm text-[var(--text-muted)] mt-2">Nodes Completed</p>
+            <p className="text-sm text-base-content/60 mt-2">Nodes Completed</p>
           </div>
           <div className="bg-orange-500/10 border border-orange-500/20 rounded-lg p-6 text-center">
             <p className="text-4xl font-bold text-orange-600 dark:text-orange-400">0</p>
-            <p className="text-sm text-[var(--text-muted)] mt-2">LLM Fallbacks</p>
+            <p className="text-sm text-base-content/60 mt-2">LLM Fallbacks</p>
           </div>
         </div>
       ),
@@ -288,12 +288,12 @@ export function PresentationMode({
           ].map((item, i) => (
             <div
               key={i}
-              className="bg-[var(--bg-elevated)] rounded-lg p-4 border border-[var(--border-subtle)] space-y-2"
+              className="bg-base-200 rounded-lg p-4 border border-base-200 space-y-2"
             >
-              <p className="font-semibold text-[var(--text-primary)] text-base">
+              <p className="font-semibold text-base-content text-base">
                 ✅ {item.title}
               </p>
-              <p className="text-sm text-[var(--text-muted)]">{item.desc}</p>
+              <p className="text-sm text-base-content/60">{item.desc}</p>
             </div>
           ))}
         </div>
@@ -328,18 +328,18 @@ export function PresentationMode({
   const slide = slides[currentSlide];
 
   return (
-    <div className="fixed inset-0 bg-[var(--bg-base)] z-[9999] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 bg-base-300 z-[9999] overflow-hidden flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between p-8 border-b border-[var(--border-subtle)]">
+      <div className="flex items-center justify-between p-8 border-b border-base-200">
         <div>
-          <h1 className="text-3xl font-bold text-[var(--text-primary)]">
+          <h1 className="text-3xl font-bold text-base-content">
             {slide.title}
           </h1>
-          <p className="text-lg text-[var(--text-muted)] mt-1">{slide.subtitle}</p>
+          <p className="text-lg text-base-content/60 mt-1">{slide.subtitle}</p>
         </div>
         <button
           onClick={onTogglePresentationMode}
-          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-2xl font-bold transition-colors"
+          className="text-base-content/60 hover:text-base-content text-2xl font-bold transition-colors"
           title="Exit presentation (Esc)"
         >
           ✕
@@ -352,17 +352,17 @@ export function PresentationMode({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between p-8 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+      <div className="flex items-center justify-between p-8 border-t border-base-200 bg-base-200">
         <button
           onClick={handlePrevSlide}
           disabled={currentSlide === 0}
-          className="px-6 py-2 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)] text-[var(--text-primary)] font-semibold hover:bg-[var(--bg-elevated)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="px-6 py-2 rounded-lg bg-base-300 border border-base-200 text-base-content font-semibold hover:bg-base-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           ← Previous
         </button>
 
         <div className="flex items-center gap-4">
-          <span className="text-sm text-[var(--text-muted)]">
+          <span className="text-sm text-base-content/60">
             Slide {currentSlide + 1} of {totalSlides}
           </span>
           <div className="flex gap-1">
@@ -372,8 +372,8 @@ export function PresentationMode({
                 onClick={() => setCurrentSlide(i)}
                 className={`w-2 h-2 rounded-full transition-all ${
                   i === currentSlide
-                    ? 'bg-[var(--text-primary)] w-8'
-                    : 'bg-[var(--border-subtle)]'
+                    ? 'bg-base-content w-8'
+                    : 'bg-base-200'
                 }`}
               />
             ))}
@@ -383,14 +383,14 @@ export function PresentationMode({
         <button
           onClick={handleNextSlide}
           disabled={currentSlide === totalSlides - 1}
-          className="px-6 py-2 rounded-lg bg-[var(--bg-base)] border border-[var(--border-subtle)] text-[var(--text-primary)] font-semibold hover:bg-[var(--bg-elevated)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="px-6 py-2 rounded-lg bg-base-300 border border-base-200 text-base-content font-semibold hover:bg-base-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Next →
         </button>
       </div>
 
       {/* Help text */}
-      <div className="absolute bottom-4 left-4 text-[9px] text-[var(--text-muted)] opacity-50">
+      <div className="absolute bottom-4 left-4 text-[9px] text-base-content/60 opacity-50">
         ⌨️ Arrow keys to navigate | Esc to exit
       </div>
     </div>

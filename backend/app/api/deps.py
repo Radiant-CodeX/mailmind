@@ -31,12 +31,6 @@ def get_current_user(
     mm_session: str | None = Cookie(default=None),
     mm_quick: str | None = Cookie(default=None),
 ):
-    print("=" * 50)
-    print("PATH:", request.url.path)
-    print("COOKIES:", request.cookies)
-    print("mm_session:", mm_session)
-    print("mm_quick:", mm_quick)
-    print("=" * 50)
     """
     FastAPI dependency — returns the authenticated User ORM object or raises 401.
 

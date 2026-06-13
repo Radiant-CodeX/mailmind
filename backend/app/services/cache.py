@@ -10,12 +10,19 @@ logger = logging.getLogger(__name__)
 
 
 class TTLCache:
-    """A thread-safe time-to-live in-memory cache for ephemeral lookups."""
+    """A thread-safe time-to-live in-memory cache for ephemeral lookups.
 
-    def __init__(self, default_ttl: int = 300) -> None:
+    Tracks hit/miss counters so the live metrics dashboard can report a real
+    cache hit rate. Counters are process-local and cheap (single int add).
+    """
+
+    def __init__(self, default_ttl: int = 300, *, name: str = "cache") -> None:
         self.default_ttl = default_ttl
+        self.name = name
         self._store: dict[str, tuple[float, Any]] = {}
         self._lock = Lock()
+        self._hits = 0
+        self._misses = 0
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         expiry = time.time() + (ttl or self.default_ttl)
@@ -26,16 +33,28 @@ class TTLCache:
         with self._lock:
             item = self._store.get(key)
             if not item:
+                self._misses += 1
                 return None
             expiry, value = item
             if expiry < time.time():
                 del self._store[key]
+                self._misses += 1
                 return None
+            self._hits += 1
             return value
 
     def clear(self) -> None:
         with self._lock:
             self._store.clear()
+
+    def stats(self) -> dict[str, int]:
+        """Return hit/miss counters and current entry count for this cache."""
+        with self._lock:
+            return {
+                "hits": self._hits,
+                "misses": self._misses,
+                "entries": len(self._store),
+            }
 
 
 class TriageCache:
@@ -56,9 +75,11 @@ class TriageCache:
     KEY_PREFIX = "mailmind:triage:"
 
     def __init__(self) -> None:
-        self._memory = TTLCache(default_ttl=self.TRIAGE_TTL)
+        self._memory = TTLCache(default_ttl=self.TRIAGE_TTL, name="triage")
         self._redis: Any = None
         self._redis_ok = False
+        self._hits = 0
+        self._misses = 0
         self._init_redis()
 
     def _init_redis(self) -> None:
@@ -98,9 +119,10 @@ class TriageCache:
 
     def get(self, email_id: str, user_email: str = "") -> dict[str, Any] | None:
         mkey = self._mkey(email_id, user_email)
-        # 1. In-memory
+        # 1. In-memory (its own counters track L1; we count L2 hits here)
         hit = self._memory.get(mkey)
         if hit is not None:
+            self._hits += 1
             return hit
         # 2. Redis
         if self._redis_ok:
@@ -109,10 +131,21 @@ class TriageCache:
                 if raw:
                     data = json.loads(raw)
                     self._memory.set(mkey, data, ttl=self.TRIAGE_TTL)
+                    self._hits += 1
                     return data
             except Exception as e:
                 logger.warning("[TriageCache] Redis get error: %s", e)
+        self._misses += 1
         return None
+
+    def stats(self) -> dict[str, Any]:
+        """Aggregate triage cache stats across both layers."""
+        return {
+            "hits": self._hits,
+            "misses": self._misses,
+            "entries": self._memory.stats()["entries"],
+            "redis": self._redis_ok,
+        }
 
     def set(self, email_id: str, data: dict[str, Any], user_email: str = "") -> None:
         self._memory.set(self._mkey(email_id, user_email), data, ttl=self.TRIAGE_TTL)
@@ -137,13 +170,38 @@ class TriageCache:
 
 
 # Global cache instances
-classification_cache = TTLCache(default_ttl=86400)
+classification_cache = TTLCache(default_ttl=86400, name="classification")
 triage_cache_store = TriageCache()          # Redis-backed triage cache
-precedents_cache = TTLCache(default_ttl=86400)
-commitments_cache = TTLCache(default_ttl=86400)
+precedents_cache = TTLCache(default_ttl=86400, name="precedents")
+commitments_cache = TTLCache(default_ttl=86400, name="commitments")
 
 # Keep legacy name working
-triage_cache = TTLCache(default_ttl=86400)
+triage_cache = TTLCache(default_ttl=86400, name="triage_legacy")
+
+
+def get_cache_stats() -> dict[str, Any]:
+    """
+    Aggregate hit/miss stats across every cache for the live metrics dashboard.
+
+    Returns per-cache breakdown plus an overall hit rate (0-100).
+    """
+    caches = {
+        "classification": classification_cache.stats(),
+        "triage": triage_cache_store.stats(),
+        "precedents": precedents_cache.stats(),
+        "commitments": commitments_cache.stats(),
+    }
+    total_hits = sum(c["hits"] for c in caches.values())
+    total_misses = sum(c["misses"] for c in caches.values())
+    total = total_hits + total_misses
+    hit_rate = round((total_hits / total) * 100, 1) if total else 0.0
+    return {
+        "hit_rate": hit_rate,
+        "total_hits": total_hits,
+        "total_misses": total_misses,
+        "total_lookups": total,
+        "per_cache": caches,
+    }
 
 
 def clear_all_user_caches() -> None:

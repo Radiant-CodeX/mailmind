@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.agent_routes import router as agent_router
 from app.api.compliance_routes import router as compliance_router
+from app.api.feedback_routes import router as feedback_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.routes import router
 from app.config.settings import settings
@@ -132,4 +133,5 @@ logger.info(
 app.include_router(router)
 app.include_router(agent_router)
 app.include_router(monitoring_router, prefix="/api")
+app.include_router(feedback_router, prefix="/api")
 app.include_router(compliance_router)

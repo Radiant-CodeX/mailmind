@@ -25,15 +25,15 @@ export function TriageExplainer({ triage, classification }: TriageExplainerProps
   return (
     <div className="text-left space-y-4" id="triage-explainer">
       {/* Header Info */}
-      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] pb-2.5">
+      <div className="flex items-center justify-between border-b border-base-200 pb-2.5">
         <div>
-          <h4 className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">Triage Breakdown</h4>
-          <p className="text-[9px] text-[var(--text-muted)] mt-0.5">NLP priority dimension metrics</p>
+          <h4 className="text-xs font-bold text-base-content uppercase tracking-wider">Triage Breakdown</h4>
+          <p className="text-[9px] text-base-content/60 mt-0.5">NLP priority dimension metrics</p>
         </div>
         {classification && (
           <div className="text-right">
-            <span className="text-[9px] text-[var(--text-muted)] block font-semibold">Category / Confidence</span>
-            <span className="text-xs font-bold text-[var(--text-primary)]">
+            <span className="text-[9px] text-base-content/60 block font-semibold">Category / Confidence</span>
+            <span className="text-xs font-bold text-base-content">
               {classification.category.toUpperCase()} ({Math.round(classification.confidence * 100)}%)
             </span>
           </div>
@@ -47,19 +47,19 @@ export function TriageExplainer({ triage, classification }: TriageExplainerProps
           return (
             <div key={axis.axis} className="space-y-1" id={`axis-row-${axis.axis}`}>
               <div className="flex justify-between items-center text-xs">
-                <span className="font-semibold text-[var(--text-primary)]">
+                <span className="font-semibold text-base-content">
                   {formatAxisName(axis.axis)}
                 </span>
-                <span className="font-mono font-bold text-[var(--text-primary)]">{pct}%</span>
+                <span className="font-mono font-bold text-base-content">{pct}%</span>
               </div>
-              <div className="w-full h-1.5 bg-[var(--bg-base)] rounded-full overflow-hidden relative">
+              <div className="w-full h-1.5 bg-base-300 rounded-full overflow-hidden relative">
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${getBarColor(axis.axis)}`}
                   style={{ width: `${pct}%` }}
                 ></div>
               </div>
               {axis.explanation && (
-                <p className="text-[9px] text-[var(--text-muted)] leading-tight pl-0.5">
+                <p className="text-[9px] text-base-content/60 leading-tight pl-0.5">
                   {axis.explanation}
                 </p>
               )}
@@ -69,13 +69,13 @@ export function TriageExplainer({ triage, classification }: TriageExplainerProps
       </div>
 
       {/* Composite priority summary */}
-      <div className="p-3 rounded-lg bg-[var(--bg-elevated)]/60 border border-[var(--border-subtle)] space-y-2.5">
+      <div className="p-3 rounded-lg bg-base-200/60 border border-base-200 space-y-2.5">
         <div>
           <div className="flex justify-between text-xs font-medium mb-1">
-            <span className="text-[var(--text-muted)]">Composite Priority Index</span>
-            <span className="text-[var(--text-primary)] font-bold">{Math.round(triage.composite_score)} / 100</span>
+            <span className="text-base-content/60">Composite Priority Index</span>
+            <span className="text-base-content font-bold">{Math.round(triage.composite_score)} / 100</span>
           </div>
-          <div className="w-full h-2 bg-[var(--bg-base)] rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-base-300 rounded-full overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-700 bg-gradient-to-r from-sky-400 via-amber-400 to-rose-500"
               style={{ width: `${triage.composite_score}%` }}
@@ -83,8 +83,8 @@ export function TriageExplainer({ triage, classification }: TriageExplainerProps
           </div>
         </div>
 
-        <div className="flex items-center justify-between pt-2 border-t border-[var(--border-subtle)]">
-          <span className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-wider">Gate Status</span>
+        <div className="flex items-center justify-between pt-2 border-t border-base-200">
+          <span className="text-[9px] text-base-content/60 uppercase font-bold tracking-wider">Gate Status</span>
           <span className={`text-[9px] font-black tracking-wider px-2 py-0.5 rounded ${
             triage.approval_mode === 'GATE'
               ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'

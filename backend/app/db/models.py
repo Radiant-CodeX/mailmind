@@ -341,6 +341,25 @@ class ToneProfile(Base):
     account: Mapped[OAuthAccount] = relationship(back_populates="tone_profile")
 
 
+class Feedback(Base):
+    """User-submitted product feedback (rating + category + message)."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    rating: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+
+
 class ProcessingMetric(Base):
     """Per-stage latency and SLA outcome for one email's processing."""
 

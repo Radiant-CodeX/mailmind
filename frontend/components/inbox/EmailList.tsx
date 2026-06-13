@@ -74,8 +74,8 @@ export function EmailList({
   return (
     <div 
       className={`${
-        isFullWidth ? 'flex-1' : 'w-[320px] shrink-0 border-r border-[var(--border)]'
-      } bg-[var(--bg-surface)] flex flex-col h-full overflow-hidden`}
+        isFullWidth ? 'flex-1' : 'w-[320px] shrink-0 border-r border-base-300'
+      } bg-base-100 flex flex-col h-full overflow-hidden`}
       id="email-list"
     >
       {/* Live triage streaming progress */}
@@ -88,8 +88,8 @@ export function EmailList({
       )}
 
       {/* Header and counter */}
-      <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between">
-        <h2 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2 uppercase tracking-wide">
+      <div className="p-4 border-b border-base-200 flex items-center justify-between">
+        <h2 className="text-sm font-bold text-base-content flex items-center gap-2 uppercase tracking-wide">
           {activeFolder}
         </h2>
         <div className="flex items-center gap-1.5">
@@ -99,7 +99,7 @@ export function EmailList({
             <button
               onClick={onRefresh}
               disabled={loading}
-              className={`p-1.5 rounded-full hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all ${
+              className={`p-1.5 rounded-full hover:bg-base-200 text-base-content/60 hover:text-base-content transition-all ${
                 loading ? 'cursor-not-allowed' : 'cursor-pointer'
               }`}
               title="Refresh"
@@ -115,13 +115,13 @@ export function EmailList({
           {/* Gmail-style pagination: "1–50 of N" with prev/next */}
           {total > 0 && (
             <div className="flex items-center gap-0.5 ml-1">
-              <span className="text-[11px] font-medium text-[var(--text-muted)] tabular-nums whitespace-nowrap px-1">
+              <span className="text-[11px] font-medium text-base-content/60 tabular-nums whitespace-nowrap px-1">
                 {pageIndex * pageSize + (emails.length ? 1 : 0)}–{pageIndex * pageSize + emails.length} of {total.toLocaleString()}
               </span>
               <button
                 onClick={onPrevPage}
                 disabled={!hasPrevPage || loading}
-                className="p-1 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                className="p-1 rounded-md hover:bg-base-200 text-base-content/60 hover:text-base-content transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                 title="Newer"
                 id="btn-prev-page"
               >
@@ -132,7 +132,7 @@ export function EmailList({
               <button
                 onClick={onNextPage}
                 disabled={!hasNextPage || loading}
-                className="p-1 rounded-md hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                className="p-1 rounded-md hover:bg-base-200 text-base-content/60 hover:text-base-content transition-all disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
                 title="Older"
                 id="btn-next-page"
               >
@@ -146,17 +146,17 @@ export function EmailList({
       </div>
 
       {/* Search Input */}
-      <div className="p-3 bg-[var(--bg-surface)] border-b border-[var(--border-subtle)]">
+      <div className="p-3 bg-base-100 border-b border-base-200">
         <div className="relative">
           <input
             type="text"
             placeholder="Search email body, sender..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] transition-all font-medium"
+            className="w-full pl-8 pr-3 py-1.5 rounded-md bg-base-200 border border-base-300 text-xs text-base-content placeholder-base-content/60 focus:outline-none focus:border-primary transition-all font-medium"
             id="inbox-search"
           />
-          <div className="absolute left-2.5 top-2.5 text-[var(--text-muted)] pointer-events-none">
+          <div className="absolute left-2.5 top-2.5 text-base-content/60 pointer-events-none">
             <svg
               className="w-3.5 h-3.5"
               fill="none"
@@ -180,7 +180,7 @@ export function EmailList({
         {loading && emails.length === 0 ? (
           <EmailListSkeleton />
         ) : emails.length === 0 ? (
-          <div className="p-8 text-center text-[var(--text-muted)] text-xs">
+          <div className="p-8 text-center text-base-content/60 text-xs">
             No emails found
           </div>
         ) : (

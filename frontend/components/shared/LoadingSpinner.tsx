@@ -15,10 +15,9 @@ export function LoadingSpinner({ message = 'Loading...', size = 'md' }: LoadingS
   return (
     <div className="flex flex-col items-center justify-center p-6 text-center animate-fade-in" id="loading-spinner">
       <div
-        className={`${sizeClasses[size]} rounded-full border-t-accent-primary border-r-transparent border-b-transparent border-l-transparent animate-spin`}
-        style={{ borderColor: 'var(--border) var(--border) var(--border) transparent' }}
+        className={`${sizeClasses[size]} rounded-full border-primary border-t-transparent animate-spin`}
       ></div>
-      {message && <p className="mt-3 text-sm text-[var(--text-muted)] tracking-wide">{message}</p>}
+      {message && <p className="mt-3 text-sm text-base-content/60 tracking-wide">{message}</p>}
     </div>
   );
 }

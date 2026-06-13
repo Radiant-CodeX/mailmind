@@ -40,19 +40,19 @@ export function CommitmentItem({ item, onToggle, conflict }: CommitmentItemProps
 
   return (
     <div
-      className={`p-3 bg-[var(--bg-surface)] border rounded-lg flex items-start justify-between gap-3 transition-all duration-200 ${
+      className={`p-3 bg-base-100 border rounded-lg flex items-start justify-between gap-3 transition-all duration-200 ${
         item.confirmed
           ? 'border-emerald-500/30 bg-emerald-500/5'
           : item.approved
-          ? 'border-[var(--accent-primary)]/40 bg-[var(--accent-primary)]/5'
-          : 'border-[var(--border-subtle)] hover:border-[var(--border)]'
+          ? 'border-primary/40 bg-primary/5'
+          : 'border-base-200 hover:border-base-300'
       }`}
       id={`commitment-item-${item.id}`}
     >
       <div className="flex items-start gap-2.5 flex-1 min-w-0">
         {/* Checkbox / Confirmed Green Check */}
         {item.confirmed ? (
-          <div className="mt-1 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-[var(--bg-elevated)] shrink-0 shadow-sm animate-scale-in">
+          <div className="mt-1 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center text-base-200 shrink-0 shadow-sm animate-scale-in">
             <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
             </svg>
@@ -62,20 +62,20 @@ export function CommitmentItem({ item, onToggle, conflict }: CommitmentItemProps
             type="checkbox"
             checked={!!item.approved}
             onChange={onToggle}
-            className="mt-1 w-4 h-4 rounded bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--accent-primary)] focus:ring-[var(--accent-primary)] cursor-pointer"
+            className="mt-1 w-4 h-4 rounded bg-base-200 border-base-300 text-primary focus:ring-primary cursor-pointer"
           />
         )}
 
         <div className="flex-1 min-w-0 text-left">
           <p className={`text-xs leading-relaxed break-words font-medium ${
-            item.confirmed ? 'text-[var(--text-primary)]/75 line-through font-normal' : item.approved ? 'text-[var(--text-primary)] font-semibold' : 'text-[var(--text-primary)]/80'
+            item.confirmed ? 'text-base-content/75 line-through font-normal' : item.approved ? 'text-base-content font-semibold' : 'text-base-content/80'
           }`}>
             {item.commitment}
           </p>
 
           <div className="flex flex-wrap items-center gap-2 mt-2">
             {/* Confidence Badge */}
-            <span className="px-1 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border)] text-[9px] font-mono text-[var(--text-muted)]">
+            <span className="px-1 py-0.5 rounded bg-base-200 border border-base-300 text-[9px] font-mono text-base-content/60">
               {Math.round(item.confidence * 100)}% confidence
             </span>
 
@@ -99,7 +99,7 @@ export function CommitmentItem({ item, onToggle, conflict }: CommitmentItemProps
                     href={item.task_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[9px] text-[var(--accent-primary)] hover:underline flex items-center gap-0.5 font-bold uppercase tracking-wider"
+                    className="text-[9px] text-primary hover:underline flex items-center gap-0.5 font-bold uppercase tracking-wider"
                   >
                     View Task
                   </a>

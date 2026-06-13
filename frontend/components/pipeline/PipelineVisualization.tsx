@@ -110,17 +110,17 @@ export function PipelineVisualization({
   const slaMet = totalDuration <= slaTarget;
 
   return (
-    <div className="space-y-6 p-4 bg-gradient-to-br from-[var(--bg-base)] to-[var(--bg-elevated)] rounded-lg border border-[var(--border-subtle)]">
+    <div className="space-y-6 p-4 bg-gradient-to-br from-base-300 to-base-200 rounded-lg border border-base-200">
       {/* Header */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold text-[var(--text-primary)] uppercase tracking-wider">
+          <h3 className="text-sm font-bold text-base-content uppercase tracking-wider">
             Pipeline Execution
           </h3>
           {!isLoading && totalDuration > 0 && (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-[var(--text-muted)]">Total</span>
-              <span className="font-mono font-bold text-[var(--text-primary)]">
+              <span className="text-xs text-base-content/60">Total</span>
+              <span className="font-mono font-bold text-base-content">
                 {totalDuration}ms
               </span>
               <span
@@ -160,7 +160,7 @@ export function PipelineVisualization({
                     ? `border-emerald-500/50 bg-gradient-to-r ${node.color} text-white shadow-lg`
                     : isRunning
                     ? `border-amber-500/50 bg-gradient-to-r ${node.color} text-white shadow-lg animate-pulse`
-                    : `border-[var(--border-subtle)] bg-[var(--bg-elevated)]/50 text-[var(--text-muted)]`
+                    : `border-base-200 bg-base-200/50 text-base-content/60`
                 }`}
               >
                 <div className="p-3 flex items-center justify-between">
@@ -194,7 +194,7 @@ export function PipelineVisualization({
                         <div className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                       )}
                       {isPending && (
-                        <div className="w-5 h-5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-base)]" />
+                        <div className="w-5 h-5 rounded-full border border-base-200 bg-base-300" />
                       )}
                     </div>
                   </div>
@@ -214,7 +214,7 @@ export function PipelineVisualization({
               </div>
 
               {/* Node Details */}
-              <div className="ml-6 space-y-1 text-xs text-[var(--text-muted)] opacity-75">
+              <div className="ml-6 space-y-1 text-xs text-base-content/60 opacity-75">
                 {node.id === 'ingest' && isCompleted && (
                   <div>└─ Masked PII entities safely</div>
                 )}
@@ -249,7 +249,7 @@ export function PipelineVisualization({
               {/* Arrow between nodes (except after last) */}
               {index < nodes.length - 1 && (
                 <div className="flex justify-center py-1">
-                  <div className="text-[var(--text-muted)] opacity-40 text-lg">↓</div>
+                  <div className="text-base-content/60 opacity-40 text-lg">↓</div>
                 </div>
               )}
             </div>
@@ -259,22 +259,22 @@ export function PipelineVisualization({
 
       {/* Summary Footer */}
       {totalDuration > 0 && (
-        <div className="p-3 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] space-y-2 text-xs">
+        <div className="p-3 rounded bg-base-200 border border-base-200 space-y-2 text-xs">
           <div className="flex justify-between">
-            <span className="text-[var(--text-muted)]">Pipeline Status</span>
-            <span className="font-semibold text-[var(--text-primary)]">
+            <span className="text-base-content/60">Pipeline Status</span>
+            <span className="font-semibold text-base-content">
               {isLoading ? 'Running...' : 'Complete'}
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--text-muted)]">Nodes Completed</span>
-            <span className="font-semibold text-[var(--text-primary)]">
+            <span className="text-base-content/60">Nodes Completed</span>
+            <span className="font-semibold text-base-content">
               {metrics.filter((m) => m.status === 'completed').length} / 6
             </span>
           </div>
-          <div className="h-px bg-[var(--border-subtle)]" />
+          <div className="h-px bg-base-200" />
           <div className="flex justify-between">
-            <span className="text-[var(--text-muted)]">SLA Target (Triage)</span>
+            <span className="text-base-content/60">SLA Target (Triage)</span>
             <span
               className={`font-semibold ${
                 slaMet
@@ -290,7 +290,7 @@ export function PipelineVisualization({
 
       {/* Empty state */}
       {!isLoading && totalDuration === 0 && !error && (
-        <div className="text-center py-8 text-[var(--text-muted)] text-xs opacity-60">
+        <div className="text-center py-8 text-base-content/60 text-xs opacity-60">
           Select an email to see the pipeline in action
         </div>
       )}
@@ -299,9 +299,9 @@ export function PipelineVisualization({
       {isLoading && (
         <div className="text-center py-8">
           <div className="inline-block">
-            <div className="w-8 h-8 border-2 border-[var(--border-subtle)] border-t-[var(--text-primary)] rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-base-200 border-t-base-content rounded-full animate-spin" />
           </div>
-          <p className="mt-3 text-xs text-[var(--text-muted)]">
+          <p className="mt-3 text-xs text-base-content/60">
             Processing email through pipeline...
           </p>
         </div>
