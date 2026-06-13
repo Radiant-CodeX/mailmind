@@ -144,6 +144,7 @@ def exchange_code(code: str) -> dict[str, Any]:
         "email": email,
         "sub": profile.get("id") or email,  # Google unique ID
         "display_name": profile.get("name"),
+        "picture": profile.get("picture"),  # OAuth profile photo → account.picture_url
         "access_token": tok.get("access_token"),
         "refresh_token": tok.get("refresh_token"),
         "token_expires_at": datetime.utcnow() + timedelta(seconds=int(tok.get("expires_in", 3600))),

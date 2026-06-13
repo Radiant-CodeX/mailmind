@@ -298,7 +298,7 @@ export default function LoginPage() {
       className="flex flex-col min-h-screen w-screen items-center justify-center gap-6 bg-bg-base text-text-primary px-4 py-10 overflow-y-auto"
       id="login-workspace"
     >
-      <div className="relative w-full max-w-md bg-base-100 border border-base-300 rounded-2xl shadow-2xl p-8 overflow-hidden">
+      <div className="relative w-full max-w-md shrink-0 bg-base-100 border border-base-300 rounded-2xl shadow-2xl p-8 overflow-hidden">
         <div className="absolute -right-16 -top-16 w-36 h-36 rounded-full bg-primary/10 blur-2xl" />
 
         {/* Brand */}
@@ -603,7 +603,7 @@ export default function LoginPage() {
       </div>
 
       {/* Footer — normal flow, below the card so it never overlaps the buttons */}
-      <footer className="w-full max-w-md px-2">
+      <footer className="w-full max-w-md shrink-0 px-2">
         <div className="flex items-center justify-between gap-4 text-xs text-base-content/50">
           <div>© {new Date().getFullYear()} MailMind</div>
           <div className="flex items-center gap-4">
