@@ -131,6 +131,8 @@ export async function triageEmail(payload: {
   subject: string;
   body: string;
   received_at: string;
+  /** Bypass the server cache and force a fresh LLM triage (re-triage button). */
+  force?: boolean;
 }) {
   const res = await apiFetch(`${BASE}/api/agent/triage`, {
     method: "POST",

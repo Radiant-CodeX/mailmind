@@ -83,9 +83,11 @@ export function useEmailDetail(
   email: Email | null,
   enabled: boolean = true,
   currentUserEmail?: string | null,
+  onTriageEnriched?: (emailId: string, triage: TriageResult) => void,
 ) {
   const [loading, setLoading] = useState(false); // Phase 1 triage loading
   const [enriching, setEnriching] = useState(false); // Phase 2 enrichment loading
+  const [isRetriaging, setIsRetriaging] = useState(false); // single-email re-triage
   const [error, setError] = useState<string | null>(null);
 
   const [classification, setClassification] =
@@ -177,6 +179,9 @@ export function useEmailDetail(
             };
             setTriageResult(upgraded);
             setClassification(toClassification(upgraded));
+            // Persist onto the list email so the breakdown shows instantly on
+            // reopen (no refetch, no "not available" flash).
+            onTriageEnriched?.(currEmail.id, upgraded);
           })
           .catch((err) => {
             console.warn("[triage] axis backfill failed:", err);
@@ -385,12 +390,49 @@ export function useEmailDetail(
     }
   };
 
+  // Re-score this one email from scratch — bypasses the server cache so the user
+  // can refresh a stale/wrong triage. Updates the panel and the list in place.
+  const retriage = async () => {
+    if (!email) return;
+    setIsRetriaging(true);
+    setError(null);
+    try {
+      const full = await triageEmail({
+        email_id: email.id,
+        sender: email.sender,
+        subject: email.subject,
+        body: email.body,
+        received_at: email.received_at,
+        force: true,
+      });
+      const f = (full || {}) as Record<string, unknown>;
+      const fresh: TriageResult = {
+        axes: (f.axes as TriageResult["axes"]) || [],
+        composite_score: (f.composite_score as number) || 0,
+        priority: f.priority as TriageResult["priority"],
+        approval_mode: f.approval_mode as TriageResult["approval_mode"],
+        email_type: f.email_type as string | undefined,
+        triage_reasoning: f.triage_reasoning as string | undefined,
+        dynamic_weights: f.dynamic_weights as TriageResult["dynamic_weights"],
+      };
+      setTriageResult(fresh);
+      setClassification(toClassification(fresh));
+      onTriageEnriched?.(email.id, fresh);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Re-triage failed");
+    } finally {
+      setIsRetriaging(false);
+    }
+  };
+
   return {
     loading,
     enriching, // true while commitment+rag are loading in background
     error,
     classification,
     triageResult,
+    retriage,
+    isRetriaging,
     precedents,
     pipelineCommitments,
     attachments,
