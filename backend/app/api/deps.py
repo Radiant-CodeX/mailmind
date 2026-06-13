@@ -72,6 +72,60 @@ def get_current_user(
     )
 
 
+def get_current_session(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    mm_session: str | None = Cookie(default=None),
+    mm_quick: str | None = Cookie(default=None),
+) -> dict:
+    """
+    FastAPI dependency — returns session metadata dict or raises 401.
+
+    Returns a dict with user context (user_id, provider, email, etc.)
+    for use in routes and middleware that need session information.
+    """
+    from app.db.models import User
+    from app.config.settings import settings
+
+    svc = _session_service(db)
+
+    # ── 1. Try primary session cookie ────────────────────────────────────────
+    if mm_session:
+        user_id = svc.get_user_id_from_session(mm_session)
+        if user_id:
+            user = db.query(User).filter_by(id=user_id).first()
+            if user:
+                return {
+                    "user_id": user.id,
+                    "email": user.email,
+                    "provider": getattr(user, "provider", "unknown"),
+                }
+
+    # ── 2. Try quick-login rotation ──────────────────────────────────────────
+    if mm_quick:
+        result = svc.try_quick_login(mm_quick)
+        if result:
+            user_id, new_quick_token = result
+            user = db.query(User).filter_by(id=user_id).first()
+            if user:
+                new_session_token = svc.create_session(user_id)
+                _set_session_cookie(response, new_session_token, settings.session_ttl_seconds)
+                _set_quick_cookie(response, new_quick_token, settings.quick_login_ttl_seconds)
+                db.commit()
+                return {
+                    "user_id": user.id,
+                    "email": user.email,
+                    "provider": getattr(user, "provider", "unknown"),
+                }
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated. Please sign in.",
+        headers={"WWW-Authenticate": "Cookie"},
+    )
+
+
 def get_default_account(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
