@@ -270,6 +270,39 @@ def _normalise_weights(weights: dict[str, Any]) -> dict[str, float]:
     return {axis: round(w / total, 4) for axis, w in cleaned.items()}
 
 
+_NOREPLY_SENDER_RE = re.compile(
+    r"(no[._-]?reply|do[._-]?not[._-]?reply|donotreply|mailer[-_.]?daemon|"
+    r"bounce[s]?@|notifications?@|automated?@|alerts?@|postmaster@)",
+    re.IGNORECASE,
+)
+
+
+def _is_automated_sender(sender: str, body: str) -> bool:
+    """True when the email comes from a no-reply / automated address."""
+    if _NOREPLY_SENDER_RE.search(sender or ""):
+        return True
+    b = (body or "").lower()
+    return any(m in b for m in (
+        "no-reply", "noreply", "do not reply", "please do not reply",
+        "this is an automated", "unsubscribe",
+    ))
+
+
+def _dampen_automated_action(axes: list[dict], sender: str, body: str) -> list[dict]:
+    """
+    No-reply / automated senders can't be replied to, so the 'action' axis must
+    not claim "a direct response is required". Cap it low so these emails aren't
+    mis-ranked as needing a reply (e.g. a CI-failure notice from noreply@github).
+    """
+    if not _is_automated_sender(sender, body):
+        return axes
+    for a in axes:
+        if a.get("axis") == "action" and float(a.get("raw_score", 0.0)) > 0.2:
+            a["raw_score"] = 0.15
+            a["explanation"] = "Automated / no-reply sender — no direct reply expected"
+    return axes
+
+
 def _recompute_composite(axes: list[dict], weights: dict[str, float]) -> float:
     """
     Recalculate the composite score in code from axis raw_scores × weights.
@@ -415,6 +448,9 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
             data = _parse_triage_json(response.content)
 
             axes = _validate_axes(data.get("axes"))
+            # No-reply/automated senders shouldn't score high on "action" (you
+            # can't reply to them) — cap it before the composite is computed.
+            axes = _dampen_automated_action(axes, state["sender"], body_for_triage or state["body"])
             weights = _normalise_weights(data.get("dynamic_weights", {}))
             # Authoritative composite — recomputed in code, LLM value discarded.
             composite = _recompute_composite(axes, weights)

@@ -786,6 +786,19 @@ class GmailClient:
         except Exception as e:
             logger.debug("[gmail] stop watch failed: %s", e)
 
+    def get_message(self, email_id: str) -> dict[str, Any] | None:
+        """Fetch a single message fully formatted (rich html_body + attachments).
+
+        Used by the detail view: the mirror stores only a snippet, so opening an
+        email fetches the full content on demand.
+        """
+        if self.use_mock:
+            for m in self._mock_inbox():
+                if m.get("email_id") == email_id:
+                    return m
+            return None
+        return self._format_one(email_id)
+
     def _fetch_many(self, ids: list[str]) -> list[dict[str, Any]]:
         """Fetch + format many messages concurrently (Gmail has no batch GET, so
         parallel requests turn ~50 sequential round-trips into a few batches)."""

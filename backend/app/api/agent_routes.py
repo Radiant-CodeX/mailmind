@@ -558,6 +558,12 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                     "email_id": req.email_id,
                     "priority": cached.get("priority"),
                     "composite_score": cached.get("composite_score"),
+                    # Ship the axis breakdown inline so the detail view shows it
+                    # instantly (no second LLM round-trip).
+                    "axes": cached.get("axes") or [],
+                    "approval_mode": cached.get("approval_mode", "SUGGEST"),
+                    "email_type": cached.get("email_type"),
+                    "triage_reasoning": cached.get("triage_reasoning"),
                     "cached": True,
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
@@ -584,6 +590,10 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                     "email_id": req.email_id,
                     "priority": existing.get("priority"),
                     "composite_score": cached_score,
+                    "axes": existing.get("axes") or [],
+                    "approval_mode": existing.get("approval_mode", "SUGGEST"),
+                    "email_type": existing.get("email_type"),
+                    "triage_reasoning": existing.get("triage_reasoning"),
                     "cached": True,
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
@@ -608,6 +618,11 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                             "email_id": result.get("email_id"),
                             "priority": result.get("priority"),
                             "composite_score": result.get("composite_score"),
+                            # Inline axis breakdown → detail view renders instantly.
+                            "axes": result.get("axes") or [],
+                            "approval_mode": result.get("approval_mode", "SUGGEST"),
+                            "email_type": result.get("email_type"),
+                            "triage_reasoning": result.get("triage_reasoning"),
                             "cached": False,
                         }
                         yield f"data: {json.dumps(payload)}\n\n"

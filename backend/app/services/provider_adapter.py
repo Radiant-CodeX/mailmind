@@ -61,6 +61,10 @@ class ProviderAdapter(ABC):
         """Simplified inbox fetch (used by /emails route)."""
 
     @abstractmethod
+    def get_message(self, email_id: str) -> dict[str, Any] | None:
+        """Fetch a single message fully formatted (html_body + attachments)."""
+
+    @abstractmethod
     def get_attachment(self, message_id: str, attachment_id: str) -> dict[str, Any] | None:
         """Return raw attachment data dict or None."""
 
@@ -170,6 +174,9 @@ class GmailAdapter(ProviderAdapter):
     def get_inbox_emails(self, limit=10) -> list[dict[str, Any]]:
         return self._get_client().get_inbox_emails(limit=limit)
 
+    def get_message(self, email_id) -> dict[str, Any] | None:
+        return self._get_client().get_message(email_id)
+
     def get_attachment(self, message_id, attachment_id) -> dict[str, Any] | None:
         return self._get_client().get_attachment(message_id, attachment_id)
 
@@ -272,6 +279,9 @@ class OutlookAdapter(ProviderAdapter):
 
     def get_inbox_emails(self, limit=10) -> list[dict[str, Any]]:
         return self._get_client().get_inbox_emails(limit=limit)
+
+    def get_message(self, email_id) -> dict[str, Any] | None:
+        return self._get_client().get_message(email_id)
 
     def get_attachment(self, message_id, attachment_id) -> dict[str, Any] | None:
         return self._get_client().get_attachment(message_id, attachment_id)

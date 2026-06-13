@@ -15,6 +15,7 @@ import {
   generateEmailDraft,
   sendEmailReply,
   fetchAttachments,
+  fetchMailboxMessage,
   triageEmail,
 } from "../lib/api";
 import { userStorage } from "../lib/userStorage";
@@ -97,6 +98,9 @@ export function useEmailDetail(
   >([]);
 
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Full message content (rich html_body) fetched on open — the mirror only
+  // stores a snippet, so this drives the formatted body in the detail view.
+  const [fullContent, setFullContent] = useState<{ html_body: string | null; body: string } | null>(null);
 
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [isSendingDraft, setIsSendingDraft] = useState(false);
@@ -183,17 +187,28 @@ export function useEmailDetail(
           });
       }
 
-      // ── Fetch attachment metadata (lazy — only when email has attachments) ────
-      if (currEmail.hasAttachments) {
-        fetchAttachments(currEmail.id)
-          .then((atts) => {
-            if (!cancelled) setAttachments(atts);
-          })
-          .catch((err) => {
-            console.warn("[attachments] Failed to fetch:", err);
-            if (!cancelled) setAttachments([]);
-          });
-      }
+      // ── Fetch FULL content (rich html_body + attachments) ────────────────────
+      // The mirror serves only a snippet, so fetch the formatted body + the
+      // attachment list on open. Falls back to the lazy attachments call if the
+      // full fetch fails for any reason.
+      setFullContent(null);
+      fetchMailboxMessage(currEmail.id)
+        .then((full) => {
+          if (cancelled || !full) return;
+          setFullContent({ html_body: full.html_body, body: full.body });
+          if (full.attachments && full.attachments.length > 0) {
+            setAttachments(full.attachments as Attachment[]);
+          }
+        })
+        .catch((err) => {
+          console.warn("[detail] full content fetch failed:", err);
+          // Fallback: at least try to get attachment metadata.
+          if (currEmail.hasAttachments) {
+            fetchAttachments(currEmail.id)
+              .then((atts) => { if (!cancelled) setAttachments(atts); })
+              .catch(() => { if (!cancelled) setAttachments([]); });
+          }
+        });
 
       // ── Check enrichment cache ───────────────────────────────────────────────
       const cached =
@@ -391,6 +406,9 @@ export function useEmailDetail(
     error,
     classification,
     triageResult,
+    fullContent,
+    retriage,
+    isRetriaging,
     precedents,
     pipelineCommitments,
     attachments,
