@@ -49,8 +49,8 @@ export function SortMenu({ value, onChange }: SortMenuProps) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1 p-1.5 rounded-md hover:bg-[var(--bg-elevated)] transition-all cursor-pointer ${
-          isCustom ? 'text-[var(--accent-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+        className={`flex items-center gap-1 p-1.5 rounded-md hover:bg-base-200 transition-all cursor-pointer ${
+          isCustom ? 'text-primary' : 'text-base-content/60 hover:text-base-content'
         }`}
         title={`Sort: ${active.label}`}
         id="btn-sort-emails"
@@ -60,15 +60,15 @@ export function SortMenu({ value, onChange }: SortMenuProps) {
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4 4m0 0l4-4m-4 4V4" />
         </svg>
-        {isCustom && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent-primary)]" />}
+        {isCustom && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
       </button>
 
       {open && (
         <div
-          className="absolute right-0 mt-1.5 w-52 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-2xl py-1.5 z-50 animate-fade-in"
+          className="absolute right-0 mt-1.5 w-52 bg-base-100 border border-base-300 rounded-xl shadow-2xl py-1.5 z-50 animate-fade-in"
           role="listbox"
         >
-          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
+          <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-base-content/60">
             Sort by
           </div>
           {OPTIONS.map((opt) => {
@@ -84,8 +84,8 @@ export function SortMenu({ value, onChange }: SortMenuProps) {
                 aria-selected={selected}
                 className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-left transition-all cursor-pointer ${
                   selected
-                    ? 'bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
-                    : 'text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-base-content hover:bg-base-200'
                 }`}
               >
                 <span>{opt.label}</span>

@@ -11,7 +11,7 @@ export function ConflictBadge({ conflict }: ConflictBadgeProps) {
   return (
     <div className="relative group inline-block shrink-0" id="conflict-badge">
       {/* Warning amber triangle */}
-      <div className="text-[var(--accent-warning)] hover:text-[var(--text-primary)] cursor-help transition-all">
+      <div className="text-warning hover:text-base-content cursor-help transition-all">
         <svg
           className="w-4.5 h-4.5"
           fill="none"
@@ -29,14 +29,14 @@ export function ConflictBadge({ conflict }: ConflictBadgeProps) {
       </div>
 
       {/* Floating Tooltip card */}
-      <div className="absolute right-0 bottom-6 hidden group-hover:block bg-[var(--bg-elevated)] border border-[var(--border)] rounded shadow-xl p-3 w-60 z-50 text-left pointer-events-none animate-fade-in">
-        <h5 className="text-[10px] font-extrabold text-[var(--accent-warning)] uppercase tracking-wider mb-1">
+      <div className="absolute right-0 bottom-6 hidden group-hover:block bg-base-200 border border-base-300 rounded shadow-xl p-3 w-60 z-50 text-left pointer-events-none animate-fade-in">
+        <h5 className="text-[10px] font-extrabold text-warning uppercase tracking-wider mb-1">
           Calendar Conflict Detected
         </h5>
-        <h6 className="text-xs font-semibold text-[var(--text-primary)] mb-1 truncate">
+        <h6 className="text-xs font-semibold text-base-content mb-1 truncate">
           {conflict.title}
         </h6>
-        <p className="text-[10px] text-[var(--text-muted)] font-mono leading-tight">
+        <p className="text-[10px] text-base-content/60 font-mono leading-tight">
           Timeslot: {new Date(conflict.start_time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} - {new Date(conflict.end_time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
         </p>
       </div>

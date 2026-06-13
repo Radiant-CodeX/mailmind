@@ -19,9 +19,35 @@ from fastapi import APIRouter, Response
 from app.config.settings import settings
 from app.db.base import is_persistence_enabled
 from app.monitoring.metrics import metrics_content_type, generate_metrics, set_queue_depth
+from app.monitoring.live_metrics import live_metrics
 from app.queue.backends import get_queue_backend
+from app.services.cache import get_cache_stats
 
 router = APIRouter(tags=["monitoring"])
+
+
+@router.get("/metrics/live")
+def metrics_live() -> dict:
+    """
+    Live operational metrics for the dashboard (JSON).
+
+    Returns cache hit rate, latency percentiles (p50/p95) per pipeline stage,
+    LLM error rate, and the sequential-vs-parallel speedup — everything the
+    ops dashboard renders, in a single poll-friendly payload.
+    """
+    return {
+        "cache": get_cache_stats(),
+        "latency": live_metrics.latency_percentiles(),
+        "llm": live_metrics.llm_error_rate(),
+        "speedup": live_metrics.speedup(),
+        "uptime_seconds": live_metrics.uptime_seconds(),
+        "queue_depth": _safe_depth(get_queue_backend()),
+        "sla_targets_seconds": {
+            "triage": settings.sla_triage_seconds,
+            "enrichment": settings.sla_enrichment_seconds,
+        },
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+    }
 
 
 @router.get("/metrics")

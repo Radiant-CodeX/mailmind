@@ -2,17 +2,15 @@ import { CommitmentItem } from "./types";
 
 /**
  * Resolve the backend base URL.
- *  1. Explicit NEXT_PUBLIC_API_URL wins.
- *  2. Otherwise use the SAME host the page is served from (so opening the app at
- *     127.0.0.1:3000 talks to 127.0.0.1:8000, and localhost:3000 to localhost:8000).
- *     This avoids the Windows "localhost → IPv6 ::1" mismatch that makes fetch fail.
- *  3. SSR fallback: 127.0.0.1 (IPv4 — what uvicorn binds by default).
+ *  - If NEXT_PUBLIC_API_URL is set (production), use it directly.
+ *  - Otherwise, use relative paths in the browser so the Next.js proxy
+ *    forwards /api/* to the backend — cookies are same-origin this way.
+ *  - SSR fallback: 127.0.0.1:8000 (what uvicorn binds by default).
  */
 function resolveBase(): string {
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
-  }
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured) return configured;
+  if (typeof window !== "undefined") return ""; // relative — proxy handles it
   return "http://127.0.0.1:8000";
 }
 
@@ -604,6 +602,41 @@ export async function fetchEvaluation() {
   return res.json();
 }
 
+export interface LiveMetrics {
+  cache: {
+    hit_rate: number;
+    total_hits: number;
+    total_misses: number;
+    total_lookups: number;
+    per_cache: Record<string, { hits: number; misses: number; entries: number }>;
+  };
+  latency: {
+    overall: { p50: number; p95: number; count: number };
+    per_stage: Record<string, { p50: number; p95: number; count: number }>;
+  };
+  llm: { error_rate: number; errors: number; ok: number; total: number };
+  speedup: {
+    sequential_ms: number;
+    parallel_ms: number;
+    sequential_s: number;
+    parallel_s: number;
+    speedup_x: number;
+    time_saved_pct: number;
+    measured: boolean;
+    runs: number;
+  };
+  uptime_seconds: number;
+  queue_depth: number;
+  sla_targets_seconds: { triage: number; enrichment: number };
+  timestamp: string;
+}
+
+export async function fetchLiveMetrics(): Promise<LiveMetrics> {
+  const res = await apiFetch(`${BASE}/api/metrics/live`);
+  if (!res.ok) throw new Error("Live metrics fetch failed");
+  return res.json();
+}
+
 export async function moveEmailToTrash(emailId: string) {
   const res = await apiFetch(`${BASE}/api/emails/${emailId}/trash`, {
     method: "POST",
@@ -828,3 +861,23 @@ export async function disconnectAccount(accountId: string): Promise<void> {
   });
   if (!res.ok) throw new Error("Failed to disconnect account");
 }
+
+// ── Feedback ─────────────────────────────────────────────────────────────────
+
+export interface FeedbackPayload {
+  rating: number;
+  category: string;
+  message: string;
+  role?: string | null;
+}
+
+export async function submitFeedback(payload: FeedbackPayload): Promise<{ ok: boolean; id: string }> {
+  const res = await apiFetch(`${BASE}/api/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to submit feedback");
+  return res.json();
+}
+

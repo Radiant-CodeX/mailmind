@@ -8,11 +8,11 @@ interface ErrorBannerProps {
 export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
   return (
     <div
-      className="p-4 bg-red-950/30 border border-[var(--accent-critical)]/40 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left w-full max-w-xl mx-auto my-4 animate-fade-in"
+      className="p-4 bg-red-950/30 border border-error/40 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-left w-full max-w-xl mx-auto my-4 animate-fade-in"
       id="error-banner"
     >
       <div className="flex items-start gap-3">
-        <div className="text-[var(--accent-critical)] shrink-0 mt-0.5">
+        <div className="text-error shrink-0 mt-0.5">
           <svg
             className="w-5 h-5"
             fill="none"
@@ -29,14 +29,14 @@ export function ErrorBanner({ message, onRetry }: ErrorBannerProps) {
           </svg>
         </div>
         <div>
-          <h4 className="text-sm font-semibold text-[var(--text-primary)]">Operational Error</h4>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5 leading-relaxed">{message}</p>
+          <h4 className="text-sm font-semibold text-base-content">Operational Error</h4>
+          <p className="text-xs text-base-content/60 mt-0.5 leading-relaxed">{message}</p>
         </div>
       </div>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="px-3 py-1.5 text-xs font-medium bg-[var(--bg-elevated)] border border-[var(--border)] hover:bg-[var(--border-subtle)] text-[var(--text-primary)] rounded transition-all shrink-0 cursor-pointer"
+          className="px-3 py-1.5 text-xs font-medium bg-base-200 border border-base-300 hover:bg-base-200 text-base-content rounded transition-all shrink-0 cursor-pointer"
         >
           Try Again
         </button>

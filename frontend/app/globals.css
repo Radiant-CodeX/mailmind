@@ -1,78 +1,17 @@
 @import "tailwindcss";
-
-:root {
-  /* Default is dark monochrome */
-  --bg-base: hsl(0, 0%, 2%);
-  --bg-surface: hsl(0, 0%, 6%);
-  --bg-elevated: hsl(0, 0%, 10%);
-  --accent-primary: hsl(0, 0%, 100%); /* White */
-  --accent-success: hsl(142, 70%, 45%);
-  --accent-warning: hsl(38, 92%, 50%);
-  --accent-critical: hsl(0, 84%, 60%);
-  --text-primary: hsl(0, 0%, 98%);
-  --text-muted: hsl(0, 0%, 60%);
-  --border: hsl(0, 0%, 14%);
-  --border-subtle: hsl(0, 0%, 8%);
-}
-
-.theme-light {
-  --bg-base: hsl(0, 0%, 98%);
-  --bg-surface: hsl(0, 0%, 100%);
-  --bg-elevated: hsl(0, 0%, 94%);
-  --accent-primary: hsl(0, 0%, 0%); /* Black */
-  --accent-success: hsl(142, 60%, 40%);
-  --accent-warning: hsl(38, 90%, 45%);
-  --accent-critical: hsl(0, 80%, 50%);
-  --text-primary: hsl(0, 0%, 2%);
-  --text-muted: hsl(0, 0%, 45%);
-  --border: hsl(0, 0%, 88%);
-  --border-subtle: hsl(0, 0%, 94%);
-}
-
-.theme-dark {
-  --bg-base: hsl(0, 0%, 2%);
-  --bg-surface: hsl(0, 0%, 6%);
-  --bg-elevated: hsl(0, 0%, 10%);
-  --accent-primary: hsl(0, 0%, 100%); /* White */
-  --accent-success: hsl(142, 70%, 45%);
-  --accent-warning: hsl(38, 92%, 50%);
-  --accent-critical: hsl(0, 84%, 60%);
-  --text-primary: hsl(0, 0%, 98%);
-  --text-muted: hsl(0, 0%, 60%);
-  --border: hsl(0, 0%, 14%);
-  --border-subtle: hsl(0, 0%, 8%);
-}
-
-@theme {
-  --color-bg-base: var(--bg-base);
-  --color-bg-surface: var(--bg-surface);
-  --color-bg-elevated: var(--bg-elevated);
-  --color-accent-primary: var(--accent-primary);
-  --color-accent-success: var(--accent-success);
-  --color-accent-warning: var(--accent-warning);
-  --color-accent-critical: var(--accent-critical);
-  --color-text-primary: var(--text-primary);
-  --color-text-muted: var(--text-muted);
-  --color-border: var(--border);
-  --color-border-subtle: var(--border-subtle);
-
-  --color-background-success: color-mix(in srgb, var(--accent-success) 10%, transparent);
-  --color-text-success: var(--accent-success);
-  --color-border-success: color-mix(in srgb, var(--accent-success) 20%, transparent);
-
-  --font-sans: var(--font-geist-sans), Inter, system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+@plugin "daisyui" {
+  themes: light, dark, cupcake, bumblebee, emerald, corporate, synthwave, retro, cyberpunk,
+    valentine, halloween, garden, forest, aqua, lofi, pastel, fantasy, wireframe, black,
+    luxury, dracula, cmyk, autumn, business, acid, lemonade, night, coffee, winter, dim,
+    nord, sunset;
 }
 
 body {
-  background-color: var(--bg-base);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
   overflow: hidden;
   height: 100vh;
 }
 
-/* Custom premium scrollbars */
+/* Custom scrollbars */
 .custom-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -83,15 +22,14 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: oklch(var(--b3));
   border-radius: 4px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: var(--accent-primary);
+  background: oklch(var(--p));
 }
 
-/* Keyframes and custom animations */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -120,3 +58,13 @@ body {
   animation: slideInFromRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Landing page: animated gradient text shimmer */
+@keyframes shimmer {
+  to {
+    background-position: 200% center;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 5s linear infinite;
+}

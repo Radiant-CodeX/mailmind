@@ -126,7 +126,7 @@ class TriageOnlyRequest(BaseModel):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/process", response_model=AgentProcessResponse)
-def process_email(request: AgentProcessRequest) -> AgentProcessResponse:
+def process_email(request: AgentProcessRequest, current_user=Depends(get_current_user)) -> AgentProcessResponse:
     """
     Run the full MailMind agentic pipeline for a single email.
 
@@ -205,7 +205,7 @@ def process_email(request: AgentProcessRequest) -> AgentProcessResponse:
 
 
 @router.post("/stream")
-async def stream_pipeline(request: AgentProcessRequest) -> StreamingResponse:
+async def stream_pipeline(request: AgentProcessRequest, current_user=Depends(get_current_user)) -> StreamingResponse:
     """
     Stream the agentic pipeline progress as Server-Sent Events (SSE).
 
@@ -397,17 +397,28 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
     cache_hits = len(requests) - len(misses)
     logger.info("[triage-page] %d cache hits, %d LLM calls needed", cache_hits, len(misses))
 
+    from app.monitoring.live_metrics import live_metrics
+
     # Run LLM only for misses, 5 at a time (respects Azure OpenAI rate limits)
     if misses:
+        import time as _time
+        batch_start = _time.perf_counter()
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             futures = {executor.submit(_run_triage_for_email, req, user_key): idx for idx, req in misses}
             for future, idx in futures.items():
+                call_start = _time.perf_counter()
                 try:
                     results[idx] = future.result(timeout=30)
+                    elapsed_ms = (_time.perf_counter() - call_start) * 1000
+                    live_metrics.record_latency("triage", elapsed_ms)
+                    live_metrics.record_llm(success=True)
                 except Exception as e:
+                    live_metrics.record_llm(success=False)
                     logger.warning("[triage-page] LLM triage failed for index %d: %s", idx, e)
                     results[idx] = {"email_id": requests[idx].email_id, "priority": "MEDIUM",
                                     "composite_score": 0.0, "axes": [], "errors": [str(e)]}
+        # wall-clock for the whole concurrent batch = the "parallel" figure
+        live_metrics.record_pipeline_run((_time.perf_counter() - batch_start) * 1000)
 
     return [r for r in results if r is not None]
 
@@ -604,7 +615,7 @@ class EnrichRequest(BaseModel):
 
 
 @router.post("/enrich")
-def enrich_email(request: EnrichRequest) -> dict[str, Any]:
+def enrich_email(request: EnrichRequest, current_user=Depends(get_current_user)) -> dict[str, Any]:
     """
     Parallel enrichment pipeline — skips triage (already done in inbox batch),
     runs commitment + rag concurrently in threads, then merges.
@@ -791,7 +802,7 @@ def agent_health() -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/commitments")
-def commitments_only(request: TriageOnlyRequest) -> dict[str, Any]:
+def commitments_only(request: TriageOnlyRequest, current_user=Depends(get_current_user)) -> dict[str, Any]:
     """
     Run the commitment extraction sub-pipeline (ingest + triage + commitment nodes).
 
@@ -865,7 +876,7 @@ class BatchProcessResponse(BaseModel):
 
 
 @router.post("/batch", response_model=BatchProcessResponse)
-def batch_process(request: BatchProcessRequest) -> BatchProcessResponse:
+def batch_process(request: BatchProcessRequest, current_user=Depends(get_current_user)) -> BatchProcessResponse:
     """
     Process multiple emails through the full pipeline sequentially.
 
@@ -935,7 +946,7 @@ class ApprovalRequest(BaseModel):
 
 
 @router.post("/approve/{email_id}")
-def approve_email(email_id: str, request: ApprovalRequest) -> dict[str, Any]:
+def approve_email(email_id: str, request: ApprovalRequest, current_user=Depends(get_current_user)) -> dict[str, Any]:
     """
     Human-in-the-loop approval for GATE-mode emails (composite_score ≥ 75).
 
@@ -973,7 +984,7 @@ def approve_email(email_id: str, request: ApprovalRequest) -> dict[str, Any]:
 
 
 @router.get("/approve/{email_id}")
-def get_approval_status(email_id: str) -> dict[str, Any]:
+def get_approval_status(email_id: str, current_user=Depends(get_current_user)) -> dict[str, Any]:
     """Get the current approval status for an email processed by the pipeline."""
     record = _approval_store.get(email_id)
     if not record:

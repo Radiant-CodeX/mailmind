@@ -62,19 +62,19 @@ export function TasksView() {
   const isDone = (s: string) => s === 'completed' || s === 'complete';
 
   return (
-    <div className="flex-1 h-full overflow-y-auto bg-[var(--bg-base)] p-6 custom-scrollbar" id="tasks-view">
+    <div className="flex-1 h-full overflow-y-auto bg-base-300 p-6 custom-scrollbar" id="tasks-view">
       <div className="max-w-2xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-lg font-bold text-[var(--text-primary)] tracking-tight">Tasks</h1>
-            <p className="text-xs text-[var(--text-muted)] mt-0.5 font-medium">
+            <h1 className="text-lg font-bold text-base-content tracking-tight">Tasks</h1>
+            <p className="text-xs text-base-content/60 mt-0.5 font-medium">
               Synced from your provider (Microsoft To Do / Google Tasks).
             </p>
           </div>
           <button
             onClick={load}
             disabled={loading}
-            className="p-2 rounded-lg hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all cursor-pointer"
+            className="p-2 rounded-lg hover:bg-base-200 text-base-content/60 hover:text-base-content transition-all cursor-pointer"
             title="Refresh"
           >
             <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="currentColor" viewBox="0 0 24 24">
@@ -89,13 +89,13 @@ export function TasksView() {
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder="Add a task…"
-            className="flex-1 px-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] transition-all"
+            className="flex-1 px-3 py-2.5 rounded-xl bg-base-200 border border-base-300 text-sm text-base-content placeholder-base-content/60 focus:outline-none focus:border-primary transition-all"
             id="new-task-input"
           />
           <button
             type="submit"
             disabled={adding || !newTitle.trim()}
-            className="px-4 py-2.5 bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 disabled:opacity-50 text-[var(--bg-surface)] font-bold text-sm rounded-xl cursor-pointer transition-all active:scale-95"
+            className="px-4 py-2.5 bg-primary hover:bg-primary/90 disabled:opacity-50 text-base-100 font-bold text-sm rounded-xl cursor-pointer transition-all active:scale-95"
           >
             {adding ? 'Adding…' : 'Add'}
           </button>
@@ -109,23 +109,23 @@ export function TasksView() {
 
         {loading && tasks.length === 0 ? (
           <div className="flex flex-col items-center py-16">
-            <div className="w-8 h-8 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mb-3" />
-            <p className="text-xs text-[var(--text-muted)]">Loading tasks…</p>
+            <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin mb-3" />
+            <p className="text-xs text-base-content/60">Loading tasks…</p>
           </div>
         ) : tasks.length === 0 ? (
-          <div className="py-16 text-center text-sm text-[var(--text-muted)]">No tasks yet.</div>
+          <div className="py-16 text-center text-sm text-base-content/60">No tasks yet.</div>
         ) : (
           <div className="space-y-2">
             {tasks.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center gap-3 p-3.5 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl"
+                className="flex items-center gap-3 p-3.5 bg-base-100 border border-base-300 rounded-xl"
               >
                 <span
                   className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center ${
                     isDone(t.status)
                       ? 'bg-emerald-500 border-emerald-500'
-                      : 'border-[var(--border)]'
+                      : 'border-base-300'
                   }`}
                 >
                   {isDone(t.status) && (
@@ -134,11 +134,11 @@ export function TasksView() {
                     </svg>
                   )}
                 </span>
-                <span className={`flex-1 text-sm ${isDone(t.status) ? 'line-through text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>
+                <span className={`flex-1 text-sm ${isDone(t.status) ? 'line-through text-base-content/60' : 'text-base-content'}`}>
                   {t.title}
                 </span>
                 {fmtDue(t.due) && (
-                  <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-[var(--bg-elevated)] text-[var(--text-muted)] shrink-0">
+                  <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-base-200 text-base-content/60 shrink-0">
                     Due {fmtDue(t.due)}
                   </span>
                 )}

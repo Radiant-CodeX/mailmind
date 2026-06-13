@@ -37,7 +37,7 @@ export function TrashToast({ email, startedAt, onUndo, onDismiss }: TrashToastPr
       role="status"
       aria-live="polite"
     >
-      <div className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden">
+      <div className="bg-base-200 border border-base-300 rounded-xl shadow-2xl overflow-hidden">
         {/* Content row */}
         <div className="flex items-center gap-3 px-4 py-3">
           {/* Trash icon */}
@@ -50,14 +50,14 @@ export function TrashToast({ email, startedAt, onUndo, onDismiss }: TrashToastPr
 
           {/* Text */}
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold text-[var(--text-primary)] truncate">{subject}</p>
-            <p className="text-[10px] text-[var(--text-muted)] font-medium mt-0.5">Moved to Trash</p>
+            <p className="text-xs font-semibold text-base-content truncate">{subject}</p>
+            <p className="text-[10px] text-base-content/60 font-medium mt-0.5">Moved to Trash</p>
           </div>
 
           {/* Undo button */}
           <button
             onClick={onUndo}
-            className="shrink-0 px-3 py-1.5 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 text-[var(--bg-surface)] text-xs font-bold cursor-pointer transition-all active:scale-95"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-primary hover:bg-primary/90 text-base-100 text-xs font-bold cursor-pointer transition-all active:scale-95"
           >
             Undo
           </button>
@@ -65,7 +65,7 @@ export function TrashToast({ email, startedAt, onUndo, onDismiss }: TrashToastPr
           {/* Close */}
           <button
             onClick={onDismiss}
-            className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface)] transition-all cursor-pointer"
+            className="shrink-0 p-1 rounded-md text-base-content/60 hover:text-base-content hover:bg-base-100 transition-all cursor-pointer"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
@@ -74,9 +74,9 @@ export function TrashToast({ email, startedAt, onUndo, onDismiss }: TrashToastPr
         </div>
 
         {/* Progress bar */}
-        <div className="h-0.5 bg-[var(--border)]">
+        <div className="h-0.5 bg-base-300">
           <div
-            className="h-full bg-[var(--accent-primary)] transition-none"
+            className="h-full bg-primary transition-none"
             style={{ width: `${progress}%` }}
           />
         </div>

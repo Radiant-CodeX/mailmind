@@ -42,8 +42,8 @@ function MailboxesSection({
 
   return (
     <div className="mt-1">
-      <div className="h-[1px] bg-[var(--border-subtle)] my-2.5 mx-1.5 opacity-60" />
-      <p className="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
+      <div className="h-[1px] bg-base-200 my-2.5 mx-1.5 opacity-60" />
+      <p className="px-3 mb-1 text-[10px] font-bold uppercase tracking-widest text-base-content/60">
         Mailboxes
       </p>
       {accounts.map((account) => {
@@ -56,14 +56,14 @@ function MailboxesSection({
             onClick={() => handleSelect(account)}
             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs transition-all duration-200 cursor-pointer ${
               isActive
-                ? "bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] font-bold"
-                : "text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                ? "bg-primary/10 text-primary font-bold"
+                : "text-base-content/60 hover:bg-base-200 hover:text-base-content"
             }`}
             title={account.email}
           >
             <span
-              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
-              style={{ background: account.color || "var(--accent-primary)" }}
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white bg-primary"
+              style={account.color ? { background: account.color } : undefined}
             >
               {initials}
             </span>
@@ -95,6 +95,7 @@ interface SidebarProps {
   onComposeClick?: () => void;
   /** v3: callback when the user selects a different mailbox in the sidebar */
   onAccountChange?: (accountId: string) => void;
+  onFeedbackClick?: () => void;
 }
 
 export function Sidebar({
@@ -111,6 +112,7 @@ export function Sidebar({
   onLogoutClick,
   onComposeClick,
   onAccountChange,
+  onFeedbackClick,
 }: SidebarProps) {
   const profileEmail = userProfile?.email || userEmail;
 
@@ -383,11 +385,30 @@ export function Sidebar({
         </svg>
       ),
     },
+    {
+      name: "Metrics",
+      icon: (
+        <svg
+          className="w-5 h-5 shrink-0"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M13 10V3L4 14h7v7l9-11h-7z"
+          />
+        </svg>
+      ),
+    },
   ];
 
   return (
     <aside
-      className={`bg-[var(--bg-surface)] border-r border-[var(--border)] flex flex-col shrink-0 h-screen transition-all duration-300 ease-in-out ${
+      className={`bg-base-100 border-r border-base-300 flex flex-col shrink-0 h-screen transition-all duration-300 ease-in-out ${
         isCollapsed ? "w-16" : "w-64"
       }`}
       id="sidebar"
@@ -396,7 +417,7 @@ export function Sidebar({
         {/* Brand Header: Clickable logo toggle trigger (No hamburger menu button) */}
         <div
           onClick={onToggleCollapse}
-          className="h-16 shrink-0 flex items-center px-4 border-b border-[var(--border-subtle)] overflow-hidden cursor-pointer hover:bg-[var(--bg-elevated)]/20 transition-all"
+          className="h-16 shrink-0 flex items-center px-4 border-b border-base-200 overflow-hidden cursor-pointer hover:bg-base-200/20 transition-all"
           title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
           id="brand-header-toggle"
         >
@@ -411,10 +432,10 @@ export function Sidebar({
                 className="w-8 h-8 rounded-lg shadow"
               />
               <div>
-                <span className="font-bold tracking-tight text-[var(--text-primary)] text-base">
+                <span className="font-bold tracking-tight text-base-content text-base">
                   MailMind
                 </span>
-                <span className="text-[10px] block text-[var(--text-muted)] font-semibold uppercase tracking-wider -mt-1">
+                <span className="text-[10px] block text-base-content/60 font-semibold uppercase tracking-wider -mt-1">
                   Co-pilot Studio
                 </span>
               </div>
@@ -436,7 +457,7 @@ export function Sidebar({
           <div className="p-3">
             <button
               onClick={onComposeClick}
-              className={`w-full flex items-center justify-center gap-2 bg-[var(--accent-primary)] hover:opacity-90 text-[var(--bg-surface)] font-bold rounded-lg transition-all cursor-pointer shadow-sm hover:shadow active:scale-95 duration-200 ${
+              className={`w-full flex items-center justify-center gap-2 bg-primary hover:opacity-90 text-base-100 font-bold rounded-lg transition-all cursor-pointer shadow-sm hover:shadow active:scale-95 duration-200 ${
                 isCollapsed ? "p-2.5" : "px-4 py-3 text-sm"
               }`}
               title="Compose Email"
@@ -474,8 +495,8 @@ export function Sidebar({
                   isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
                 } ${
                   isActive
-                    ? "bg-[var(--accent-primary)] text-[var(--bg-surface)] font-bold shadow-sm"
-                    : "text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                    ? "bg-primary text-base-100 font-bold shadow-sm"
+                    : "text-base-content/60 hover:bg-base-200 hover:text-base-content"
                 }`}
                 title={isCollapsed ? item.name : undefined}
               >
@@ -492,7 +513,7 @@ export function Sidebar({
             onClick={() => setIsMoreExpanded((prev) => !prev)}
             className={`w-full flex items-center rounded-lg text-sm transition-all duration-200 cursor-pointer ${
               isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
-            } text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]`}
+            } text-base-content/60 hover:bg-base-200 hover:text-base-content`}
             title={
               isCollapsed
                 ? isMoreExpanded
@@ -551,8 +572,8 @@ export function Sidebar({
                     isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
                   } ${
                     isActive
-                      ? "bg-[var(--accent-primary)] text-[var(--bg-surface)] font-bold shadow-sm"
-                      : "text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                      ? "bg-primary text-base-100 font-bold shadow-sm"
+                      : "text-base-content/60 hover:bg-base-200 hover:text-base-content"
                   }`}
                   title={isCollapsed ? item.name : undefined}
                 >
@@ -565,7 +586,7 @@ export function Sidebar({
             })}
 
           {/* Divider */}
-          <div className="h-[1px] bg-[var(--border-subtle)] my-2.5 mx-1.5 opacity-60" />
+          <div className="h-[1px] bg-base-200 my-2.5 mx-1.5 opacity-60" />
 
           {/* Utility items */}
           {utilityItems.map((item) => {
@@ -578,8 +599,8 @@ export function Sidebar({
                   isCollapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
                 } ${
                   isActive
-                    ? "bg-[var(--accent-primary)] text-[var(--bg-surface)] font-bold shadow-sm"
-                    : "text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                    ? "bg-primary text-base-100 font-bold shadow-sm"
+                    : "text-base-content/60 hover:bg-base-200 hover:text-base-content"
                 }`}
                 title={isCollapsed ? item.name : undefined}
               >
@@ -601,13 +622,30 @@ export function Sidebar({
         </nav>
       </div>
 
+      {/* Feedback button */}
+      <div className="px-3 pb-2 shrink-0">
+        <button
+          onClick={onFeedbackClick}
+          className={`w-full flex items-center rounded-lg text-xs font-medium transition-all duration-200 cursor-pointer text-base-content/50 hover:bg-base-200 hover:text-base-content ${
+            isCollapsed ? "justify-center p-2.5" : "gap-2.5 px-3 py-2"
+          }`}
+          title="Send Feedback"
+          id="sidebar-feedback-btn"
+        >
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+          </svg>
+          {!isCollapsed && <span className="animate-fade-in">Send Feedback</span>}
+        </button>
+      </div>
+
       {/* User Footer Profile */}
-      <div className="p-3 shrink-0 border-t border-[var(--border-subtle)] flex flex-col justify-center bg-[var(--border-subtle)]/30 min-h-[68px] overflow-hidden text-left">
+      <div className="p-3 shrink-0 border-t border-base-200 flex flex-col justify-center bg-base-200/30 min-h-[68px] overflow-hidden text-left">
         {isCollapsed ? (
           authenticated ? (
             <button
               onClick={() => setShowSignOutModal(true)}
-              className="w-9 h-9 rounded-full bg-[var(--bg-elevated)] border border-red-500/20 hover:border-red-500 text-red-500 hover:bg-red-500/5 flex items-center justify-center font-bold text-xs mx-auto shadow-inner cursor-pointer transition-all duration-200 animate-fade-in"
+              className="w-9 h-9 rounded-full bg-base-200 border border-red-500/20 hover:border-red-500 text-red-500 hover:bg-red-500/5 flex items-center justify-center font-bold text-xs mx-auto shadow-inner cursor-pointer transition-all duration-200 animate-fade-in"
               title={`Logged in as ${accountLabel || profileEmail || "User"}. Click to Sign Out.`}
               id="sidebar-user-collapsed-signout"
             >
@@ -625,7 +663,7 @@ export function Sidebar({
           ) : (
             <button
               onClick={onLoginClick}
-              className="w-9 h-9 rounded-full bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/80 text-[var(--bg-surface)] flex items-center justify-center mx-auto shadow-sm cursor-pointer transition-all duration-200 animate-fade-in"
+              className="w-9 h-9 rounded-full bg-primary hover:bg-primary/80 text-base-100 flex items-center justify-center mx-auto shadow-sm cursor-pointer transition-all duration-200 animate-fade-in"
               title="Sign In with Microsoft"
               id="sidebar-user-collapsed-signin"
             >
@@ -648,7 +686,7 @@ export function Sidebar({
         ) : authenticated ? (
           <div className="flex items-center justify-between gap-2 animate-fade-in w-full">
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-9 h-9 rounded-full bg-[var(--bg-elevated)] border border-[var(--accent-primary)]/30 flex items-center justify-center font-bold text-xs text-[var(--accent-primary)] shadow-inner shrink-0">
+              <div className="w-9 h-9 rounded-full bg-base-200 border border-primary/30 flex items-center justify-center font-bold text-xs text-primary shadow-inner shrink-0">
                 {avatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -661,11 +699,11 @@ export function Sidebar({
                 )}
               </div>
               <div className="overflow-hidden">
-                <h4 className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                <h4 className="text-xs font-semibold text-base-content truncate">
                   {accountLabel}
                 </h4>
                 <p
-                  className="text-[10px] text-[var(--text-muted)] truncate"
+                  className="text-[10px] text-base-content/60 truncate"
                   title={profileEmail || ""}
                 >
                   {profileEmail}
@@ -683,7 +721,7 @@ export function Sidebar({
         ) : (
           <button
             onClick={onLoginClick}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/95 text-[var(--bg-surface)] font-bold text-xs transition-all cursor-pointer shadow-sm hover:shadow active:scale-95 animate-fade-in"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary hover:bg-primary/95 text-base-100 font-bold text-xs transition-all cursor-pointer shadow-sm hover:shadow active:scale-95 animate-fade-in"
             id="sidebar-signin-btn"
           >
             <svg

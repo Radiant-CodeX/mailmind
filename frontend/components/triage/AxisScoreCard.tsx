@@ -30,24 +30,24 @@ export function AxisScoreCard({ score }: AxisScoreCardProps) {
   };
 
   return (
-    <div className="p-3 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg text-left" id={`axis-card-${score.axis}`}>
+    <div className="p-3 bg-base-200 border border-base-300 rounded-lg text-left" id={`axis-card-${score.axis}`}>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs font-bold text-[var(--text-primary)]">
+        <span className="text-xs font-bold text-base-content">
           {formatAxisName(score.axis)}
         </span>
-        <span className="text-xs font-mono font-bold text-[var(--text-primary)]">
+        <span className="text-xs font-mono font-bold text-base-content">
           {pct}%
         </span>
       </div>
 
-      <div className="w-full h-1.5 bg-[var(--bg-base)] rounded-full overflow-hidden mb-2">
+      <div className="w-full h-1.5 bg-base-300 rounded-full overflow-hidden mb-2">
         <div
           className={`h-full rounded-full transition-all duration-500 ${getBarColor(score.axis)}`}
           style={{ width: `${pct}%` }}
         ></div>
       </div>
 
-      <p className="text-[10px] text-[var(--text-muted)] leading-tight">
+      <p className="text-[10px] text-base-content/60 leading-tight">
         {score.explanation || 'No detail available'}
       </p>
     </div>

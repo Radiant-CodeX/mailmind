@@ -26,7 +26,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   const ReadButton = onToggleRead ? (
     <button
       onClick={(e) => { e.stopPropagation(); onToggleRead(email.id, isUnread); }}
-      className="p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-elevated)] hover:text-[var(--accent-primary)] transition-all cursor-pointer"
+      className="p-1 rounded-md text-base-content/60 hover:bg-base-200 hover:text-primary transition-all cursor-pointer"
       title={isUnread ? 'Mark as read' : 'Mark as unread'}
       id={`btn-read-${email.id}`}
     >
@@ -41,7 +41,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   const ArchiveButton = onArchive ? (
     <button
       onClick={(e) => { e.stopPropagation(); onArchive(email.id); }}
-      className="p-1 rounded-md text-[var(--text-muted)] hover:bg-amber-500/10 hover:text-amber-500 transition-all cursor-pointer"
+      className="p-1 rounded-md text-base-content/60 hover:bg-amber-500/10 hover:text-amber-500 transition-all cursor-pointer"
       title="Archive" id={`btn-archive-${email.id}`}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -53,7 +53,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   const SpamButton = onSpam ? (
     <button
       onClick={(e) => { e.stopPropagation(); onSpam(email.id); }}
-      className="p-1 rounded-md text-[var(--text-muted)] hover:bg-red-500/10 hover:text-red-500 transition-all cursor-pointer"
+      className="p-1 rounded-md text-base-content/60 hover:bg-red-500/10 hover:text-red-500 transition-all cursor-pointer"
       title="Report spam" id={`btn-spam-${email.id}`}
     >
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -65,7 +65,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   const RestoreButton = onRestore ? (
     <button
       onClick={(e) => { e.stopPropagation(); onRestore(email.id); }}
-      className="p-1 rounded-md hover:bg-emerald-500/10 text-[var(--text-muted)] hover:text-emerald-500 transition-all cursor-pointer"
+      className="p-1 rounded-md hover:bg-emerald-500/10 text-base-content/60 hover:text-emerald-500 transition-all cursor-pointer"
       title="Restore to Inbox"
       id={`btn-restore-${email.id}`}
     >
@@ -79,7 +79,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   const TrashButton = onTrash ? (
     <button
       onClick={(e) => { e.stopPropagation(); onTrash(email.id); }}
-      className="p-1 rounded-md hover:bg-red-500/10 text-[var(--text-muted)] hover:text-red-500 transition-all cursor-pointer"
+      className="p-1 rounded-md hover:bg-red-500/10 text-base-content/60 hover:text-red-500 transition-all cursor-pointer"
       title="Move to Trash"
       id={`btn-trash-${email.id}`}
     >
@@ -136,24 +136,24 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
     return (
       <div
         onClick={onClick}
-        className={`p-4 border-b border-[var(--border-subtle)] cursor-pointer transition-all duration-200 text-left select-none relative ${
+        className={`p-4 border-b border-base-200 cursor-pointer transition-all duration-200 text-left select-none relative ${
           isSelected
-            ? 'bg-[var(--bg-elevated)] border-l-4 border-l-[var(--accent-primary)]'
-            : 'hover:bg-[var(--bg-elevated)]/40 bg-transparent'
+            ? 'bg-base-200 border-l-4 border-l-primary'
+            : 'hover:bg-base-200/40 bg-transparent'
         }`}
         id={`email-item-${email.id}`}
       >
         <div className="flex items-center justify-between gap-6 w-full">
           {/* 1. Leftmost column: unread dot + Sender */}
           <div className="w-[150px] shrink-0 overflow-hidden flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full shrink-0 ${isUnread ? 'bg-[var(--accent-primary)]' : 'bg-transparent'}`} title={isUnread ? 'Unread' : 'Read'} />
+            <span className={`w-2 h-2 rounded-full shrink-0 ${isUnread ? 'bg-primary' : 'bg-transparent'}`} title={isUnread ? 'Unread' : 'Read'} />
             <div className="min-w-0">
               <span className={`text-xs truncate block ${
-                isUnread ? 'text-[var(--text-primary)] font-bold' : 'font-semibold text-[var(--text-primary)]/80'
+                isUnread ? 'text-base-content font-bold' : 'font-semibold text-base-content/80'
               }`} title={email.sender}>
                 {email.sender.split('@')[0]}
               </span>
-              <span className="text-[9px] text-[var(--text-muted)] font-mono block mt-0.5" suppressHydrationWarning>
+              <span className="text-[9px] text-base-content/60 font-mono block mt-0.5" suppressHydrationWarning>
                 {formatTime(email.received_at)}
               </span>
             </div>
@@ -161,15 +161,15 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
 
           {/* 2. Middle column: Subject (+attachment) and snippet */}
           <div className="flex-1 min-w-0 pr-4">
-            <h4 className={`text-xs truncate flex items-center gap-1.5 ${isUnread ? 'font-bold text-[var(--text-primary)]' : 'font-semibold text-[var(--text-primary)]'}`}>
+            <h4 className={`text-xs truncate flex items-center gap-1.5 ${isUnread ? 'font-bold text-base-content' : 'font-semibold text-base-content'}`}>
               {email.hasAttachments && (
-                <svg className="w-3 h-3 shrink-0 text-[var(--text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Has attachment">
+                <svg className="w-3 h-3 shrink-0 text-base-content/60" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Has attachment">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                 </svg>
               )}
               <span className="truncate">{email.subject}</span>
             </h4>
-            <p className="text-[11px] text-[var(--text-muted)] truncate mt-0.5 font-medium opacity-80">
+            <p className="text-[11px] text-base-content/60 truncate mt-0.5 font-medium opacity-80">
               {email.body.replace(/\s+/g, ' ')}
             </p>
           </div>
@@ -177,7 +177,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
           {/* 3. Rightmost column: Score, Priority, Star */}
           <div className="flex items-center gap-4 shrink-0">
             {scorePending ? (
-              <span className="w-7 h-4 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+              <span className="w-7 h-4 rounded bg-base-200 animate-pulse" title="Scoring…" />
             ) : triageApplies && email.composite_score !== undefined && (
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
                 priority === 'CRITICAL' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
@@ -190,7 +190,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
             )}
 
             {scorePending ? (
-              <span className="px-2 py-0.5 w-12 h-5 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+              <span className="px-2 py-0.5 w-12 h-5 rounded bg-base-200 animate-pulse" title="Scoring…" />
             ) : triageApplies && (
               <PriorityBadge priority={priority} />
             )}
@@ -200,8 +200,8 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
                 e.stopPropagation();
                 onToggleStar(email.id);
               }}
-              className={`p-1 rounded-md hover:bg-[var(--bg-elevated)] transition-all cursor-pointer ${
-                email.isStarred ? 'text-amber-400' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              className={`p-1 rounded-md hover:bg-base-200 transition-all cursor-pointer ${
+                email.isStarred ? 'text-amber-400' : 'text-base-content/60 hover:text-base-content'
               }`}
               title={email.isStarred ? 'Unstar email' : 'Star email'}
               id={`btn-star-${email.id}`}
@@ -237,22 +237,22 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
   return (
     <div
       onClick={onClick}
-      className={`p-4 border-b border-[var(--border-subtle)] cursor-pointer transition-all duration-200 text-left select-none relative ${
+      className={`p-4 border-b border-base-200 cursor-pointer transition-all duration-200 text-left select-none relative ${
         isSelected
-          ? 'bg-[var(--bg-elevated)] border-l-4 border-l-[var(--accent-primary)]'
-          : 'hover:bg-[var(--bg-elevated)]/40 bg-transparent'
+          ? 'bg-base-200 border-l-4 border-l-primary'
+          : 'hover:bg-base-200/40 bg-transparent'
       }`}
       id={`email-item-${email.id}`}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
         <span className={`text-xs font-semibold truncate max-w-[150px] ${
-          isSelected ? 'text-[var(--text-primary)] font-bold' : 'text-[var(--text-primary)]/80'
+          isSelected ? 'text-base-content font-bold' : 'text-base-content/80'
         }`}>
           {email.sender.split('@')[0]}
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
           {scorePending ? (
-            <span className="w-7 h-4 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+            <span className="w-7 h-4 rounded bg-base-200 animate-pulse" title="Scoring…" />
           ) : triageApplies && email.composite_score !== undefined && (
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
               priority === 'CRITICAL' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
@@ -263,19 +263,19 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
               {email.composite_score}
             </span>
           )}
-          <span className="text-[10px] text-[var(--text-muted)] font-mono" suppressHydrationWarning>
+          <span className="text-[10px] text-base-content/60 font-mono" suppressHydrationWarning>
             {formatTime(email.received_at)}
           </span>
         </div>
       </div>
 
-      <h4 className="text-xs font-medium text-[var(--text-primary)] truncate mb-2 pr-4">
+      <h4 className="text-xs font-medium text-base-content truncate mb-2 pr-4">
         {email.subject}
       </h4>
 
       <div className="flex items-center justify-between gap-2">
         {scorePending ? (
-          <span className="px-2 py-0.5 w-12 h-5 rounded bg-[var(--bg-elevated)] animate-pulse" title="Scoring…" />
+          <span className="px-2 py-0.5 w-12 h-5 rounded bg-base-200 animate-pulse" title="Scoring…" />
         ) : triageApplies ? (
           <PriorityBadge priority={priority} />
         ) : null}
@@ -284,8 +284,8 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
             e.stopPropagation();
             onToggleStar(email.id);
           }}
-          className={`p-1 rounded-md hover:bg-[var(--bg-elevated)] transition-all cursor-pointer ${
-            email.isStarred ? 'text-amber-400' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+          className={`p-1 rounded-md hover:bg-base-200 transition-all cursor-pointer ${
+            email.isStarred ? 'text-amber-400' : 'text-base-content/60 hover:text-base-content'
           }`}
           title={email.isStarred ? 'Unstar email' : 'Star email'}
           id={`btn-star-${email.id}`}

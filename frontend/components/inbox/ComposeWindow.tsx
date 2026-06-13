@@ -92,7 +92,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
   if (success) {
     return (
       <div
-        className="fixed bottom-4 right-4 z-50 w-96 bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-2xl p-6 text-center animate-fade-in"
+        className="fixed bottom-4 right-4 z-50 w-96 bg-base-100 border border-base-300 rounded-xl shadow-2xl p-6 text-center animate-fade-in"
         id="compose-window-success"
       >
         <div className="mx-auto w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mb-4 text-emerald-500">
@@ -100,29 +100,29 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h4 className="text-sm font-bold text-[var(--text-primary)] mb-1">Email Sent!</h4>
-        <p className="text-xs text-[var(--text-muted)]">Your message has been sent successfully.</p>
+        <h4 className="text-sm font-bold text-base-content mb-1">Email Sent!</h4>
+        <p className="text-xs text-base-content/60">Your message has been sent successfully.</p>
       </div>
     );
   }
 
   return (
     <div
-      className={`fixed bottom-0 right-4 z-50 w-96 bg-[var(--bg-surface)] border border-[var(--border)] rounded-t-xl shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
+      className={`fixed bottom-0 right-4 z-50 w-96 bg-base-100 border border-base-300 rounded-t-xl shadow-2xl flex flex-col transition-all duration-300 ease-in-out ${
         isMinimized ? 'h-12' : 'h-[500px]'
       }`}
       id="compose-window"
     >
       {/* Header bar */}
-      <div className="h-12 bg-[var(--bg-elevated)] border-b border-[var(--border)] px-4 flex items-center justify-between rounded-t-xl select-none shrink-0">
-        <span className="text-xs font-bold text-[var(--text-primary)] uppercase tracking-wider">
+      <div className="h-12 bg-base-200 border-b border-base-300 px-4 flex items-center justify-between rounded-t-xl select-none shrink-0">
+        <span className="text-xs font-bold text-base-content uppercase tracking-wider">
           New Message
         </span>
         <div className="flex items-center gap-1.5">
           {/* Minimize / Restore button */}
           <button
             onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1 hover:bg-[var(--bg-surface)] rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer transition-colors"
+            className="p-1 hover:bg-base-100 rounded text-base-content/60 hover:text-base-content cursor-pointer transition-colors"
             title={isMinimized ? 'Restore Window' : 'Minimize Window'}
             id="btn-compose-minimize"
           >
@@ -140,7 +140,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
           {/* Close button */}
           <button
             onClick={onClose}
-            className="p-1 hover:bg-red-500/10 rounded text-[var(--text-muted)] hover:text-red-500 cursor-pointer transition-colors"
+            className="p-1 hover:bg-red-500/10 rounded text-base-content/60 hover:text-red-500 cursor-pointer transition-colors"
             title="Discard Draft"
             id="btn-compose-close"
           >
@@ -163,8 +163,8 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
 
             {/* Recipient Field */}
             <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-1 relative">
-                <span className="text-[10px] font-bold text-[var(--text-muted)] w-8 select-none">To:</span>
+              <div className="flex items-center gap-2 border-b border-base-200 pb-1 relative">
+                <span className="text-[10px] font-bold text-base-content/60 w-8 select-none">To:</span>
                 <input
                   ref={toInputRef}
                   type="text"
@@ -177,16 +177,16 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
                   }}
                   disabled={isSending}
                   placeholder="recipient@example.com"
-                  className="flex-1 bg-transparent border-0 text-xs text-[var(--text-primary)] focus:outline-none placeholder-[var(--text-muted)]/50 font-medium"
+                  className="flex-1 bg-transparent border-0 text-xs text-base-content focus:outline-none placeholder-base-content/60/50 font-medium"
                   id="compose-to-input"
                 />
                 {/* Cc/Bcc Toggle Triggers */}
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-[var(--text-muted)] select-none absolute right-1">
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-base-content/60 select-none absolute right-1">
                   {!showCc && (
                     <button
                       type="button"
                       onClick={() => setShowCc(true)}
-                      className="hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                      className="hover:text-base-content transition-colors cursor-pointer"
                     >
                       Cc
                     </button>
@@ -195,7 +195,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
                     <button
                       type="button"
                       onClick={() => setShowBcc(true)}
-                      className="hover:text-[var(--text-primary)] transition-colors cursor-pointer"
+                      className="hover:text-base-content transition-colors cursor-pointer"
                     >
                       Bcc
                     </button>
@@ -210,15 +210,15 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
             {/* Collapsible Cc Field */}
             {showCc && (
               <div className="flex flex-col gap-1 animate-fade-in">
-                <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-1 relative">
-                  <span className="text-[10px] font-bold text-[var(--text-muted)] w-8 select-none">Cc:</span>
+                <div className="flex items-center gap-2 border-b border-base-200 pb-1 relative">
+                  <span className="text-[10px] font-bold text-base-content/60 w-8 select-none">Cc:</span>
                   <input
                     type="text"
                     value={cc}
                     onChange={(e) => setCc(e.target.value)}
                     disabled={isSending}
                     placeholder="cc1@example.com"
-                    className="flex-1 bg-transparent border-0 text-xs text-[var(--text-primary)] focus:outline-none placeholder-[var(--text-muted)]/50 font-medium"
+                    className="flex-1 bg-transparent border-0 text-xs text-base-content focus:outline-none placeholder-base-content/60/50 font-medium"
                     id="compose-cc-input"
                   />
                   <button
@@ -227,7 +227,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
                       setShowCc(false);
                       setCc('');
                     }}
-                    className="text-[10px] font-bold text-[var(--text-muted)] hover:text-red-500 transition-colors cursor-pointer absolute right-1"
+                    className="text-[10px] font-bold text-base-content/60 hover:text-red-500 transition-colors cursor-pointer absolute right-1"
                     title="Remove Cc"
                   >
                     ×
@@ -239,15 +239,15 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
             {/* Collapsible Bcc Field */}
             {showBcc && (
               <div className="flex flex-col gap-1 animate-fade-in">
-                <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-1 relative">
-                  <span className="text-[10px] font-bold text-[var(--text-muted)] w-8 select-none">Bcc:</span>
+                <div className="flex items-center gap-2 border-b border-base-200 pb-1 relative">
+                  <span className="text-[10px] font-bold text-base-content/60 w-8 select-none">Bcc:</span>
                   <input
                     type="text"
                     value={bcc}
                     onChange={(e) => setBcc(e.target.value)}
                     disabled={isSending}
                     placeholder="bcc1@example.com"
-                    className="flex-1 bg-transparent border-0 text-xs text-[var(--text-primary)] focus:outline-none placeholder-[var(--text-muted)]/50 font-medium"
+                    className="flex-1 bg-transparent border-0 text-xs text-base-content focus:outline-none placeholder-base-content/60/50 font-medium"
                     id="compose-bcc-input"
                   />
                   <button
@@ -256,7 +256,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
                       setShowBcc(false);
                       setBcc('');
                     }}
-                    className="text-[10px] font-bold text-[var(--text-muted)] hover:text-red-500 transition-colors cursor-pointer absolute right-1"
+                    className="text-[10px] font-bold text-base-content/60 hover:text-red-500 transition-colors cursor-pointer absolute right-1"
                     title="Remove Bcc"
                   >
                     ×
@@ -267,8 +267,8 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
 
             {/* Subject Field */}
             <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] pb-1">
-                <span className="text-[10px] font-bold text-[var(--text-muted)] w-8 select-none">Sub:</span>
+              <div className="flex items-center gap-2 border-b border-base-200 pb-1">
+                <span className="text-[10px] font-bold text-base-content/60 w-8 select-none">Sub:</span>
                 <input
                   type="text"
                   value={subject}
@@ -280,7 +280,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
                   }}
                   disabled={isSending}
                   placeholder="Subject"
-                  className="flex-1 bg-transparent border-0 text-xs text-[var(--text-primary)] focus:outline-none placeholder-[var(--text-muted)]/50 font-medium"
+                  className="flex-1 bg-transparent border-0 text-xs text-base-content focus:outline-none placeholder-base-content/60/50 font-medium"
                   id="compose-subject-input"
                 />
               </div>
@@ -301,7 +301,7 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
                 }}
                 disabled={isSending}
                 placeholder="Write your email here..."
-                className="w-full flex-1 p-3 rounded bg-[var(--bg-elevated)] border border-[var(--border)] text-xs text-[var(--text-primary)] leading-relaxed focus:outline-none focus:border-[var(--accent-primary)] resize-none font-medium custom-scrollbar"
+                className="w-full flex-1 p-3 rounded bg-base-200 border border-base-300 text-xs text-base-content leading-relaxed focus:outline-none focus:border-primary resize-none font-medium custom-scrollbar"
                 id="compose-body-textarea"
               ></textarea>
               {validationErrors.body && (
@@ -311,12 +311,12 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
           </div>
 
           {/* Footer Controls */}
-          <div className="flex items-center justify-between border-t border-[var(--border)] pt-3 mt-3 shrink-0">
+          <div className="flex items-center justify-between border-t border-base-300 pt-3 mt-3 shrink-0">
             <button
               type="button"
               onClick={onClose}
               disabled={isSending}
-              className="p-2 bg-[var(--bg-elevated)] border border-[var(--border)] hover:border-red-500/20 text-[var(--text-muted)] hover:text-red-500 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+              className="p-2 bg-base-200 border border-base-300 hover:border-red-500/20 text-base-content/60 hover:text-red-500 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
               id="btn-compose-discard"
               title="Discard Email"
             >
@@ -329,12 +329,12 @@ export function ComposeWindow({ onClose }: ComposeWindowProps) {
             <button
               type="submit"
               disabled={isSending}
-              className="px-5 py-2 bg-[var(--accent-primary)] hover:opacity-90 disabled:opacity-50 text-[var(--bg-surface)] rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
+              className="px-5 py-2 bg-primary hover:opacity-90 disabled:opacity-50 text-base-100 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
               id="btn-compose-send"
             >
               {isSending ? (
                 <>
-                  <span className="w-3.5 h-3.5 border-2 border-[var(--bg-surface)] border-t-transparent animate-spin rounded-full"></span>
+                  <span className="w-3.5 h-3.5 border-2 border-base-100 border-t-transparent animate-spin rounded-full"></span>
                   Sending...
                 </>
               ) : (

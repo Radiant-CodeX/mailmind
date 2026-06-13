@@ -1,604 +1,608 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import {
-  checkAuthStatus,
-  quickLogin,
-  googleLoginInitiate,
-  googleLoginPoll,
-  microsoftLoginInitiate,
-  microsoftLoginPoll,
-} from "../lib/api";
-import {
-  getRememberedLogin,
-  clearRememberedLogin,
-  initialsFor,
-  getRememberMe,
-  rememberLogin,
-  setRememberMe as persistRememberMe,
-  RememberedLogin,
-  Provider,
-} from "../lib/session";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import gsap from 'gsap';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { HeroCanvas } from '../components/landing/HeroCanvas';
+import { Preloader } from '../components/landing/Preloader';
 
-/** Pick the provider for a typed email address. */
-function providerForEmail(email: string): Provider {
-  const domain = email.split("@")[1]?.toLowerCase() || "";
-  if (domain.includes("gmail") || domain.includes("googlemail"))
-    return "google";
-  return "microsoft";
-}
+gsap.registerPlugin(ScrollTrigger);
 
-export default function LoginPage() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [authStatus, setAuthStatus] = useState<string>("checking");
-  const [remembered, setRemembered] = useState<RememberedLogin | null>(null);
-  const [email, setEmail] = useState("");
-  const [rememberMe, setRememberMe] = useState(true);
-  const [googleWaiting, setGoogleWaiting] = useState(false);
-  const [msWaiting, setMsWaiting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [signedOutNotice, setSignedOutNotice] = useState<"session" | "full" | null>(null);
-  const pollingIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
-  const googlePopupRef = React.useRef<Window | null>(null);
-  const msPopupRef = React.useRef<Window | null>(null);
+/* ────────────────────────── data ────────────────────────── */
+
+const FEATURES = [
+  {
+    icon: '◎',
+    sender: 'Triage Engine',
+    tag: 'CRITICAL',
+    tagColor: 'bg-rose-500/15 text-rose-300 border-rose-400/30',
+    time: 'now',
+    title: '5-Axis Triage',
+    body: 'Every email scored across deadline urgency, sender authority, sentiment, thread decay and action type — the inbox sorts itself by what actually matters.',
+  },
+  {
+    icon: '✦',
+    sender: 'Tone DNA',
+    tag: 'YOUR VOICE',
+    tagColor: 'bg-violet-500/15 text-violet-300 border-violet-400/30',
+    time: '1m',
+    title: 'Drafts that sound like you',
+    body: 'MailMind learns your voice from your sent mail — formality, sentence rhythm, favorite phrases — and writes replies that sound like you, not a bot.',
+  },
+  {
+    icon: '◈',
+    sender: 'Precedent Recall',
+    tag: 'RAG',
+    tagColor: 'bg-indigo-500/15 text-indigo-300 border-indigo-400/30',
+    time: '2m',
+    title: 'Your past decisions, recalled',
+    body: 'Retrieval surfaces how you handled similar emails before, injecting your past decisions as context for every new draft.',
+  },
+  {
+    icon: '✓',
+    sender: 'Commitment Tracker',
+    tag: 'DEADLINE',
+    tagColor: 'bg-amber-500/15 text-amber-300 border-amber-400/30',
+    time: '5m',
+    title: 'Promises become tasks',
+    body: '"I\'ll send it by Friday" becomes a tracked task with a deadline — automatically pulled from every thread, never forgotten.',
+  },
+  {
+    icon: '◷',
+    sender: 'Calendar Radar',
+    tag: 'CONFLICT',
+    tagColor: 'bg-cyan-500/15 text-cyan-300 border-cyan-400/30',
+    time: '12m',
+    title: 'Double-bookings, flagged first',
+    body: 'New commitments are checked against your calendar in real time. Conflicts get flagged before you hit send.',
+  },
+  {
+    icon: '⬡',
+    sender: 'Workspace',
+    tag: 'MULTI-ACCOUNT',
+    tagColor: 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30',
+    time: '1h',
+    title: 'Every inbox, one mind',
+    body: 'Gmail and Outlook, multiple accounts, one workspace. Per-account tone profiles and isolated retrieval keep contexts clean.',
+  },
+];
+
+const PIPELINE = [
+  { step: '01', name: 'Ingest', desc: 'PII masked, payload validated, queued.' },
+  { step: '02', name: 'Triage', desc: 'Five scoring axes rank true urgency.' },
+  { step: '03', name: 'Commitments', desc: 'Promises extracted with deadlines.' },
+  { step: '04', name: 'Calendar', desc: 'Conflicts detected deterministically.' },
+  { step: '05', name: 'Draft', desc: 'Precedent-aware reply in your voice.' },
+  { step: '06', name: 'Approve', desc: 'You stay in the loop. Always.' },
+];
+
+const STATS = [
+  { value: '1.5s', label: 'triage SLA' },
+  { value: '5', label: 'scoring axes' },
+  { value: '32', label: 'workspace themes' },
+  { value: '100%', label: 'human-approved sends' },
+];
+
+/* ────────────────────────── page ────────────────────────── */
+
+export default function LandingPage() {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [loaded, setLoaded] = useState(false);
+  const handlePreloaderDone = useCallback(() => setLoaded(true), []);
+
+  /* hero + nav entrance — fires once after the preloader finishes.
+     Guarded by a ref (NOT reverted on cleanup) so React StrictMode's
+     double-mount in dev can't reset and replay the animation. */
+  const heroPlayed = useRef(false);
+  useEffect(() => {
+    if (!loaded || heroPlayed.current) return;
+    heroPlayed.current = true;
+
+    gsap
+      .timeline({ defaults: { ease: 'power3.out' } })
+      .from('[data-hero-badge]', { y: 24, opacity: 0, duration: 0.7, delay: 0.05 })
+      .from('[data-hero-line]', { y: 80, opacity: 0, duration: 1, stagger: 0.12 }, '-=0.4')
+      .from('[data-hero-sub]', { y: 30, opacity: 0, duration: 0.8 }, '-=0.55')
+      .from('[data-hero-cta]', { y: 20, opacity: 0, duration: 0.7, stagger: 0.1 }, '-=0.5')
+      .from('[data-hero-stat]', { y: 24, opacity: 0, duration: 0.6, stagger: 0.08 }, '-=0.4');
+
+    gsap.from('[data-nav]', { y: -40, opacity: 0, duration: 0.8, ease: 'power2.out' });
+
+    // re-measure scroll positions now that the preloader overlay is gone
+    ScrollTrigger.refresh();
+  }, [loaded]);
 
   useEffect(() => {
-    async function init() {
-      const params = new URLSearchParams(window.location.search);
-      const signedOut = params.get("signedOut");
+    // globals.css locks body scroll for the dashboard; the landing needs window scroll
+    document.body.style.overflow = 'auto';
+    document.body.style.height = 'auto';
 
-      if (signedOut === "full") {
-        // Full logout: clear remembered login, skip auth check, show plain login
-        clearRememberedLogin();
-        setRemembered(null);
-        setSignedOutNotice("full");
-        setAuthStatus("ready");
-        return;
-      }
+    const ctx = gsap.context(() => {
+      /* section headings */
+      gsap.utils.toArray<HTMLElement>('[data-reveal]').forEach((el) => {
+        gsap.from(el, {
+          y: 60,
+          opacity: 0,
+          duration: 0.9,
+          ease: 'power3.out',
+          scrollTrigger: { trigger: el, start: 'top 85%' },
+        });
+      });
 
-      if (signedOut === "session") {
-        // Session-only logout: keep remembered login for Quick Login card,
-        // but DON'T auto-redirect even if mm_quick restores a session
-        setRemembered(getRememberedLogin());
-        setRememberMe(getRememberMe());
-        setSignedOutNotice("session");
-        setAuthStatus("ready");
-        return;
-      }
-
-      try {
-        const data = await checkAuthStatus();
-        if (data.authenticated) {
-          router.replace("/dashboard");
-          return;
-        }
-        setRemembered(getRememberedLogin());
-        setRememberMe(getRememberMe());
-        setAuthStatus("ready");
-      } catch (err) {
-        console.error("Failed to query status", err);
-        setRemembered(getRememberedLogin());
-        setAuthStatus("ready");
-      }
-    }
-    init();
-    return () => {
-      if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    };
-  }, [router]);
-
-  const rememberPref = (val: boolean) => {
-    setRememberMe(val);
-    persistRememberMe(val);
-  };
-
-  // ── Microsoft (OAuth popup flow) ───────────────────────────────────────────
-  const handleMicrosoft = async (forceOAuth = false) => {
-    persistRememberMe(rememberMe);
-    setError(null);
-    // Open the popup SYNCHRONOUSLY to preserve the click gesture.
-    msPopupRef.current = window.open("", "ms-login", "width=520,height=680");
-    setLoading(true);
-    try {
-      const data = await microsoftLoginInitiate();
-      if (data.authenticated) {
-        msPopupRef.current?.close();
-        router.push("/dashboard");
-        return;
-      }
-      if (msPopupRef.current && data.auth_url) {
-        msPopupRef.current.location.replace(data.auth_url);
-        setMsWaiting(true);
-        startMicrosoftPolling(data.state, msPopupRef.current);
-      } else if (data.auth_url) {
-        window.location.assign(data.auth_url);
-      }
-    } catch (err: unknown) {
-      msPopupRef.current?.close();
-      setError(err instanceof Error ? err.message : "Microsoft sign-in failed");
-      setLoading(false);
-      setMsWaiting(false);
-    }
-  };
-
-  const startMicrosoftPolling = (state: string, popup: Window | null) => {
-    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await microsoftLoginPoll(state);
-        if (data.status === "success") {
-          if (pollingIntervalRef.current)
-            clearInterval(pollingIntervalRef.current);
-          popup?.close();
-          if (data.user_principal_name && getRememberMe()) {
-            rememberLogin(data.user_principal_name, "microsoft");
-          }
-          router.push("/dashboard");
-        }
-      } catch (err) {
-        if (pollingIntervalRef.current)
-          clearInterval(pollingIntervalRef.current);
-        setLoading(false);
-        setMsWaiting(false);
-        setError(
-          err instanceof Error ? err.message : "Microsoft sign-in failed",
+      /* feature cards: per-card reveal, fire once, self-clearing so a missed
+         trigger can never leave a card invisible */
+      gsap.utils.toArray<HTMLElement>('[data-feature-card]').forEach((card, i) => {
+        gsap.fromTo(
+          card,
+          { y: 60, autoAlpha: 0 },
+          {
+            y: 0,
+            autoAlpha: 1,
+            duration: 0.7,
+            delay: (i % 3) * 0.1,
+            ease: 'power3.out',
+            clearProps: 'all',
+            scrollTrigger: { trigger: card, start: 'top 92%', once: true },
+          },
         );
-      }
-    }, 2500);
-  };
+      });
 
-  // ── Google (OAuth popup flow) ──────────────────────────────────────────────
-  const handleGoogle = async (emailHint?: string, forceOAuth = false) => {
-    persistRememberMe(rememberMe);
-    setError(null);
-    // Open the popup SYNCHRONOUSLY (inside the click) so the browser keeps the
-    // user-gesture and doesn't block it. We navigate it once we have the URL.
-    googlePopupRef.current = window.open(
-      "",
-      "google-login",
-      "width=500,height=680",
-    );
-    setLoading(true);
-    try {
-      const data = await googleLoginInitiate(emailHint);
-      if (data.authenticated) {
-        googlePopupRef.current?.close();
-        router.push("/dashboard");
-        return;
-      }
-      if (googlePopupRef.current && data.auth_url) {
-        // Live: point the already-open popup at Google's consent screen.
-        googlePopupRef.current.location.replace(data.auth_url);
-        setGoogleWaiting(true);
-        startGooglePolling(data.state, googlePopupRef.current);
-      } else if (data.auth_url) {
-        // Popup was blocked — fall back to a full-page redirect to Google.
-        window.location.assign(data.auth_url);
-      }
-    } catch (err: unknown) {
-      googlePopupRef.current?.close();
-      setError(err instanceof Error ? err.message : "Google sign-in failed");
-      setLoading(false);
-      setGoogleWaiting(false);
-    }
-  };
+      /* circular pipeline: nodes pop in around the ring */
+      gsap.from('[data-pipe-node]', {
+        scale: 0,
+        opacity: 0,
+        duration: 0.7,
+        stagger: 0.12,
+        ease: 'back.out(1.8)',
+        scrollTrigger: { trigger: '[data-pipeline-wheel]', start: 'top 75%' },
+      });
 
-  const startGooglePolling = (state: string, popup: Window | null) => {
-    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await googleLoginPoll(state);
-        if (data.status === "success") {
-          if (pollingIntervalRef.current)
-            clearInterval(pollingIntervalRef.current);
-          popup?.close();
-          if (data.user_principal_name && getRememberMe()) {
-            rememberLogin(data.user_principal_name, "google");
-          }
-          router.push("/dashboard");
-        }
-      } catch (err) {
-        if (pollingIntervalRef.current)
-          clearInterval(pollingIntervalRef.current);
-        setLoading(false);
-        setGoogleWaiting(false);
-        setError(err instanceof Error ? err.message : "Google sign-in failed");
-      }
-    }, 2500);
-  };
+      /* the dashed orbit ring slowly rotates forever */
+      gsap.to('[data-pipe-ring]', {
+        rotation: 360,
+        duration: 60,
+        repeat: -1,
+        ease: 'none',
+        transformOrigin: 'center center',
+      });
 
-  const cancelWaiting = () => {
-    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    googlePopupRef.current?.close();
-    msPopupRef.current?.close();
-    setGoogleWaiting(false);
-    setMsWaiting(false);
-    setLoading(false);
-  };
+      /* center envelope floats and sways */
+      gsap.to('[data-pipe-envelope]', {
+        y: -14,
+        rotation: 3,
+        duration: 2.6,
+        yoyo: true,
+        repeat: -1,
+        ease: 'sine.inOut',
+      });
+      gsap.from('[data-pipe-envelope]', {
+        scale: 0,
+        duration: 0.8,
+        ease: 'back.out(1.6)',
+        scrollTrigger: { trigger: '[data-pipeline-wheel]', start: 'top 75%' },
+      });
 
-  // ── Email-first "Next" → route to the right provider ───────────────────────
-  const handleNext = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) {
-      setError("Please enter your email address.");
-      return;
-    }
-    // Email-first sign-in respects the typed address → force a fresh OAuth.
-    if (providerForEmail(email) === "google") {
-      handleGoogle(email, true);
-    } else {
-      handleMicrosoft(true);
-    }
-  };
+      /* big CTA zoom */
+      gsap.from('[data-final-cta]', {
+        scale: 0.92,
+        opacity: 0,
+        duration: 1,
+        ease: 'power3.out',
+        scrollTrigger: { trigger: '[data-final-cta]', start: 'top 80%' },
+      });
 
-  // ── Quick login / forget ───────────────────────────────────────────────────
-  const handleQuickLogin = async () => {
-    if (!remembered) return;
-    setLoading(true);
-    setError(null);
-    try {
-      // Explicitly activate quick login — validates mm_quick and issues a new session.
-      const data = await quickLogin();
-      if (data.authenticated) {
-        router.push("/dashboard");
-        return;
-      }
-      // mm_quick expired or missing — fall back to full OAuth for the remembered provider.
-      setLoading(false);
-      if (remembered.provider === "google") {
-        handleGoogle(remembered.email, true);
-      } else {
-        handleMicrosoft(true);
-      }
-    } catch (err) {
-      setLoading(false);
-      setError(err instanceof Error ? err.message : 'Quick login failed. Please try again.');
-      if (remembered.provider === "google") {
-        handleGoogle(remembered.email, true);
-      } else {
-        handleMicrosoft(true);
-      }
-    }
-  };
+      /* gradient orbs drift */
+      gsap.to('[data-orb-1]', { y: -60, x: 40, duration: 9, yoyo: true, repeat: -1, ease: 'sine.inOut' });
+      gsap.to('[data-orb-2]', { y: 50, x: -30, duration: 11, yoyo: true, repeat: -1, ease: 'sine.inOut' });
 
-  const handleForgetAccount = async () => {
-    try {
-      const { logoutUser } = await import("../lib/api");
-      await logoutUser();
-    } catch (err) {
-      console.error("Failed to forget account:", err);
-    }
-    clearRememberedLogin();
-    setRemembered(null);
-  };
+      /* cursor spotlight tracking on the email cards */
+      gsap.utils.toArray<HTMLElement>('[data-feature-card]').forEach((card) => {
+        card.addEventListener('mousemove', (e) => {
+          const r = card.getBoundingClientRect();
+          card.style.setProperty('--mx', `${e.clientX - r.left}px`);
+          card.style.setProperty('--my', `${e.clientY - r.top}px`);
+        });
+      });
 
-  if (authStatus === "checking") {
-    return (
-      <div
-        className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary"
-        id="login-checking"
-      >
-        <div className="text-center">
-          <div className="w-8 h-8 rounded-full border-2 border-[var(--accent-primary)] border-t-transparent animate-spin mx-auto mb-4" />
-          <p className="text-xs text-[var(--text-muted)] font-medium">
-            Checking authorization status...
-          </p>
-        </div>
-      </div>
-    );
-  }
+      /* magnetic buttons */
+      gsap.utils.toArray<HTMLElement>('[data-magnetic]').forEach((btn) => {
+        const qx = gsap.quickTo(btn, 'x', { duration: 0.35, ease: 'power3.out' });
+        const qy = gsap.quickTo(btn, 'y', { duration: 0.35, ease: 'power3.out' });
 
-  const showMainForm = !googleWaiting && !msWaiting;
+        btn.addEventListener('mousemove', (e) => {
+          const r = btn.getBoundingClientRect();
+          qx((e.clientX - (r.left + r.width / 2)) * 0.35);
+          qy((e.clientY - (r.top + r.height / 2)) * 0.35);
+        });
+        btn.addEventListener('mouseleave', () => {
+          gsap.to(btn, { x: 0, y: 0, duration: 0.7, ease: 'elastic.out(1, 0.35)' });
+        });
+      });
+
+    }, rootRef);
+
+    return () => {
+      ctx.revert();
+      document.body.style.overflow = '';
+      document.body.style.height = '';
+    };
+  }, []);
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary px-4"
-      id="login-workspace"
+      ref={rootRef}
+      className="min-h-screen bg-[#05060a] text-white antialiased overflow-x-hidden selection:bg-indigo-500/40"
+      style={{ fontFamily: 'var(--font-space), var(--font-geist-sans), sans-serif' }}
     >
-      <div className="relative w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border)] rounded-2xl shadow-2xl p-8 overflow-hidden">
-        <div className="absolute -right-16 -top-16 w-36 h-36 rounded-full bg-[var(--accent-primary)]/10 blur-2xl" />
+      {!loaded && <Preloader onDone={handlePreloaderDone} />}
 
-        {/* Brand */}
-        <div className="text-center mb-8 flex flex-col items-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/mailmind-logo.svg"
-            alt="MailMind logo"
-            width={48}
-            height={48}
-            className="w-12 h-12 rounded-xl shadow mb-4"
-          />
-          <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">
-            MailMind
+      {/* ── Nav ─────────────────────────────────────────── */}
+      <nav
+        data-nav
+        className="fixed top-0 inset-x-0 z-50 backdrop-blur-xl bg-[#05060a]/60 border-b border-white/5"
+      >
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">
+              M
+            </div>
+            <span className="font-semibold tracking-tight text-[15px]">MailMind</span>
+          </div>
+          <div className="hidden md:flex items-center gap-8 text-sm text-white/60">
+            <a href="#features" className="hover:text-white transition-colors">Features</a>
+            <a href="#pipeline" className="hover:text-white transition-colors">How it works</a>
+            <a href="#security" className="hover:text-white transition-colors">Security</a>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/login"
+              className="text-sm text-white/70 hover:text-white transition-colors px-3 py-2"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/login"
+              className="text-sm font-medium bg-white text-black px-4 py-2 rounded-full hover:bg-white/90 transition-all hover:scale-[1.03] active:scale-[0.98]"
+            >
+              Get started
+            </Link>
+          </div>
+        </div>
+      </nav>
+
+      {/* ── Hero ────────────────────────────────────────── */}
+      <header className="relative min-h-screen flex items-center justify-center overflow-hidden">
+        <HeroCanvas />
+        {/* vignette + orbs */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,#05060a_85%)] pointer-events-none" />
+        <div data-orb-1 className="absolute -top-32 -left-32 w-[480px] h-[480px] rounded-full bg-indigo-600/20 blur-[140px] pointer-events-none" />
+        <div data-orb-2 className="absolute -bottom-40 -right-24 w-[520px] h-[520px] rounded-full bg-violet-600/15 blur-[160px] pointer-events-none" />
+
+        <div className="relative z-10 max-w-5xl mx-auto px-6 text-center pt-24 pb-16">
+          <div
+            data-hero-badge
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur text-xs text-white/70 mb-8"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            AI email co-pilot · Gmail &amp; Outlook
+          </div>
+
+          <h1 className="font-black tracking-[-0.04em] leading-[0.92] text-5xl sm:text-7xl lg:text-8xl">
+            <span data-hero-line className="block">Your inbox,</span>
+            <span
+              data-hero-line
+              className="block bg-gradient-to-r from-indigo-400 via-violet-400 via-60% to-cyan-300 bg-clip-text text-transparent pb-2 animate-shimmer bg-[length:200%_auto]"
+            >
+              finally sentient.
+            </span>
           </h1>
-          <p className="text-[10px] text-[var(--text-muted)] font-bold uppercase tracking-widest mt-0.5">
-            Co-pilot Studio
+
+          <p data-hero-sub className="mt-7 text-lg sm:text-xl text-white/55 max-w-2xl mx-auto leading-relaxed [text-wrap:balance]">
+            MailMind triages every email on five axes, extracts the promises you make,
+            guards your calendar, and drafts replies in <em className="text-white/80 not-italic font-medium">your</em> voice —
+            while you stay in control of every send.
           </p>
+
+          <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Link
+              data-hero-cta
+              data-magnetic
+              href="/login"
+              className="group relative px-8 py-4 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 font-semibold text-[15px] shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition-shadow active:scale-[0.98]"
+            >
+              Start free with your inbox
+              <span className="inline-block ml-2 transition-transform group-hover:translate-x-1">→</span>
+            </Link>
+            <a
+              data-hero-cta
+              data-magnetic
+              href="#pipeline"
+              className="px-8 py-4 rounded-full border border-white/15 text-white/80 font-medium text-[15px] hover:bg-white/5 hover:border-white/30 transition-colors"
+            >
+              See how it thinks
+            </a>
+          </div>
+
+          <div className="mt-20 grid grid-cols-2 sm:grid-cols-4 gap-px rounded-2xl overflow-hidden border border-white/10 bg-white/10 max-w-3xl mx-auto">
+            {STATS.map((s) => (
+              <div key={s.label} data-hero-stat className="bg-[#0a0c14] px-6 py-5">
+                <div className="text-2xl sm:text-3xl font-bold bg-gradient-to-br from-white to-white/60 bg-clip-text text-transparent">
+                  {s.value}
+                </div>
+                <div className="text-[11px] uppercase tracking-widest text-white/40 mt-1">{s.label}</div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {signedOutNotice === "session" && (
-          <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-lg text-xs font-semibold text-center">
-            Signed out of this session. Quick Login is still active.
-          </div>
-        )}
-        {signedOutNotice === "full" && (
-          <div className="mb-4 p-3 bg-[var(--bg-elevated)] border border-[var(--border)] text-[var(--text-muted)] rounded-lg text-xs font-semibold text-center">
-            Signed out completely. Please sign in again.
-          </div>
-        )}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white/30 text-xs tracking-widest animate-bounce">
+          SCROLL ↓
+        </div>
+      </header>
 
-        {error && (
-          <div className="mb-6 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-lg text-xs font-semibold text-center max-h-32 overflow-y-auto">
-            {error}
+      {/* ── Features ───────────────────────────────────── */}
+      <section id="features" data-features className="relative py-32 px-6">
+        <div className="max-w-7xl mx-auto">
+          <div data-reveal className="max-w-2xl mb-16">
+            <div className="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-4">Capabilities</div>
+            <h2 className="text-4xl sm:text-5xl font-bold tracking-[-0.03em] leading-[1.08]">
+              Not another email client.
+              <span className="block text-white/40">A second brain for your correspondence.</span>
+            </h2>
           </div>
-        )}
 
-        {/* ── Main email-first form ── */}
-        {showMainForm && (
-          <div className="space-y-4">
-            {/* Quick Login (after sign-out, within 1 week) */}
-            {remembered && (
-              <div className="mb-5 animate-fade-in">
-                <button
-                  onClick={handleQuickLogin}
-                  disabled={loading}
-                  className="w-full flex items-center gap-3 p-3 bg-[var(--bg-elevated)] hover:bg-[var(--bg-elevated)]/70 border border-[var(--border)] hover:border-[var(--accent-primary)]/40 rounded-xl transition-all cursor-pointer disabled:opacity-50 active:scale-[0.98] text-left group"
-                  id="btn-quick-login"
-                >
-                  <div className="w-10 h-10 rounded-full bg-[var(--accent-primary)] flex items-center justify-center text-[var(--bg-surface)] font-extrabold text-sm shrink-0 shadow">
-                    {initialsFor(remembered.email)}
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5" style={{ perspective: 1200 }}>
+            {FEATURES.map((f) => (
+              <div
+                key={f.title}
+                data-feature-card
+                className="group relative rounded-2xl border border-white/8 bg-gradient-to-b from-[#0d1020] to-[#080a14] overflow-hidden will-change-transform transition-all duration-300 ease-out hover:-translate-y-3 hover:scale-[1.02] hover:border-indigo-400/50 hover:shadow-[0_24px_60px_-12px_rgba(99,102,241,0.45)] cursor-default"
+              >
+                {/* cursor spotlight */}
+                <div
+                  className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10"
+                  style={{
+                    background:
+                      'radial-gradient(280px circle at var(--mx, 50%) var(--my, 50%), rgba(99,102,241,0.15), transparent 65%)',
+                  }}
+                />
+
+                {/* email header bar */}
+                <div className="flex items-center gap-3 px-5 pt-5 pb-3.5 border-b border-white/5">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500/30 to-violet-600/30 border border-indigo-400/30 flex items-center justify-center text-indigo-300 text-base shrink-0">
+                    {f.icon}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
-                      Quick Login ·{" "}
-                      {remembered.provider === "google"
-                        ? "Google"
-                        : "Microsoft"}
-                    </p>
-                    <p
-                      className="text-sm font-bold text-[var(--text-primary)] truncate"
-                      title={remembered.email}
-                    >
-                      {remembered.email}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-white/90 truncate">MailMind · {f.sender}</span>
+                      {/* unread dot */}
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0 group-hover:opacity-0 transition-opacity" />
+                    </div>
+                    <div className="text-[10px] text-white/35 font-mono tracking-wide">to: you@inbox</div>
                   </div>
-                  {loading ? (
-                    <div className="w-4 h-4 border-2 border-[var(--accent-primary)] border-t-transparent animate-spin rounded-full shrink-0" />
-                  ) : (
-                    <svg
-                      className="w-5 h-5 text-[var(--text-muted)] group-hover:text-[var(--accent-primary)] transition-colors shrink-0"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2.5}
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  )}
-                </button>
-                <button
-                  onClick={handleForgetAccount}
-                  className="mt-2 w-full text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors cursor-pointer"
-                  id="btn-forget-account"
+                  <span className="text-[10px] text-white/30 font-mono shrink-0">{f.time}</span>
+                </div>
+
+                {/* email body */}
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-[15px] font-bold tracking-tight">{f.title}</h3>
+                  </div>
+                  <p className="text-[13px] text-white/45 leading-relaxed">{f.body}</p>
+                </div>
+
+                {/* email footer: tag chip + actions appear on hover */}
+                <div className="flex items-center justify-between px-5 pb-4">
+                  <span className={`text-[9px] font-bold tracking-[0.15em] px-2 py-1 rounded border ${f.tagColor}`}>
+                    {f.tag}
+                  </span>
+                  <div className="flex gap-1.5 opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
+                    {['↩', '★', '⋯'].map((a) => (
+                      <span
+                        key={a}
+                        className="w-6 h-6 rounded-md bg-white/5 border border-white/10 flex items-center justify-center text-[10px] text-white/60"
+                      >
+                        {a}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* bottom glow line on hover */}
+                <div className="absolute bottom-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-indigo-400/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Pipeline ───────────────────────────────────── */}
+      <section id="pipeline" data-pipeline className="relative py-32 px-6 bg-gradient-to-b from-transparent via-indigo-950/10 to-transparent">
+        <div className="max-w-4xl mx-auto">
+          <div data-reveal className="text-center mb-20">
+            <div className="text-xs uppercase tracking-[0.3em] text-indigo-400 mb-4">The pipeline</div>
+            <h2 className="text-4xl sm:text-5xl font-bold tracking-[-0.03em]">
+              Six stages. <span className="text-white/40">Zero guesswork.</span>
+            </h2>
+            <p className="mt-5 text-white/50 max-w-xl mx-auto">
+              Every message flows through an agentic LangGraph pipeline — deterministic where it
+              should be, intelligent where it counts, human-approved where it matters.
+            </p>
+          </div>
+
+          {/* ── circular wheel (desktop) ── */}
+          <div
+            data-pipeline-wheel
+            className="relative hidden md:block mx-auto"
+            style={{ width: 640, height: 640 }}
+          >
+            {/* rotating dashed orbit */}
+            <svg
+              data-pipe-ring
+              className="absolute inset-0 w-full h-full"
+              viewBox="0 0 640 640"
+              fill="none"
+            >
+              <circle
+                cx="320"
+                cy="320"
+                r="230"
+                stroke="url(#ringGrad)"
+                strokeWidth="1.5"
+                strokeDasharray="6 10"
+                opacity="0.5"
+              />
+              <circle cx="320" cy="320" r="290" stroke="rgba(99,102,241,0.12)" strokeWidth="1" />
+              <defs>
+                <linearGradient id="ringGrad" x1="0" y1="0" x2="640" y2="640">
+                  <stop stopColor="#6366f1" />
+                  <stop offset="0.5" stopColor="#a855f7" />
+                  <stop offset="1" stopColor="#22d3ee" />
+                </linearGradient>
+              </defs>
+            </svg>
+
+            {/* floating envelope in the middle */}
+            <div
+              data-pipe-envelope
+              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            >
+              <div className="relative" style={{ perspective: 800 }}>
+                <div className="relative w-36 h-[92px] rounded-lg bg-gradient-to-b from-[#181d36] to-[#0b0e1c] border border-indigo-400/40 shadow-[0_0_60px_rgba(99,102,241,0.5)]">
+                  <svg className="absolute inset-0 w-full h-full opacity-60" viewBox="0 0 144 92" fill="none">
+                    <path d="M0 0 L72 52 L144 0" stroke="#818cf8" strokeWidth="1.4" />
+                    <path d="M0 92 L52 48 M144 92 L92 48" stroke="rgba(129,140,248,0.4)" strokeWidth="1" />
+                  </svg>
+                  <div className="absolute -right-1.5 -top-1.5 w-3.5 h-3.5 rounded-full bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_0_10px_rgba(244,63,94,0.8)]" />
+                </div>
+                {/* glow under envelope */}
+                <div className="absolute -inset-6 rounded-full bg-indigo-500/15 blur-2xl -z-10" />
+              </div>
+              <div className="mt-4 text-center text-[10px] font-mono tracking-[0.3em] text-indigo-300/60">
+                YOUR EMAIL
+              </div>
+            </div>
+
+            {/* six nodes around the circle */}
+            {PIPELINE.map((p, i) => {
+              const angle = (i * 60 - 90) * (Math.PI / 180); // start at top, clockwise
+              const x = 50 + 36 * Math.cos(angle);
+              const y = 50 + 36 * Math.sin(angle);
+              return (
+                <div
+                  key={p.step}
+                  data-pipe-node
+                  className="absolute w-44 -translate-x-1/2 -translate-y-1/2 text-center"
+                  style={{ left: `${x}%`, top: `${y}%` }}
                 >
-                  Use a different account
-                </button>
-                <div className="flex items-center gap-3 my-5">
-                  <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
-                    or
-                  </span>
-                  <div className="flex-1 h-px bg-[var(--border-subtle)]" />
+                  <div className="mx-auto w-14 h-14 rounded-full border border-indigo-400/40 bg-[#0a0c14] flex items-center justify-center font-mono text-xs text-indigo-300 shadow-[0_0_30px_rgba(99,102,241,0.25)] mb-3">
+                    {p.step}
+                  </div>
+                  <h3 className="text-base font-bold tracking-tight">{p.name}</h3>
+                  <p className="text-[12px] text-white/40 mt-1 leading-snug">{p.desc}</p>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── vertical fallback (mobile) ── */}
+          <div className="md:hidden space-y-8">
+            {PIPELINE.map((p) => (
+              <div key={p.step} className="flex items-start gap-4">
+                <div className="w-12 h-12 shrink-0 rounded-full border border-indigo-400/40 bg-[#0a0c14] flex items-center justify-center font-mono text-xs text-indigo-300">
+                  {p.step}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">{p.name}</h3>
+                  <p className="text-sm text-white/45 mt-0.5">{p.desc}</p>
                 </div>
               </div>
-            )}
+            ))}
+          </div>
+        </div>
+      </section>
 
-            {/* Email + Remember me + Next */}
-            <form onSubmit={handleNext} className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">
-                  Email
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none">
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
-                      />
-                    </svg>
+      {/* ── Security band ──────────────────────────────── */}
+      <section id="security" className="relative py-28 px-6">
+        <div data-reveal className="max-w-5xl mx-auto rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.04] to-transparent p-10 sm:p-16 overflow-hidden relative">
+          <div className="absolute -top-24 -right-24 w-80 h-80 rounded-full bg-cyan-500/10 blur-[100px] pointer-events-none" />
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div>
+              <div className="text-xs uppercase tracking-[0.3em] text-cyan-400 mb-4">Trust &amp; safety</div>
+              <h2 className="text-3xl sm:text-4xl font-bold tracking-tight leading-tight">
+                Your mail never trains anyone else&rsquo;s model.
+              </h2>
+              <p className="mt-5 text-white/50 leading-relaxed">
+                PII is masked before any LLM call. Retrieval indexes are isolated per account.
+                Sessions are HttpOnly-cookie scoped, drafts require explicit approval, and a full
+                audit log records every action taken on your behalf.
+              </p>
+            </div>
+            <ul className="space-y-4">
+              {[
+                'PII masking before indexing & inference',
+                'Per-account RAG + Tone DNA isolation',
+                'Human-in-the-loop approval gate on every send',
+                '90-day data retention with full audit trail',
+              ].map((item) => (
+                <li key={item} className="flex items-start gap-3 text-sm text-white/70">
+                  <span className="mt-0.5 w-5 h-5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 flex items-center justify-center text-[10px] shrink-0">
+                    ✓
                   </span>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Your email (Gmail, Outlook, work…)"
-                    className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border)] text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] transition-all"
-                    id="login-email"
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-center gap-2 cursor-pointer select-none w-fit">
-                <input
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => rememberPref(e.target.checked)}
-                  className="w-4 h-4 accent-[var(--accent-primary)] cursor-pointer"
-                  id="login-remember"
-                />
-                <span className="text-xs font-medium text-[var(--text-muted)]">
-                  Remember me
-                </span>
-              </label>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/90 disabled:opacity-50 text-[var(--bg-surface)] font-extrabold text-sm rounded-xl cursor-pointer shadow hover:shadow-lg transition-all duration-200 active:scale-95"
-                id="btn-login-next"
-              >
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-[var(--bg-surface)] border-t-transparent animate-spin rounded-full" />
-                ) : (
-                  "Next"
-                )}
-              </button>
-            </form>
-
-            {/* OR divider */}
-            <div className="flex items-center gap-3 py-1">
-              <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)]">
-                or
-              </span>
-              <div className="flex-1 h-px bg-[var(--border-subtle)]" />
-            </div>
-
-            {/* Provider buttons */}
-            <button
-              onClick={() => handleGoogle(email || undefined)}
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2.5 py-2.5 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-bold text-sm rounded-xl cursor-pointer border border-[var(--border)] transition-all active:scale-95"
-              id="btn-login-google"
-            >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path
-                  fill="#4285F4"
-                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                />
-                <path
-                  fill="#34A853"
-                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                />
-                <path
-                  fill="#FBBC05"
-                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"
-                />
-                <path
-                  fill="#EA4335"
-                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                />
-              </svg>
-              Continue with Google
-            </button>
-
-            <button
-              onClick={() => handleMicrosoft()}
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2.5 py-2.5 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-bold text-sm rounded-xl cursor-pointer border border-[var(--border)] transition-all active:scale-95"
-              id="btn-login-microsoft"
-            >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 21 21"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-                <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-                <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-                <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-              </svg>
-              Continue with Microsoft
-            </button>
+                  {item}
+                </li>
+              ))}
+            </ul>
           </div>
-        )}
+        </div>
+      </section>
 
-        {/* ── Waiting for Microsoft sign-in (popup) ── */}
-        {msWaiting && (
-          <div className="space-y-5 animate-fade-in text-center">
-            <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center mx-auto shadow-md border border-[var(--border)]">
-              <svg className="w-7 h-7" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-                <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-                <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-                <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-                <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-              </svg>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1">
-                Sign-in in progress
-              </p>
-              <p className="text-sm font-bold text-[var(--text-primary)]">
-                Microsoft Account
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">
-                Complete the sign-in in the popup window.
-                <br />
-                If it didn&apos;t open, check your popup blocker.
-              </p>
-            </div>
-            <div className="flex items-center justify-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-[#F25022] animate-bounce [animation-delay:-0.3s]" />
-              <div className="w-2 h-2 rounded-full bg-[#7FBA00] animate-bounce [animation-delay:-0.15s]" />
-              <div className="w-2 h-2 rounded-full bg-[#00A4EF] animate-bounce [animation-delay:0s]" />
-              <div className="w-2 h-2 rounded-full bg-[#FFB900] animate-bounce [animation-delay:0.15s]" />
-            </div>
-            <button
-              onClick={cancelWaiting}
-              className="w-full py-2.5 bg-[var(--bg-elevated)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/20 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:text-red-500 transition-all cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
-        )}
+      {/* ── Final CTA ──────────────────────────────────── */}
+      <section className="relative py-36 px-6 text-center overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(99,102,241,0.15),transparent_60%)] pointer-events-none" />
+        <div data-final-cta className="relative max-w-3xl mx-auto">
+          <h2 className="text-5xl sm:text-6xl font-black tracking-[-0.04em] leading-[1.0]">
+            Stop managing email.
+            <span className="block bg-gradient-to-r from-indigo-400 to-cyan-300 bg-clip-text text-transparent pb-2">
+              Start commanding it.
+            </span>
+          </h2>
+          <p className="mt-6 text-white/50 text-lg">
+            Connect Gmail or Outlook and watch your inbox organize itself in under a minute.
+          </p>
+          <Link
+            href="/login"
+            data-magnetic
+            className="group inline-block mt-10 px-10 py-5 rounded-full bg-white text-black font-bold text-base active:scale-[0.98] shadow-2xl shadow-indigo-500/20"
+          >
+            Connect your inbox
+            <span className="inline-block ml-2 transition-transform group-hover:translate-x-1.5">→</span>
+          </Link>
+          <div className="mt-5 text-xs text-white/30">Free to start · No card required · OAuth only, we never see your password</div>
+        </div>
+      </section>
 
-        {/* ── Waiting for Google sign-in (popup) ── */}
-        {googleWaiting && (
-          <div className="space-y-5 animate-fade-in text-center">
-            <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center mx-auto shadow-md border border-[var(--border)]">
-              <svg className="w-7 h-7" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-              </svg>
+      {/* ── Footer ─────────────────────────────────────── */}
+      <footer className="border-t border-white/5 px-6 py-10">
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-white/35">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-black text-[10px] text-white">
+              M
             </div>
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-1">
-                Sign-in in progress
-              </p>
-              <p className="text-sm font-bold text-[var(--text-primary)]">
-                Google Account
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-2 leading-relaxed">
-                Complete the sign-in in the popup window.
-                <br />
-                If it didn&apos;t open, check your popup blocker.
-              </p>
-            </div>
-            <div className="flex items-center justify-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-[#4285F4] animate-bounce [animation-delay:-0.3s]" />
-              <div className="w-2 h-2 rounded-full bg-[#EA4335] animate-bounce [animation-delay:-0.15s]" />
-              <div className="w-2 h-2 rounded-full bg-[#FBBC05] animate-bounce [animation-delay:0s]" />
-              <div className="w-2 h-2 rounded-full bg-[#34A853] animate-bounce [animation-delay:0.15s]" />
-            </div>
-            <button
-              onClick={cancelWaiting}
-              className="w-full py-2.5 bg-[var(--bg-elevated)] hover:bg-red-500/10 border border-[var(--border)] hover:border-red-500/20 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:text-red-500 transition-all cursor-pointer"
-            >
-              Cancel
-            </button>
+            MailMind — AI email co-pilot
           </div>
-        )}
-      </div>
+          <div className="flex items-center gap-6">
+            <a href="#features" className="hover:text-white/70 transition-colors">Features</a>
+            <a href="#pipeline" className="hover:text-white/70 transition-colors">Pipeline</a>
+            <a href="#security" className="hover:text-white/70 transition-colors">Security</a>
+            <Link href="/privacy" className="hover:text-white/70 transition-colors">Privacy</Link>
+            <Link href="/terms" className="hover:text-white/70 transition-colors">Terms</Link>
+            <Link href="/login" className="hover:text-white/70 transition-colors">Sign in</Link>
+          </div>
+          <div>© {new Date().getFullYear()} Radiants</div>
+        </div>
+      </footer>
     </div>
   );
 }
