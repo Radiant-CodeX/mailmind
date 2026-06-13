@@ -1,0 +1,76 @@
+<svg viewBox="0 0 1150 740" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .lbl{font-size:14px;font-weight:600}
+    .li{font-size:12px;fill:#334155}
+    .edge{stroke:#475569;stroke-width:2;fill:none;marker-end:url(#arrow)}
+  </style>
+
+  <text x="575" y="46" text-anchor="middle" class="title">Draft Generation — RAG + Tone DNA</text>
+  <text x="575" y="72" text-anchor="middle" class="sub">Replies grounded in your history and written in your voice</text>
+
+  <!-- request -->
+  <rect x="425" y="100" width="300" height="64" rx="11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="575" y="126" text-anchor="middle" class="lbl" fill="#1e3a8a">POST /api/rag/draft</text>
+  <text x="575" y="148" text-anchor="middle" class="li">email · style · sender · subject</text>
+  <line x1="575" y1="164" x2="575" y2="198" class="edge"/>
+
+  <!-- cache -->
+  <polygon points="575,198 715,242 575,286 435,242" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+  <text x="575" y="240" text-anchor="middle" class="lbl" fill="#854d0e">cache hit?</text>
+  <text x="575" y="258" text-anchor="middle" class="li">draft:{style}:{user}</text>
+  <line x1="715" y1="242" x2="850" y2="242" class="edge"/>
+  <text x="740" y="232" class="li" font-weight="700" fill="#16a34a">hit</text>
+  <rect x="850" y="212" width="240" height="60" rx="11" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="970" y="246" text-anchor="middle" class="lbl" fill="#166534">return cached draft</text>
+
+  <line x1="575" y1="286" x2="575" y2="320" class="edge"/>
+  <text x="585" y="308" class="li" font-weight="700" fill="#ef4444">miss</text>
+
+  <!-- inputs row -->
+  <rect x="40" y="322" width="320" height="150" rx="11" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="200" y="346" text-anchor="middle" class="lbl" fill="#115e59">PrecedentInjector</text>
+  <text x="56" y="372" class="li">load ChromaDB index</text>
+  <text x="56" y="392" class="li">original email +</text>
+  <text x="56" y="412" class="li">2 similar past emails +</text>
+  <text x="56" y="432" class="li">your real replies</text>
+  <text x="56" y="456" class="li" font-style="italic" fill="#475569">→ augmented prompt context</text>
+
+  <rect x="790" y="322" width="320" height="150" rx="11" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="950" y="346" text-anchor="middle" class="lbl" fill="#5b21b6">Tone DNA profile</text>
+  <text x="806" y="372" class="li">tone_dna/{email}.json</text>
+  <text x="806" y="392" class="li">formality_score: 0.72</text>
+  <text x="806" y="412" class="li">avg_sentence_length: 16</text>
+  <text x="806" y="432" class="li">favorite_phrases [...]</text>
+  <text x="806" y="456" class="li">tone_markers {friend, urgency}</text>
+
+  <!-- llm -->
+  <rect x="400" y="338" width="350" height="118" rx="11" fill="#dcfce7" stroke="#22c55e" stroke-width="2"/>
+  <text x="575" y="366" text-anchor="middle" class="lbl" fill="#166534">GPT-4o draft synthesis</text>
+  <text x="575" y="390" text-anchor="middle" class="li">augmented prompt + tone profile</text>
+  <text x="575" y="412" text-anchor="middle" class="li">style: standard / concise / warm</text>
+  <text x="575" y="434" text-anchor="middle" class="li">low temp · grounded, not invented</text>
+
+  <line x1="360" y1="400" x2="398" y2="400" class="edge"/>
+  <line x1="788" y1="400" x2="752" y2="400" class="edge"/>
+  <line x1="575" y1="456" x2="575" y2="492" class="edge"/>
+
+  <!-- output -->
+  <rect x="375" y="494" width="400" height="64" rx="11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="575" y="520" text-anchor="middle" class="lbl" fill="#1e3a8a">Draft returned to DraftPanel</text>
+  <text x="575" y="542" text-anchor="middle" class="li">cache write · user reviews / edits</text>
+  <line x1="575" y1="558" x2="575" y2="592" class="edge"/>
+
+  <!-- gate -->
+  <rect x="405" y="594" width="340" height="60" rx="11" fill="#fef9c3" stroke="#eab308" stroke-width="2"/>
+  <text x="575" y="620" text-anchor="middle" class="lbl" fill="#854d0e">Human approval required to send</text>
+  <text x="575" y="640" text-anchor="middle" class="li">MailMind never sends autonomously</text>
+
+  <text x="575" y="700" text-anchor="middle" class="li" font-style="italic">The personalization flywheel: every sent reply enriches Tone DNA + the RAG corpus, so the next draft is better.</text>
+</svg>

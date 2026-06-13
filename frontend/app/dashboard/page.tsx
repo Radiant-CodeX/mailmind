@@ -43,6 +43,11 @@ export default function Home() {
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [doneEmailIds, setDoneEmailIds] = useState<Set<string>>(new Set());
+
+  const markEmailDone = (id: string) => {
+    setDoneEmailIds((prev) => new Set([...prev, id]));
+  };
 
   // Load auth status on mount — retries up to 3× (500ms apart) to handle the
   // race where cookies from the OAuth popup haven't been flushed to the browser
@@ -161,6 +166,13 @@ export default function Home() {
     sendDraft,
   } = useEmailDetail(selectedEmail, showPipeline, userEmail);
 
+  // Auto-mark email as Done when a reply is successfully sent
+  useEffect(() => {
+    if (isDraftApproved && selectedEmail?.id) {
+      markEmailDone(selectedEmail.id);
+    }
+  }, [isDraftApproved, selectedEmail?.id]);
+
   const {
     commitments,
     loading: commitmentsLoading,
@@ -217,7 +229,7 @@ export default function Home() {
       setAuthenticated(false);
       setUserEmail(null);
       setUserProfile(null);
-      router.replace('/');
+      router.replace('/login');
     }
   };
 
@@ -289,6 +301,8 @@ export default function Home() {
                   onArchiveEmail={archiveEmail}
                   onReportSpam={reportSpam}
                   onToggleRead={markRead}
+                  onMarkDone={markEmailDone}
+                  doneEmailIds={doneEmailIds}
                   isStreaming={isStreaming}
                   triageProgress={triageProgress}
                 />

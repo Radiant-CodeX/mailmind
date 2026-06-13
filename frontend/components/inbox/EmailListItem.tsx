@@ -12,12 +12,14 @@ interface EmailListItemProps {
   onArchive?: (id: string) => void;
   onSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
+  onMarkDone?: (id: string) => void;
   isFullWidth: boolean;
   /** Whether triage scoring applies to this folder (false for Sent/Drafts/etc). */
   triageApplies?: boolean;
+  isDone?: boolean;
 }
 
-export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, isFullWidth, triageApplies = true }: EmailListItemProps) {
+export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTrash, onRestore, onArchive, onSpam, onToggleRead, onMarkDone, isFullWidth, triageApplies = true, isDone = false }: EmailListItemProps) {
   const isUnread = email.isRead === false;
   // Triage score is still being computed when the folder uses triage but this
   // email has no triage object yet — show a shimmer instead of a misleading 0.
@@ -72,6 +74,19 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
           d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+      </svg>
+    </button>
+  ) : null;
+
+  const DoneButton = onMarkDone && !isDone ? (
+    <button
+      onClick={(e) => { e.stopPropagation(); onMarkDone(email.id); }}
+      className="p-1 rounded-md text-base-content/60 hover:bg-emerald-500/10 hover:text-emerald-500 transition-all cursor-pointer"
+      title="Mark as Done"
+      id={`btn-done-${email.id}`}
+    >
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     </button>
   ) : null;
@@ -176,7 +191,9 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
 
           {/* 3. Rightmost column: Score, Priority, Star */}
           <div className="flex items-center gap-4 shrink-0">
-            {scorePending ? (
+            {isDone ? (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded font-mono bg-emerald-500/10 text-emerald-500 border border-emerald-500/20" title="Done">✓ Done</span>
+            ) : scorePending ? (
               <span className="w-7 h-4 rounded bg-base-200 animate-pulse" title="Scoring…" />
             ) : triageApplies && email.composite_score !== undefined && (
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
@@ -189,11 +206,11 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
               </span>
             )}
 
-            {scorePending ? (
+            {!isDone && (scorePending ? (
               <span className="px-2 py-0.5 w-12 h-5 rounded bg-base-200 animate-pulse" title="Scoring…" />
             ) : triageApplies && (
               <PriorityBadge priority={priority} />
-            )}
+            ))}
 
             <button
               onClick={(e) => {
@@ -223,6 +240,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
             </button>
 
             {ReadButton}
+            {DoneButton}
             {ArchiveButton}
             {SpamButton}
             {TrashButton}
@@ -251,7 +269,9 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
           {email.sender.split('@')[0]}
         </span>
         <div className="flex items-center gap-1.5 shrink-0">
-          {scorePending ? (
+          {isDone ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded font-mono bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">✓</span>
+          ) : scorePending ? (
             <span className="w-7 h-4 rounded bg-base-200 animate-pulse" title="Scoring…" />
           ) : triageApplies && email.composite_score !== undefined && (
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
@@ -274,7 +294,9 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
       </h4>
 
       <div className="flex items-center justify-between gap-2">
-        {scorePending ? (
+        {isDone ? (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded font-mono bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">✓ Done</span>
+        ) : scorePending ? (
           <span className="px-2 py-0.5 w-12 h-5 rounded bg-base-200 animate-pulse" title="Scoring…" />
         ) : triageApplies ? (
           <PriorityBadge priority={priority} />
@@ -305,6 +327,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
             />
           </svg>
         </button>
+        {DoneButton}
         {TrashButton}
         {RestoreButton}
       </div>

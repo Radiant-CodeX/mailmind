@@ -1,0 +1,64 @@
+<svg viewBox="0 0 1150 560" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .lbl{font-size:15px;font-weight:700}
+    .li{font-size:12px;fill:#334155}
+    .edge{stroke:#475569;stroke-width:2.5;fill:none;marker-end:url(#arrow)}
+    .step{font-size:12px;font-weight:700;fill:#94a3b8}
+  </style>
+
+  <text x="575" y="46" text-anchor="middle" class="title">User Onboarding Flow</text>
+  <text x="575" y="72" text-anchor="middle" class="sub">First login per user · gated by localStorage key  mailmind_onboarded_{email}</text>
+
+  <!-- trigger -->
+  <rect x="400" y="100" width="350" height="56" rx="11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="575" y="124" text-anchor="middle" class="lbl" fill="#1e3a8a">Auth success → first-time check</text>
+  <text x="575" y="144" text-anchor="middle" class="li">no key present → setShowOnboarding(true)</text>
+  <line x1="575" y1="156" x2="575" y2="190" class="edge"/>
+
+  <!-- 4 phases -->
+  <text x="120" y="218" class="step">PHASE 1</text>
+  <rect x="40" y="224" width="250" height="150" rx="12" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="165" y="252" text-anchor="middle" class="lbl" fill="#5b21b6">Welcome</text>
+  <text x="56" y="280" class="li">brand intro</text>
+  <text x="56" y="302" class="li">value proposition</text>
+  <text x="56" y="324" class="li">"explainable · in your</text>
+  <text x="56" y="342" class="li">voice · you stay in control"</text>
+
+  <text x="380" y="218" class="step">PHASE 2</text>
+  <rect x="300" y="224" width="250" height="150" rx="12" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="425" y="252" text-anchor="middle" class="lbl" fill="#5b21b6">About You</text>
+  <text x="316" y="280" class="li">6 role options</text>
+  <text x="316" y="302" class="li">5 multi-select goals</text>
+  <text x="316" y="324" class="li">personalizes the</text>
+  <text x="316" y="342" class="li">experience</text>
+
+  <text x="640" y="218" class="step">PHASE 3</text>
+  <rect x="560" y="224" width="250" height="150" rx="12" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="685" y="252" text-anchor="middle" class="lbl" fill="#166534">Spotlight Tour</text>
+  <text x="576" y="280" class="li">4 steps — sidebar,</text>
+  <text x="576" y="302" class="li">compose, email list,</text>
+  <text x="576" y="324" class="li">centered finish</text>
+  <text x="576" y="342" class="li">getBoundingClientRect()</text>
+
+  <text x="900" y="218" class="step">PHASE 4</text>
+  <rect x="820" y="224" width="250" height="150" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="945" y="252" text-anchor="middle" class="lbl" fill="#1e3a8a">Complete</text>
+  <text x="836" y="280" class="li">save { role, goals, ts }</text>
+  <text x="836" y="302" class="li">to localStorage key</text>
+  <text x="836" y="324" class="li">→ tour never repeats</text>
+  <text x="836" y="342" class="li">for this user</text>
+
+  <line x1="290" y1="299" x2="298" y2="299" class="edge"/>
+  <line x1="550" y1="299" x2="558" y2="299" class="edge"/>
+  <line x1="810" y1="299" x2="818" y2="299" class="edge"/>
+
+  <text x="575" y="440" text-anchor="middle" class="li" font-style="italic">Spotlight uses a fixed overlay with box-shadow: 0 0 0 9999px rgba(0,0,0,.8) — measured live against real DOM elements.</text>
+  <text x="575" y="466" text-anchor="middle" class="li" font-style="italic">Keyed per email, so multi-account users get onboarded once per identity — the "last 10%" polish that signals production, not prototype.</text>
+</svg>

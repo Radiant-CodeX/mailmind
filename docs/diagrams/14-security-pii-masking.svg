@@ -1,0 +1,108 @@
+<svg viewBox="0 0 1150 760" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .lbl{font-size:14px;font-weight:600}
+    .li{font-size:12px;fill:#334155}
+    .edge{stroke:#475569;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    .h{font-size:13px;font-weight:700;letter-spacing:1px}
+  </style>
+
+  <text x="575" y="46" text-anchor="middle" class="title">Security &amp; PII Masking — Defense in Depth</text>
+  <text x="575" y="72" text-anchor="middle" class="sub">Privacy enforced before the API call · encryption at rest · isolation by identity</text>
+
+  <!-- PII data flow -->
+  <rect x="40" y="100" width="1070" height="220" rx="14" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
+  <text x="60" y="124" class="h" fill="#991b1b">PII PROTECTION PIPELINE</text>
+
+  <rect x="70" y="142" width="220" height="150" rx="11" fill="#ffffff" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="180" y="168" text-anchor="middle" class="lbl" fill="#991b1b">Raw email</text>
+  <text x="86" y="194" class="li">john@acme.com</text>
+  <text x="86" y="214" class="li">SSN 123-45-6789</text>
+  <text x="86" y="234" class="li">card 4111 1111 ...</text>
+  <text x="86" y="266" class="li" font-style="italic" fill="#475569">never leaves the</text>
+  <text x="86" y="284" class="li" font-style="italic" fill="#475569">server unmasked</text>
+
+  <line x1="290" y1="217" x2="350" y2="217" class="edge"/>
+
+  <rect x="350" y="142" width="240" height="150" rx="11" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="470" y="168" text-anchor="middle" class="lbl" fill="#991b1b">PII Masker</text>
+  <text x="366" y="194" class="li">spaCy NER + regex</text>
+  <text x="366" y="216" class="li">emails / SSN / cards</text>
+  <text x="366" y="238" class="li">→ [PII_EMAIL]</text>
+  <text x="366" y="258" class="li">→ [PII_SSN]</text>
+  <text x="366" y="278" class="li">→ [PII_CARD]</text>
+
+  <line x1="590" y1="217" x2="650" y2="217" class="edge"/>
+
+  <rect x="650" y="142" width="200" height="150" rx="11" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="750" y="168" text-anchor="middle" class="lbl" fill="#166534">Masked text</text>
+  <text x="666" y="196" class="li">[PII_EMAIL]</text>
+  <text x="666" y="216" class="li">[PII_SSN]</text>
+  <text x="666" y="236" class="li">[PII_CARD]</text>
+  <text x="666" y="268" class="li" font-style="italic" fill="#475569">safe to send /</text>
+  <text x="666" y="286" class="li" font-style="italic" fill="#475569">index</text>
+
+  <line x1="850" y1="217" x2="910" y2="217" class="edge"/>
+
+  <rect x="910" y="142" width="180" height="150" rx="11" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="1000" y="168" text-anchor="middle" class="lbl" fill="#5b21b6">LLM / Index</text>
+  <text x="926" y="196" class="li">GPT-4o</text>
+  <text x="926" y="216" class="li">ChromaDB</text>
+  <text x="926" y="252" class="li" font-style="italic" fill="#475569">3rd parties never</text>
+  <text x="926" y="270" class="li" font-style="italic" fill="#475569">see real PII</text>
+
+  <!-- four security pillars -->
+  <rect x="40" y="344" width="255" height="200" rx="12" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="167" y="370" text-anchor="middle" class="h" fill="#6d28d9">IDENTITY</text>
+  <text x="56" y="398" class="li">user-centric UUIDs</text>
+  <text x="56" y="420" class="li">DB primary keys never</text>
+  <text x="56" y="438" class="li">exposed to frontend</text>
+  <text x="56" y="460" class="li">multi-account per user</text>
+  <text x="56" y="482" class="li">per-account RAG + Tone</text>
+  <text x="56" y="500" class="li">DNA isolation</text>
+  <text x="56" y="528" class="li" font-style="italic" fill="#475569">no cross-account bleed</text>
+
+  <rect x="310" y="344" width="255" height="200" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="437" y="370" text-anchor="middle" class="h" fill="#991b1b">AUTH</text>
+  <text x="326" y="398" class="li">HttpOnly · Secure ·</text>
+  <text x="326" y="416" class="li">SameSite cookies</text>
+  <text x="326" y="438" class="li">session tokens stored as</text>
+  <text x="326" y="456" class="li">SHA-256 hashes only</text>
+  <text x="326" y="478" class="li">tokens never in body/logs</text>
+  <text x="326" y="500" class="li">auth on every endpoint</text>
+  <text x="326" y="528" class="li" font-style="italic" fill="#475569">audited — 13+ closed</text>
+
+  <rect x="580" y="344" width="255" height="200" rx="12" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="707" y="370" text-anchor="middle" class="h" fill="#0f766e">DATA AT REST</text>
+  <text x="596" y="398" class="li">OAuth tokens encrypted</text>
+  <text x="596" y="416" class="li">with Fernet</text>
+  <text x="596" y="438" class="li">audit logging</text>
+  <text x="596" y="460" class="li">retention purge endpoint</text>
+  <text x="596" y="482" class="li">rate limiting +</text>
+  <text x="596" y="500" class="li">security-headers MW</text>
+  <text x="596" y="528" class="li" font-style="italic" fill="#475569">compliance-ready</text>
+
+  <rect x="850" y="344" width="255" height="200" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="977" y="370" text-anchor="middle" class="h" fill="#1d4ed8">GOVERNANCE</text>
+  <text x="866" y="398" class="li">in-app Privacy Policy</text>
+  <text x="866" y="420" class="li">in-app Terms of Service</text>
+  <text x="866" y="442" class="li">prepared for Google</text>
+  <text x="866" y="460" class="li">OAuth verification</text>
+  <text x="866" y="482" class="li">human-in-the-loop gate</text>
+  <text x="866" y="500" class="li">on every send</text>
+  <text x="866" y="528" class="li" font-style="italic" fill="#475569">trust by design</text>
+
+  <!-- footer -->
+  <rect x="40" y="576" width="1065" height="150" rx="12" fill="#0f172a"/>
+  <text x="60" y="606" class="h" fill="#ffffff">SECURITY AUDIT — WHAT WE FOUND &amp; FIXED MID-BUILD</text>
+  <text x="60" y="636" class="li" fill="#cbd5e1">• 13+ unauthenticated data endpoints → added get_current_user dependency to every one</text>
+  <text x="60" y="660" class="li" fill="#cbd5e1">• session_token leaked in login-poll response body → removed; tokens now travel only via HttpOnly cookies</text>
+  <text x="60" y="684" class="li" fill="#cbd5e1">• debug prints logging raw cookie tokens to stdout → removed; Set-Cookie header logging redacted</text>
+  <text x="60" y="708" class="li" fill="#cbd5e1">• feedback identity spoofable via client payload → identity now sourced only from the authenticated session</text>
+</svg>

@@ -34,6 +34,8 @@ interface EmailListProps {
   onArchiveEmail?: (id: string) => void;
   onReportSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
+  onMarkDone?: (id: string) => void;
+  doneEmailIds?: Set<string>;
   // Streaming triage progress
   isStreaming?: boolean;
   triageProgress?: number;
@@ -66,6 +68,8 @@ export function EmailList({
   onArchiveEmail,
   onReportSpam,
   onToggleRead,
+  onMarkDone,
+  doneEmailIds,
   isStreaming = false,
   triageProgress = 0,
 }: EmailListProps) {
@@ -196,6 +200,8 @@ export function EmailList({
               onArchive={showActions ? onArchiveEmail : undefined}
               onSpam={showActions ? onReportSpam : undefined}
               onToggleRead={showActions ? onToggleRead : undefined}
+              onMarkDone={showActions ? onMarkDone : undefined}
+              isDone={doneEmailIds?.has(email.id)}
               isFullWidth={isFullWidth}
               triageApplies={['Inbox', 'Starred', 'Important'].includes(activeFolder)}
             />

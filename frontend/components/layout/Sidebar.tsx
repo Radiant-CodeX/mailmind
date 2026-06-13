@@ -154,7 +154,7 @@ export function Sidebar({
     // Fire API in background — redirect immediately so UI doesn't hang
     logoutSession().catch(() => {});
     // signedOut=session tells the login page to skip auto-redirect and show Quick Login card
-    window.location.href = "/?signedOut=session";
+    window.location.href = "/login?signedOut=session";
   };
 
   const handleSignOutEverywhere = () => {
@@ -162,7 +162,7 @@ export function Sidebar({
     // Fire API in background — redirect immediately
     logoutUser().catch(() => {});
     // signedOut=full tells the login page to clear remembered login
-    window.location.href = "/?signedOut=full";
+    window.location.href = "/login?signedOut=full";
   };
 
   // Use profile picture from OAuth provider if available
