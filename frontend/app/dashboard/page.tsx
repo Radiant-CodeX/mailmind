@@ -172,7 +172,6 @@ export default function Home() {
     triageProgress,
     triageActive,
     triageTotal,
-    patchEmailTriage,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const scoreFor = (p: Priority): number =>
@@ -218,9 +217,7 @@ export default function Home() {
     setActiveStyle,
     isSendingDraft,
     sendDraft,
-    retriage,
-    isRetriaging,
-  } = useEmailDetail(selectedEmail, showPipeline, userEmail, patchEmailTriage);
+  } = useEmailDetail(selectedEmail, showPipeline, userEmail);
 
   // Auto-mark email as Done when a reply is successfully sent
   useEffect(() => {
@@ -377,8 +374,6 @@ export default function Home() {
                     error={detailError}
                     classification={classification}
                     triageResult={triageResult}
-                    onRetriage={retriage}
-                    isRetriaging={isRetriaging}
                     precedents={precedents}
                     aiDraft={aiDraft}
                     setAiDraft={setAiDraft}
