@@ -14,20 +14,19 @@ describe('session (quick login)', () => {
   });
 
   it('remembers and reads back a login', () => {
-    rememberLogin('live', 'jane.doe@corp.com');
+    rememberLogin('jane.doe@corp.com', 'microsoft');
     const r = getRememberedLogin();
-    expect(r?.mode).toBe('live');
+    expect(r?.provider).toBe('microsoft');
     expect(r?.email).toBe('jane.doe@corp.com');
-    expect(typeof r?.ts).toBe('number');
   });
 
   it('falls back to a placeholder email when none provided', () => {
-    rememberLogin('mock', null);
+    rememberLogin(null, 'google');
     expect(getRememberedLogin()?.email).toBe('Signed-in user');
   });
 
   it('clears the remembered login', () => {
-    rememberLogin('mock', 'm@x.com');
+    rememberLogin('m@x.com', 'google');
     clearRememberedLogin();
     expect(getRememberedLogin()).toBeNull();
   });

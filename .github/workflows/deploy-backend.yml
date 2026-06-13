@@ -1,0 +1,75 @@
+name: Deploy Backend to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Login to Azure Container Registry
+        run: |
+          echo "${{ secrets.AZURE_REGISTRY_PASSWORD }}" | docker login -u "${{ secrets.AZURE_REGISTRY_USERNAME }}" --password-stdin "${{ secrets.AZURE_REGISTRY_SERVER }}"
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.AZURE_REGISTRY_SERVER }}/backend:latest ./backend
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ secrets.AZURE_REGISTRY_SERVER }}/backend:latest
+
+      - name: Login to Azure
+        run: |
+          az login --service-principal \
+            -u ${{ secrets.AZURE_DEPLOY_CLIENT_ID }} \
+            -p ${{ secrets.AZURE_DEPLOY_CLIENT_SECRET }} \
+            --tenant ${{ secrets.AZURE_DEPLOY_TENANT_ID }}
+          az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Delete old container (if exists)
+        run: |
+          az container delete --resource-group mailmind-rg --name mailmind-backend --yes || true
+
+      - name: Deploy to Container Instances
+        run: |
+          az container create \
+            --resource-group mailmind-rg \
+            --name mailmind-backend \
+            --image ${{ secrets.AZURE_REGISTRY_SERVER }}/backend:latest \
+            --registry-login-server ${{ secrets.AZURE_REGISTRY_SERVER }} \
+            --registry-username ${{ secrets.AZURE_REGISTRY_USERNAME }} \
+            --registry-password ${{ secrets.AZURE_REGISTRY_PASSWORD }} \
+            --os-type Linux \
+            --cpu 1 \
+            --memory 1.5 \
+            --ports 8000 \
+            --protocol TCP \
+            --dns-name-label mailmind-backend \
+            --environment-variables \
+              DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+              QUEUE_BACKEND="memory" \
+              APP_ENV="production" \
+              AZURE_TENANT_ID="${{ secrets.AZURE_DEPLOY_TENANT_ID }}" \
+              AZURE_CLIENT_ID="${{ secrets.AZURE_DEPLOY_CLIENT_ID }}" \
+              AZURE_CLIENT_SECRET="${{ secrets.AZURE_DEPLOY_CLIENT_SECRET }}" \
+              AZURE_OPENAI_ENDPOINT="${{ secrets.AZURE_OPENAI_ENDPOINT }}" \
+              AZURE_OPENAI_API_KEY="${{ secrets.AZURE_OPENAI_API_KEY }}" \
+              GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
+              GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
+              GOOGLE_REDIRECT_URI="${{ secrets.GOOGLE_REDIRECT_URI }}" \
+              FRONTEND_ORIGIN="${{ secrets.FRONTEND_ORIGIN }}" \
+              APPROVAL_TOKEN="${{ secrets.APPROVAL_TOKEN }}"
+
+      - name: Get container URL
+        run: |
+          echo "Container is deploying. Check status with:"
+          echo "az container show --resource-group mailmind-rg --name mailmind-backend --query ipAddress.fqdn"

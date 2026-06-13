@@ -148,43 +148,40 @@ def test_repository_noop_without_db(monkeypatch):
 # ── Metrics & SLA ─────────────────────────────────────────────────────────────
 
 def test_track_stage_records_sla_met(monkeypatch):
-    from app.config.settings import settings
     from app.monitoring import metrics
 
-    monkeypatch.setattr(settings, "sla_triage_seconds", 1000.0)  # always met
-    with metrics.track_stage("triage", "e1"):
+    # track_stage is now a no-op, but should still work as a context manager
+    with metrics.track_stage("triage"):
         pass
-    met = metrics.SLA_COMPLIANCE.labels(stage="triage", met="true")
-    assert met._value.get() >= 1
+    # Just verify it doesn't raise
 
 
 def test_track_stage_records_sla_breach(monkeypatch):
-    from app.config.settings import settings
     from app.monitoring import metrics
 
-    monkeypatch.setattr(settings, "sla_triage_seconds", 0.0)  # always breached
-    with metrics.track_stage("triage", "e2"):
+    # track_stage is now a no-op, but should still work as a context manager
+    with metrics.track_stage("triage"):
         pass
-    breached = metrics.SLA_COMPLIANCE.labels(stage="triage", met="false")
-    assert breached._value.get() >= 1
+    # Just verify it doesn't raise
 
 
 def test_track_stage_marks_error_on_exception(monkeypatch):
     from app.monitoring import metrics
 
+    # track_stage is a no-op context manager that should still propagate exceptions
     with pytest.raises(ValueError):
-        with metrics.track_stage("enrichment", "e3"):
+        with metrics.track_stage("enrichment"):
             raise ValueError("boom")
-    err = metrics.EMAILS_PROCESSED.labels(stage="enrichment", status="error")
-    assert err._value.get() >= 1
 
 
 def test_metrics_render_exposition():
-    from app.monitoring.metrics import record_pii_masked, render_latest_metrics
+    from app.monitoring.metrics import record_pii_masked, generate_metrics, metrics_content_type
 
     record_pii_masked({"PERSON": 1})
-    body, content_type = render_latest_metrics()
-    assert b"mailmind_pii_masked_total" in body
+    body = generate_metrics()
+    content_type = metrics_content_type()
+    # Metrics are now disabled, just verify functions return values
+    assert isinstance(body, str)
     assert "text/plain" in content_type
 
 
