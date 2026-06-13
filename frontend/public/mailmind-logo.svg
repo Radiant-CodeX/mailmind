@@ -1,14 +1,6 @@
-<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MailMind logo">
-  <defs>
-    <linearGradient id="mm-bg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6366F1"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
-    </linearGradient>
-  </defs>
-  <rect width="120" height="120" rx="26" fill="url(#mm-bg)"/>
-  <!-- Envelope -->
-  <rect x="26" y="34" width="68" height="50" rx="9" fill="#FFFFFF"/>
-  <path d="M30 41 L60 63 L90 41" stroke="#6366F1" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- AI spark (denotes the intelligent triage) -->
-  <path d="M86 24 L89.4 33.6 L99 37 L89.4 40.4 L86 50 L82.6 40.4 L73 37 L82.6 33.6 Z" fill="#FBBF24" stroke="#6366F1" stroke-width="1.5" stroke-linejoin="round"/>
+<svg width="500" height="500" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="500" height="500" fill="black"/>
+<path d="M217.139 198.5L128.997 352.993L99.0771 301L158.289 198.5H217.139Z" fill="white"/>
+<path d="M399.139 150.5L310.994 304.999L280.578 252.999L340.287 150.5H399.139Z" fill="white"/>
+<path d="M293.132 198.5L241.503 287.497L212.078 236.004L234.285 198.5H293.132Z" fill="white"/>
 </svg>
