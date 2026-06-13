@@ -15,6 +15,7 @@ import {
   generateEmailDraft,
   sendEmailReply,
   fetchAttachments,
+  triageEmail,
 } from "../lib/api";
 import { userStorage } from "../lib/userStorage";
 
@@ -145,6 +146,41 @@ export function useEmailDetail(
         setLoading(false);
       } else {
         setLoading(true); // only show spinner if we truly have nothing yet
+      }
+
+      // ── PHASE 1b: Backfill the per-axis breakdown ───────────────────────────
+      // The inbox stream caches composite-only triage (no axes) for speed, so the
+      // detail panel would otherwise show "breakdown not available". Fetch the
+      // full 5-axis scoring from /api/agent/triage (recomputes + caches on the
+      // server when axes are missing) and upgrade the display in place.
+      if (!triage || !triage.axes || triage.axes.length === 0) {
+        triageEmail({
+          email_id: currEmail.id,
+          sender: currEmail.sender,
+          subject: currEmail.subject,
+          body: currEmail.body,
+          received_at: currEmail.received_at,
+        })
+          .then((full) => {
+            if (cancelled || !full) return;
+            const f = full as Record<string, unknown>;
+            const axes = (f.axes as TriageResult["axes"]) || [];
+            if (axes.length === 0) return; // nothing better to show
+            const upgraded: TriageResult = {
+              axes,
+              composite_score: (f.composite_score as number) ?? triage?.composite_score ?? 0,
+              priority: (f.priority as TriageResult["priority"]) ?? triage?.priority,
+              approval_mode: (f.approval_mode as TriageResult["approval_mode"]) ?? triage?.approval_mode,
+              email_type: (f.email_type as string | undefined) ?? triage?.email_type,
+              triage_reasoning: (f.triage_reasoning as string | undefined) ?? triage?.triage_reasoning,
+              dynamic_weights: (f.dynamic_weights as TriageResult["dynamic_weights"]) ?? triage?.dynamic_weights,
+            };
+            setTriageResult(upgraded);
+            setClassification(toClassification(upgraded));
+          })
+          .catch((err) => {
+            console.warn("[triage] axis backfill failed:", err);
+          });
       }
 
       // ── Fetch attachment metadata (lazy — only when email has attachments) ────

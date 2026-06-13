@@ -723,7 +723,16 @@ export async function composeDraftWithAI(payload: {
       subject: payload.subject || null,
     }),
   });
-  if (!res.ok) throw new Error("Failed to generate AI draft");
+  if (!res.ok) {
+    let detail = `Failed to generate AI draft (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail);
+  }
   return res.json();
 }
 

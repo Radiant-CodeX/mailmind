@@ -492,6 +492,28 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
     Frontend receives: {"email_id": "...", "priority": "HIGH", "composite_score": 62, "cached": true}
     """
     import concurrent.futures
+    import time as _time
+
+    from app.monitoring.live_metrics import live_metrics
+
+    def _timed_triage(req: TriageOnlyRequest, user_key: str) -> dict[str, Any]:
+        """Run triage for one miss and record stage latency + LLM metrics.
+
+        Only genuine LLM runs (not the inner Redis/DB cache hits) count toward
+        the LLM success rate; every run still records triage-stage latency so the
+        metrics dashboard reflects the live inbox path, not just the batch route.
+        """
+        _start = _time.perf_counter()
+        try:
+            r = _run_triage_for_email(req, user_key)
+            if not r.get("_cached"):
+                live_metrics.record_llm(success=True)
+            return r
+        except Exception:
+            live_metrics.record_llm(success=False)
+            raise
+        finally:
+            live_metrics.record_latency("triage", (_time.perf_counter() - _start) * 1000)
 
     async def event_generator():
         if not requests:
@@ -575,7 +597,7 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
         # ── Run LLM for misses in parallel, emit as they complete ──────────
         if misses:
             with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-                futures = {executor.submit(_run_triage_for_email, req, user_key): idx for idx, req in misses}
+                futures = {executor.submit(_timed_triage, req, user_key): idx for idx, req in misses}
                 for future in concurrent.futures.as_completed(futures):
                     idx = futures[future]
                     req = requests[idx]
