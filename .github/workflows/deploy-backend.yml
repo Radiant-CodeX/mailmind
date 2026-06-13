@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'backend/**'
-      - '.github/workflows/deploy-backend.yml'
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
 
 jobs:
   build-and-deploy:
@@ -51,7 +51,7 @@ jobs:
             --os-type Linux \
             --cpu 1 \
             --memory 1.5 \
-            --ports 8000 \
+            --ports 80 \
             --protocol TCP \
             --dns-name-label mailmind-backend \
             --environment-variables \
