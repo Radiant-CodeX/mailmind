@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.agent_routes import router as agent_router
 from app.api.compliance_routes import router as compliance_router
@@ -122,11 +121,6 @@ app.add_middleware(
     # Explicit header list — the CORS spec forbids "*" when credentials are allowed.
     allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token", "X-MailMind-Session"],
 )
-
-# Trust X-Forwarded-Proto (and other proxy headers) from Cloudflare.
-# Cloudflare Flexible SSL terminates HTTPS and proxies to us over HTTP, so we must
-# trust X-Forwarded-Proto: https to correctly detect the original scheme.
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
 
 logger = logging.getLogger(__name__)
 
