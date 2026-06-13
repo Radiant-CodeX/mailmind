@@ -407,6 +407,18 @@ class GmailClient:
             self._injected_access_token = refreshed
         return refreshed
 
+    # ── identity ──────────────────────────────────────────────────────────────
+
+    def _own_email(self) -> str | None:
+        """Return the authenticated user's email address (best-effort)."""
+        if self._injected_access_token:
+            try:
+                profile = self._request("GET", "/profile") or {}
+                return profile.get("emailAddress")
+            except Exception:
+                pass
+        return _token_cache.get("email") or _load_tokens().get("email")
+
     def get_user_profile(self) -> dict[str, str | None]:
         """Return the signed-in Google profile for display in the app shell."""
         if self.use_mock:
@@ -614,6 +626,164 @@ class GmailClient:
             "next_page_token": data.get("nextPageToken"),
             "total": int(data.get("resultSizeEstimate", len(emails))),
         }
+
+    # ── Delta sync (users.history.list) ───────────────────────────────────────
+
+    def list_inbox_delta(self, history_id: str | None = None, folder: str = "inbox") -> dict[str, Any]:
+        """
+        True Gmail delta sync via users.history.list.
+
+        history_id=None  → first-time backfill: snapshot + capture current historyId.
+        history_id=str   → incremental: replay changes since that historyId.
+
+        Returns { upserts, removed, delta_cursor (new historyId), truncated }.
+        delta_cursor is stored in mailbox_sync_state.delta_cursor by SyncService.
+        """
+        if self.use_mock:
+            page = self.list_emails(folder=folder, limit=50)
+            return {"upserts": page.get("emails", []), "removed": [],
+                    "delta_cursor": "mock-history-1", "truncated": False}
+
+        label = self._LABELS.get(folder, "INBOX")
+        if not history_id:
+            return self._gmail_snapshot_with_cursor(label)
+        return self._gmail_history_delta(history_id, label)
+
+    def _gmail_snapshot_with_cursor(self, label: str) -> dict[str, Any]:
+        """Full snapshot + capture the current historyId for future delta calls."""
+        try:
+            current_history_id = (self._request("GET", "/profile") or {}).get("historyId")
+        except Exception:
+            current_history_id = None
+
+        all_emails: list[dict] = []
+        page_token: str | None = None
+        pages = 0
+        truncated = False
+
+        while pages < 10:  # max 500 messages on backfill
+            params = ["maxResults=50", f"labelIds={label}"]
+            if page_token:
+                params.append(f"pageToken={page_token}")
+            data = self._request("GET", f"/messages?{'&'.join(params)}") or {}
+            ids = [m["id"] for m in data.get("messages", [])]
+            if ids:
+                all_emails.extend(self._fetch_many(ids))
+            page_token = data.get("nextPageToken")
+            pages += 1
+            if not page_token:
+                break
+        else:
+            truncated = True
+
+        return {
+            "upserts": all_emails,
+            "removed": [],
+            "delta_cursor": current_history_id,
+            "truncated": truncated,
+        }
+
+    def _gmail_history_delta(self, history_id: str, label: str) -> dict[str, Any]:
+        """Replay Gmail history since history_id; returns upserts + removed ids."""
+        upsert_ids: set[str] = set()
+        removed_ids: set[str] = set()
+        new_history_id = history_id
+        page_token: str | None = None
+        pages = 0
+
+        while pages < 20:
+            params = [
+                f"startHistoryId={history_id}",
+                "historyTypes=messageAdded",
+                "historyTypes=messageDeleted",
+                "historyTypes=labelAdded",
+                "historyTypes=labelRemoved",
+                f"labelId={label}",
+                "maxResults=500",
+            ]
+            if page_token:
+                params.append(f"pageToken={page_token}")
+
+            try:
+                data = self._request("GET", f"/history?{'&'.join(params)}") or {}
+            except Exception as exc:
+                # historyId is too old (Gmail purges after ~30 days) → full re-snapshot
+                logger.warning("[gmail] historyId %s too old (%s) — falling back to snapshot", history_id, exc)
+                return self._gmail_snapshot_with_cursor(label)
+
+            new_history_id = data.get("historyId", new_history_id)
+
+            for record in data.get("history", []):
+                for item in record.get("messagesAdded", []):
+                    mid = (item.get("message") or {}).get("id")
+                    if mid:
+                        upsert_ids.add(mid)
+                        removed_ids.discard(mid)
+
+                for item in record.get("messagesDeleted", []):
+                    mid = (item.get("message") or {}).get("id")
+                    if mid:
+                        removed_ids.add(mid)
+                        upsert_ids.discard(mid)
+
+                # INBOX label added → message moved back into inbox
+                for item in record.get("labelsAdded", []):
+                    if label in (item.get("labelIds") or []):
+                        mid = (item.get("message") or {}).get("id")
+                        if mid:
+                            upsert_ids.add(mid)
+                            removed_ids.discard(mid)
+
+                # INBOX label removed → archived or trashed
+                for item in record.get("labelsRemoved", []):
+                    if label in (item.get("labelIds") or []):
+                        mid = (item.get("message") or {}).get("id")
+                        if mid:
+                            removed_ids.add(mid)
+                            upsert_ids.discard(mid)
+
+            page_token = data.get("nextPageToken")
+            pages += 1
+            if not page_token:
+                break
+
+        upserts = self._fetch_many(list(upsert_ids)) if upsert_ids else []
+        return {
+            "upserts": upserts,
+            "removed": list(removed_ids),
+            "delta_cursor": new_history_id,
+            "truncated": pages >= 20,
+        }
+
+    # ── Push notifications (Cloud Pub/Sub watch) ──────────────────────────────
+
+    def watch_inbox(self, topic_name: str) -> dict[str, Any]:
+        """
+        Register a Gmail push watch on the INBOX label.
+
+        Gmail publishes a notification to ``topic_name`` (a Cloud Pub/Sub topic)
+        whenever the mailbox changes. Returns {historyId, expiration} where
+        expiration is epoch-millis (~7 days out). Must be re-called before it
+        lapses — Gmail enforces a 7-day max and stops silently after that.
+        """
+        if self.use_mock:
+            return {"historyId": "mock-history-1",
+                    "expiration": str(int((time.time() + 7 * 86400) * 1000))}
+        body = {
+            "topicName": topic_name,
+            "labelIds": ["INBOX"],
+            "labelFilterBehavior": "INCLUDE",
+        }
+        return self._request("POST", "/watch", json=body) or {}
+
+    def stop_watch(self) -> None:
+        """Stop all Gmail push notifications for this account (best-effort)."""
+        if self.use_mock:
+            return
+        try:
+            self._request("POST", "/stop")
+        except Exception as e:
+            logger.debug("[gmail] stop watch failed: %s", e)
 
     def _fetch_many(self, ids: list[str]) -> list[dict[str, Any]]:
         """Fetch + format many messages concurrently (Gmail has no batch GET, so

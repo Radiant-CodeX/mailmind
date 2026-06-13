@@ -407,3 +407,92 @@ class ProcessingMetric(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INBOX SYNC LAYER (server-side mailbox mirror)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class MailboxMessage(Base):
+    """
+    Server-side mirror of one email's envelope + flags for a connected account.
+
+    This is the source of truth the dashboard reads from, kept in sync with the
+    provider via delta queries + webhooks. Body is NOT stored here (fetched
+    lazily on open); triage/enrichment lives in ``email_enrichment`` and is
+    joined on ``email_id``.
+    """
+
+    __tablename__ = "mailbox_message"
+
+    # Native provider message id (matches email_enrichment.email_id in practice).
+    email_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oauth_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    thread_id: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    folder: Mapped[str] = mapped_column(String(32), nullable=False, default="inbox")
+
+    sender: Mapped[str] = mapped_column(String(320), nullable=False)
+    sender_name: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_starred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    has_attachments: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # active | deleted (tombstone for delta @removed so we never re-import)
+    state: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        Index("ix_msg_account_folder_recv", "account_id", "folder", "received_at"),
+        Index("ix_msg_account_state", "account_id", "state"),
+    )
+
+
+class MailboxSyncState(Base):
+    """Per-account, per-folder delta cursor + exact message count."""
+
+    __tablename__ = "mailbox_sync_state"
+
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oauth_accounts.id", ondelete="CASCADE"), primary_key=True
+    )
+    folder: Mapped[str] = mapped_column(String(32), primary_key=True, default="inbox")
+
+    # Graph @odata.deltaLink (Gmail: last historyId). Absolute URL for Graph.
+    delta_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    backfill_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str] = mapped_column(String(16), default="idle", nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Exact count of active messages → powers the pager with zero provider calls.
+    message_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class GraphSubscription(Base):
+    """Microsoft Graph change-notification subscription (webhook) lifecycle."""
+
+    __tablename__ = "graph_subscription"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    account_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("oauth_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_sub_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    resource: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Random secret echoed back in notifications for verification.
+    client_state: Mapped[str] = mapped_column(String(128), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "resource", name="uq_sub_account_resource"),
+    )

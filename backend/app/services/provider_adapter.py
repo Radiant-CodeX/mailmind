@@ -157,6 +157,16 @@ class GmailAdapter(ProviderAdapter):
     def list_emails(self, folder="inbox", limit=50, page_token=None, query=None) -> dict[str, Any]:
         return self._get_client().list_emails(folder=folder, limit=limit, page_token=page_token, query=query)
 
+    def list_inbox_delta(self, delta_link=None, folder="inbox") -> dict[str, Any]:
+        # delta_link is the historyId string for Gmail (or None for first backfill)
+        return self._get_client().list_inbox_delta(history_id=delta_link, folder=folder)
+
+    def watch_inbox(self, topic_name) -> dict[str, Any]:
+        return self._get_client().watch_inbox(topic_name)
+
+    def stop_watch(self) -> None:
+        self._get_client().stop_watch()
+
     def get_inbox_emails(self, limit=10) -> list[dict[str, Any]]:
         return self._get_client().get_inbox_emails(limit=limit)
 
@@ -243,6 +253,22 @@ class OutlookAdapter(ProviderAdapter):
 
     def list_emails(self, folder="inbox", limit=50, page_token=None, query=None) -> dict[str, Any]:
         return self._get_client().list_emails(folder=folder, limit=limit, page_token=page_token, query=query)
+
+    def list_inbox_delta(self, delta_link=None, folder="inbox") -> dict[str, Any]:
+        return self._get_client().list_inbox_delta(delta_link, folder=folder)
+
+    def create_subscription(self, notification_url, client_state, resource=None, minutes=4230) -> dict[str, Any]:
+        client = self._get_client()
+        kwargs = {"minutes": minutes}
+        if resource:
+            kwargs["resource"] = resource
+        return client.create_subscription(notification_url, client_state, **kwargs)
+
+    def renew_subscription(self, subscription_id, minutes=4230) -> dict[str, Any]:
+        return self._get_client().renew_subscription(subscription_id, minutes=minutes)
+
+    def delete_subscription(self, subscription_id) -> None:
+        self._get_client().delete_subscription(subscription_id)
 
     def get_inbox_emails(self, limit=10) -> list[dict[str, Any]]:
         return self._get_client().get_inbox_emails(limit=limit)

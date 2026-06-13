@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -631,6 +632,119 @@ class GraphClient:
         total = int(data.get("@odata.count", skip + len(emails)))
         next_token = str(skip + limit) if len(emails) == limit and (skip + limit) < total else None
         return {"emails": emails, "next_page_token": next_token, "total": total}
+
+    def list_inbox_delta(
+        self, delta_link: str | None = None, *, folder: str = "inbox", max_pages: int = 40
+    ) -> dict[str, Any]:
+        """
+        Walk the Graph messages *delta* for a folder (the inbox-sync engine).
+
+        - delta_link=None  → start a fresh enumeration (used for backfill).
+        - delta_link=<url> → replay an incremental change set.
+
+        Returns { upserts: [...envelopes], removed: [email_id...],
+                  delta_cursor: <next @odata.deltaLink or None>, truncated: bool }.
+
+        ``delta_cursor`` is None if we hit ``max_pages`` before Graph emitted a
+        deltaLink (very large mailbox); the caller should re-backfill next time.
+        """
+        if self.use_mock:
+            snap = self.get_inbox_emails(limit=25) if folder == "inbox" else []
+            return {"upserts": snap, "removed": [], "delta_cursor": None, "truncated": False}
+
+        select = ("id,subject,from,sender,receivedDateTime,isRead,bodyPreview,"
+                  "hasAttachments,conversationId,flag")
+        folder_id = self._FOLDERS.get(folder, "inbox")
+        if delta_link:
+            url = delta_link
+        else:
+            prefix = self._get_prefix()
+            url = (f"{self.base}{prefix}/mailFolders/{folder_id}/messages/delta"
+                   f"?$select={select}&$top=50")
+
+        upserts: list[dict[str, Any]] = []
+        removed: list[str] = []
+        delta_cursor: str | None = None
+        truncated = False
+
+        token = self._get_token()
+        headers = {"Accept": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        pages = 0
+        with httpx.Client(timeout=30.0) as client:
+            while url:
+                if pages >= max_pages:
+                    truncated = True
+                    break
+                resp = client.get(url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json() if resp.content else {}
+                for msg in data.get("value", []):
+                    if "@removed" in msg:
+                        if msg.get("id"):
+                            removed.append(msg["id"])
+                        continue
+                    upserts.append(self._delta_msg_to_envelope(msg))
+                pages += 1
+                if data.get("@odata.deltaLink"):
+                    delta_cursor = data["@odata.deltaLink"]
+                    break
+                url = data.get("@odata.nextLink")
+
+        return {"upserts": upserts, "removed": removed,
+                "delta_cursor": delta_cursor, "truncated": truncated}
+
+    @staticmethod
+    def _delta_msg_to_envelope(msg: dict[str, Any]) -> dict[str, Any]:
+        """Map a Graph delta message to the shared envelope shape."""
+        from_obj = msg.get("from") or msg.get("sender") or {}
+        addr = (from_obj.get("emailAddress") or {}) if isinstance(from_obj, dict) else {}
+        flag = (msg.get("flag") or {}) if isinstance(msg.get("flag"), dict) else {}
+        return {
+            "email_id": msg.get("id"),
+            "sender": addr.get("address", "unknown@example.com"),
+            "sender_name": addr.get("name"),
+            "subject": msg.get("subject", ""),
+            "snippet": msg.get("bodyPreview", ""),
+            "received_at": msg.get("receivedDateTime"),
+            "is_read": bool(msg.get("isRead", True)),
+            "is_starred": (flag.get("flagStatus") == "flagged"),
+            "has_attachments": bool(msg.get("hasAttachments", False)),
+            "thread_id": msg.get("conversationId"),
+        }
+
+    # ── Change-notification subscriptions (webhooks) ──────────────────────────
+
+    def create_subscription(self, notification_url: str, client_state: str,
+                            resource: str = "/me/mailFolders('inbox')/messages",
+                            minutes: int = 4230) -> dict[str, Any]:
+        """Create a Graph change-notification subscription. Returns {id, expirationDateTime}."""
+        from datetime import datetime, timedelta, timezone
+        expires = (datetime.now(tz=timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        body = {
+            "changeType": "created,updated,deleted",
+            "notificationUrl": notification_url,
+            "resource": resource,
+            "expirationDateTime": expires,
+            "clientState": client_state,
+        }
+        return self._request("POST", "/subscriptions", json=body) or {}
+
+    def renew_subscription(self, subscription_id: str, minutes: int = 4230) -> dict[str, Any]:
+        """Extend a subscription's expiry. Returns the updated subscription."""
+        from datetime import datetime, timedelta, timezone
+        expires = (datetime.now(tz=timezone.utc) + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return self._request("PATCH", f"/subscriptions/{subscription_id}",
+                             json={"expirationDateTime": expires}) or {}
+
+    def delete_subscription(self, subscription_id: str) -> None:
+        """Remove a subscription (best-effort)."""
+        try:
+            self._request("DELETE", f"/subscriptions/{subscription_id}")
+        except Exception as e:
+            logging.getLogger(__name__).debug("[graph] delete subscription %s failed: %s", subscription_id, e)
 
     def list_attachments(self, message_id: str) -> list[dict[str, Any]]:
         """List attachment metadata for a Graph message."""

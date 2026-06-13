@@ -170,6 +170,7 @@ export default function Home() {
     reportSpam,
     isStreaming,
     triageProgress,
+    triageActive,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const scoreFor = (p: Priority): number =>
@@ -357,6 +358,7 @@ export default function Home() {
                   doneEmailIds={doneEmailIds}
                   isStreaming={isStreaming}
                   triageProgress={triageProgress}
+                  triageActive={triageActive}
                 />
               </div>
 

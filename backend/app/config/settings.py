@@ -40,6 +40,10 @@ class Settings:
 
     webhook_validation_token: str = os.getenv("WEBHOOK_VALIDATION_TOKEN", "")
     webhook_secret: str = os.getenv("WEBHOOK_SECRET", "")
+    # Public HTTPS base URL of THIS backend, used as the Graph webhook
+    # notificationUrl. When unset, webhook subscriptions are skipped and the
+    # mirror stays fresh via on-mount + scheduled delta sync instead.
+    backend_public_url: str = os.getenv("BACKEND_PUBLIC_URL", "")
     rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
     use_chroma: bool = _bool_env("USE_CHROMA", True)
@@ -68,6 +72,15 @@ class Settings:
     google_redirect_uri: str = os.getenv(
         "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback"
     )
+    # Gmail push notifications (Cloud Pub/Sub). When gmail_pubsub_topic is unset,
+    # Gmail watch is skipped and the mirror stays fresh via on-mount + scheduled
+    # delta sync (same graceful degradation as Graph without BACKEND_PUBLIC_URL).
+    #   gmail_pubsub_topic — full topic name, e.g. projects/PROJECT/topics/gmail-push
+    #   gmail_pubsub_token — shared secret appended as ?token=… to the push
+    #                        endpoint URL in the Pub/Sub subscription; verified on
+    #                        every notification so only Google can trigger a sync.
+    gmail_pubsub_topic: str = os.getenv("GMAIL_PUBSUB_TOPIC", "")
+    gmail_pubsub_token: str = os.getenv("GMAIL_PUBSUB_TOKEN", "")
 
     # OpenAI / Azure OpenAI Configuration
     # Store the raw env value; use azure_openai_base_endpoint for SDK calls.
