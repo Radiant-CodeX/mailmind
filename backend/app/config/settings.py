@@ -85,6 +85,15 @@ class Settings:
     app_env: str = os.getenv("APP_ENV", "development")          # development | staging | production
     app_release: str = os.getenv("APP_RELEASE", "mailmind@2.0.0")
 
+    # ── Transport security toggles ─────────────────────────────────────────
+    # These default to "on" in production but can be forced off so the app can
+    # run behind plain HTTP (e.g. an HTTP-only reverse proxy or port-80 deploy)
+    # WITHOUT FastAPI forcing HTTPS.
+    #   COOKIE_SECURE=false → auth cookies are sent over HTTP (no Secure flag)
+    #   HSTS_ENABLED=false  → never emit Strict-Transport-Security (no forced upgrade)
+    cookie_secure: bool = _bool_env("COOKIE_SECURE", os.getenv("APP_ENV", "development").lower() == "production")
+    hsts_enabled: bool = _bool_env("HSTS_ENABLED", os.getenv("APP_ENV", "development").lower() == "production")
+
     # ── Queue backend (Option 2 production architecture) ───────────────────
     # "memory" keeps the dev experience zero-dependency; "redis" enables a
     # durable, multi-worker queue for staging/production.

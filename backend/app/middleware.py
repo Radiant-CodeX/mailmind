@@ -25,6 +25,7 @@ class SecurityHeadersMiddleware:
             await self.app(scope, receive, send)
             return
 
+        from app.config.settings import settings
         is_https = scope.get("scheme") == "https"
 
         async def send_with_security_headers(message):
@@ -37,7 +38,10 @@ class SecurityHeadersMiddleware:
                     (b"referrer-policy", b"strict-origin-when-cross-origin"),
                     (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
                 ]
-                if is_https:
+                # Only emit HSTS when the request is HTTPS AND HSTS is enabled.
+                # Gated by settings.hsts_enabled so an HTTP deployment never
+                # force-upgrades the browser to HTTPS.
+                if is_https and settings.hsts_enabled:
                     to_add.append(
                         (b"strict-transport-security", b"max-age=31536000; includeSubDomains")
                     )

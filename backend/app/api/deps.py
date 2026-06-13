@@ -195,7 +195,7 @@ def _set_session_cookie(response: Response, token: str, max_age: int) -> None:
         value=token,
         max_age=max_age,
         httponly=True,
-        secure=settings.is_production,
+        secure=settings.cookie_secure,
         samesite="lax",
         path="/",
     )
@@ -208,7 +208,7 @@ def _set_quick_cookie(response: Response, token: str, max_age: int) -> None:
         value=token,
         max_age=max_age,
         httponly=True,
-        secure=settings.is_production,
+        secure=settings.cookie_secure,
         samesite="lax",
         path="/",
     )
