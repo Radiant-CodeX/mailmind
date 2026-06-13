@@ -119,9 +119,6 @@ class TriageOnlyRequest(BaseModel):
     subject: str
     body: str
     received_at: str = ""
-    # When true, skip the Redis/DB cache and force a fresh LLM triage. Used by the
-    # per-email "re-triage" button so the user can re-score on demand.
-    force: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -264,20 +261,17 @@ def _run_triage_for_email(request: TriageOnlyRequest, user_email: str = "") -> d
     """
     from app.services.cache import triage_cache_store
 
-    # Re-triage on demand: skip all caches and recompute fresh from the LLM.
-    force = getattr(request, "force", False)
-
     # ── Level 1: Redis cache (sub-ms) ────────────────────────────────────────
     # Only short-circuit when the cached entry has the full axis breakdown. The
     # inbox streaming/batch path caches composite-only results (no axes), so a
     # cache hit without axes must fall through and recompute for the detail view.
-    cached = None if force else triage_cache_store.get(request.email_id, user_email=user_email)
+    cached = triage_cache_store.get(request.email_id, user_email=user_email)
     if cached and cached.get("priority") and cached.get("axes"):
         logger.info("[triage] Redis hit for %s", request.email_id)
         return {**cached, "_cached": "redis"}
 
     # ── Level 2: DB cache (1-5ms) ────────────────────────────────────────────
-    existing = None if force else repo.get_enrichment(request.email_id, user_email=user_email)
+    existing = repo.get_enrichment(request.email_id, user_email=user_email)
     if existing and existing.get("priority"):
         cached_score = existing.get("composite_score") or 0.0
         # Skip the DB hit if composite_score == 0.0 — this indicates a broken
