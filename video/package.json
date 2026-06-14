@@ -1,0 +1,23 @@
+{
+  "name": "mailmind-video",
+  "version": "1.0.0",
+  "description": "MailMind SaaS reveal video built with Remotion",
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render MailMindReveal out/mailmind.mp4",
+    "render:still": "remotion still MailMindReveal out/poster.png"
+  },
+  "dependencies": {
+    "@remotion/google-fonts": "4.0.370",
+    "@remotion/media": "^4.0.370",
+    "@remotion/transitions": "4.0.370",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.370"
+  },
+  "devDependencies": {
+    "@remotion/cli": "4.0.370",
+    "@types/react": "19.0.0",
+    "typescript": "5.8.3"
+  }
+}

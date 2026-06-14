@@ -112,7 +112,13 @@ async def gmail_webhook(request: Request, background_tasks: BackgroundTasks) -> 
 
 
 def _sync_account(account_id: str) -> None:
-    """Background: load the account and run a delta sync (own DB session)."""
+    """Background: load the account and run a delta sync.
+
+    The account row is loaded with a short-lived session that is released
+    *before* the sync runs. delta_sync does network I/O (Graph/Gmail) and opens
+    its own short sessions for each mirror write, so holding this connection
+    across the whole sync would needlessly pin a pool slot for seconds.
+    """
     from app.db.models import OAuthAccount
 
     with get_session() as session:
@@ -121,7 +127,9 @@ def _sync_account(account_id: str) -> None:
         account = session.get(OAuthAccount, account_id)
         if account is None:
             return
-        SyncService.delta_sync(account, "inbox")
+        session.expunge(account)  # detach: all columns are already loaded
+
+    SyncService.delta_sync(account, "inbox")
 
 
 @router.post("/api/subscriptions/ensure")

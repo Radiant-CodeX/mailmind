@@ -50,10 +50,29 @@ def _build_engine() -> Optional[Engine]:
             url,
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_max_overflow,
-            pool_pre_ping=True,  # transparently recycle dropped connections
+            # Liveness check before each checkout. Costs a round-trip per checkout
+            # on a remote pooler; can be disabled (DB_POOL_PRE_PING=false) when a
+            # short pool_recycle already keeps connections fresh.
+            pool_pre_ping=settings.db_pool_pre_ping,
+            # Reclaim a checkout that can't be served within this many seconds
+            # instead of blocking forever — turns "pool exhausted" hangs into a
+            # fast, observable error we can alert on.
+            pool_timeout=settings.db_pool_timeout,
+            # Recycle connections older than this. Supabase/pgbouncer drop idle
+            # server-side conns; recycling avoids handing out a dead one.
+            pool_recycle=settings.db_pool_recycle,
+            # LIFO: reuse the most-recently-returned connection so a burst of
+            # traffic doesn't keep the whole pool warm — idle conns age out and
+            # get recycled, which is friendlier to the Supabase session pooler.
+            pool_use_lifo=True,
             future=True,
         )
-    logger.info("Database engine initialised (%s).", url.split("@")[-1] if "@" in url else url)
+    logger.info(
+        "Database engine initialised (%s) pool_size=%d max_overflow=%d timeout=%ss recycle=%ss.",
+        url.split("@")[-1] if "@" in url else url,
+        settings.db_pool_size, settings.db_max_overflow,
+        settings.db_pool_timeout, settings.db_pool_recycle,
+    )
     return engine
 
 

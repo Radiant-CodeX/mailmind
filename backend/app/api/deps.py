@@ -24,6 +24,25 @@ def _session_service(db: Session):
     return SessionService(DBSessionBackend(db))
 
 
+def _release(db: Session) -> None:
+    """Return the auth session's connection to the pool immediately.
+
+    FastAPI keeps a ``yield`` dependency (and therefore its DB connection) open
+    until the *entire* response has been sent. For Server-Sent-Events endpoints
+    (e.g. the inbox triage stream) that can be many seconds, during which the
+    connection sits idle-in-transaction and is unavailable to anyone else — a
+    handful of concurrent users then exhaust the pool ("max pool size reached").
+
+    Committing here ends the read transaction and hands the connection back to
+    the pool right after auth resolves. ``expire_on_commit=False`` (see
+    db/base.py) keeps the returned ORM objects fully usable in the route body.
+    """
+    try:
+        db.commit()
+    except Exception:  # pragma: no cover - defensive; auth path has no pending writes
+        db.rollback()
+
+
 def get_current_user(
     request: Request,
     response: Response,
@@ -49,6 +68,7 @@ def get_current_user(
         if user_id:
             user = db.query(User).filter_by(id=user_id).first()
             if user:
+                _release(db)  # free the connection before a (possibly long) route body
                 return user
 
     # ── 2. Try quick-login rotation ──────────────────────────────────────────
@@ -62,7 +82,7 @@ def get_current_user(
                 new_session_token = svc.create_session(user_id)
                 _set_session_cookie(response, new_session_token, settings.session_ttl_seconds)
                 _set_quick_cookie(response, new_quick_token, settings.quick_login_ttl_seconds)
-                db.commit()
+                db.commit()  # persists rotation AND releases the connection
                 return user
 
     raise HTTPException(
@@ -151,6 +171,7 @@ def get_default_account(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No connected account found. Please connect an email account first.",
         )
+    _release(db)  # release before the route body (mirror reads use their own sessions)
     return account
 
 
@@ -180,6 +201,7 @@ def get_current_account(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account not found or does not belong to your user.",
         )
+    _release(db)
     return account
 
 

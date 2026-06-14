@@ -117,8 +117,25 @@ class Settings:
     # ── Persistence (Supabase / PostgreSQL) ────────────────────────────────
     # Empty DATABASE_URL → persistence is disabled (results returned inline only).
     database_url: str = os.getenv("DATABASE_URL", "")
-    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "5"))
-    db_max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+    db_pool_size: int = int(os.getenv("DB_POOL_SIZE", "10"))
+    db_max_overflow: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+    # Seconds to wait for a free connection before raising (instead of hanging).
+    db_pool_timeout: int = int(os.getenv("DB_POOL_TIMEOUT", "10"))
+    # pool_pre_ping issues a liveness "SELECT 1" before handing out each pooled
+    # connection. It's a safety net against the pooler dropping idle server
+    # connections, but on a remote pooler it adds a full round-trip to every
+    # checkout. With the transaction pooler + a short pool_recycle it's
+    # unnecessary, so it can be turned off to roughly halve per-request latency.
+    db_pool_pre_ping: bool = _bool_env("DB_POOL_PRE_PING", True)
+    # Recycle pooled connections older than this many seconds (Supabase/pgbouncer
+    # close idle server conns; 30 min keeps us comfortably under that).
+    db_pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
+
+    # ── Triage concurrency ─────────────────────────────────────────────────
+    # How many emails to triage in parallel per inbox page. gpt-4o-mini has
+    # generous TPM headroom, so a higher fan-out drains a cold inbox faster;
+    # lower it if Azure starts returning 429s.
+    triage_max_workers: int = int(os.getenv("TRIAGE_MAX_WORKERS", "8"))
 
     # ── Worker configuration ───────────────────────────────────────────────
     worker_poll_interval_seconds: float = float(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "1.0"))

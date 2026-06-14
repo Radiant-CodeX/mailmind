@@ -37,6 +37,7 @@ except ImportError:
 
 from app.graph.state import EmailAgentState
 from app.monitoring.metrics import observe_node, record_llm_call, record_pii_masked
+from app.services.tracing import trace_config
 from app.tools.email_tools import (
     ALL_TOOLS,
     TRIAGE_TOOLS,
@@ -439,10 +440,14 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
             # max_tokens cap: 5-axis JSON with explanations averages ~150-200 tokens;
             # 400 is a safe ceiling that still keeps inference fast.
             triage_llm = _with_max_tokens(llm, 400)
-            response: AIMessage = triage_llm.invoke([
-                SystemMessage(content=_TRIAGE_SYSTEM_PROMPT),
-                HumanMessage(content=user_prompt),
-            ])
+            response: AIMessage = triage_llm.invoke(
+                [
+                    SystemMessage(content=_TRIAGE_SYSTEM_PROMPT),
+                    HumanMessage(content=user_prompt),
+                ],
+                config=trace_config("triage", email_id=state.get("email_id"),
+                                    user=state.get("user_email")),
+            )
 
             logger.debug("[TRIAGE] raw LLM response: %s", response.content[:300])
             data = _parse_triage_json(response.content)
@@ -552,7 +557,11 @@ def commitment_node(state: EmailAgentState) -> dict[str, Any]:
 
             # max_tokens cap: commitment JSON averages ~200 tokens per item.
             commit_llm = _with_max_tokens(llm, 400)
-            response = commit_llm.invoke(messages)
+            response = commit_llm.invoke(
+                messages,
+                config=trace_config("commitment", email_id=state.get("email_id"),
+                                    user=state.get("user_email")),
+            )
             content = response.content.strip()
             # Strip markdown fences if present
             content = re.sub(r"^```(?:json)?\s*", "", content)
@@ -707,7 +716,11 @@ def rag_node(state: EmailAgentState, index_documents: list[dict] | None = None) 
                 )),
                 HumanMessage(content=draft_prompt),
             ]
-            response = llm.invoke(messages)
+            response = llm.invoke(
+                messages,
+                config=trace_config("rag_draft", email_id=state.get("email_id"),
+                                    user=state.get("user_email")),
+            )
             draft_reply = response.content.strip()
         except Exception as e:
             logger.warning(f"[RAG] Draft generation failed: {e}")

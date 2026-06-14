@@ -132,6 +132,35 @@ def get_enrichment(
         return _row_to_dict(row) if row else None
 
 
+def get_enrichments_bulk(
+    email_ids: list[str],
+    account_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+) -> dict[str, dict[str, Any]]:
+    """Fetch many enrichment rows in ONE query, keyed by email_id.
+
+    The inbox triage path checks the DB cache for a whole page at once. Doing
+    that with N individual ``get_enrichment`` calls means N sequential network
+    round-trips to the database (≈100ms each on a remote Supabase pooler — ~5s
+    for a 50-email page before any LLM runs). Batching collapses that to a single
+    round-trip. Missing ids are simply absent from the returned dict.
+    """
+    if not is_persistence_enabled() or not email_ids:
+        return {}
+
+    resolved = account_id or user_email or None
+    # De-dupe while preserving the caller's set; IN-clause handles the rest.
+    ids = list(dict.fromkeys(email_ids))
+
+    with get_session() as session:
+        if session is None:
+            return {}
+        stmt = select(EmailEnrichment).where(EmailEnrichment.email_id.in_(ids))
+        if resolved:
+            stmt = stmt.where(EmailEnrichment.account_id == resolved)
+        return {row.email_id: _row_to_dict(row) for row in session.scalars(stmt).all()}
+
+
 def list_enrichments(
     *,
     account_id: Optional[str] = None,
@@ -320,6 +349,56 @@ def get_sender_priority_hint(
     if all(p == recent[0] for p in recent):
         return recent[0]
     return None
+
+
+def get_sender_priority_hints_bulk(
+    senders: list[str],
+    *,
+    account_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> dict[str, str]:
+    """Resolve learned priorities for many senders in ONE query.
+
+    Batched form of ``get_sender_priority_hint`` for the inbox triage path, which
+    would otherwise issue one query per email just to check for a learned hint.
+    A hint is only returned for a sender when its three most recent overrides
+    agree (same unanimity rule as the single-sender version). Senders with no
+    confident hint are omitted from the result.
+    """
+    if not is_persistence_enabled():
+        return {}
+
+    norm = {(s or "").strip().lower() for s in senders if (s or "").strip()}
+    if not norm:
+        return {}
+
+    with get_session() as session:
+        if session is None:
+            return {}
+        stmt = select(
+            TriagePriorityOverride.sender,
+            TriagePriorityOverride.override_priority,
+            TriagePriorityOverride.created_at,
+        ).where(TriagePriorityOverride.sender.in_(norm))
+        if account_id:
+            stmt = stmt.where(TriagePriorityOverride.account_id == account_id)
+        elif user_id:
+            stmt = stmt.where(TriagePriorityOverride.user_id == user_id)
+        stmt = stmt.order_by(TriagePriorityOverride.created_at.desc())
+
+        # Collect up to the 3 most-recent overrides per sender (rows arrive newest
+        # first), then apply the unanimity rule in Python.
+        recent: dict[str, list[str]] = {}
+        for sender, priority, _created in session.execute(stmt).all():
+            bucket = recent.setdefault(sender, [])
+            if len(bucket) < 3:
+                bucket.append(priority)
+
+    hints: dict[str, str] = {}
+    for sender, priorities in recent.items():
+        if priorities and all(p == priorities[0] for p in priorities):
+            hints[sender] = priorities[0]
+    return hints
 
 
 def get_audit_log(email_id: str, limit: int = 200) -> list[dict[str, Any]]:
