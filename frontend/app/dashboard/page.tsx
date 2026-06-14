@@ -1,42 +1,53 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Sidebar } from '../../components/layout/Sidebar';
-import { Header } from '../../components/layout/Header';
-import { EmailList } from '../../components/inbox/EmailList';
-import { EmailDetail } from '../../components/detail/EmailDetail';
-import { CalendarView } from '../../components/calendar/CalendarView';
-import { RAGSettingsView } from '../../components/rag/RAGSettingsView';
-import { ComposeWindow } from '../../components/inbox/ComposeWindow';
-import { TrashToast } from '../../components/shared/TrashToast';
-import { EvaluationView } from '../../components/evaluation/EvaluationView';
-import { MetricsView } from '../../components/metrics/MetricsView';
-import { TasksView } from '../../components/tasks/TasksView';
-import { FeedbackModal } from '../../components/shared/FeedbackModal';
-import { OnboardingFlow } from '../../components/onboarding/OnboardingFlow';
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { Sidebar } from "../../components/layout/Sidebar";
+import { Header } from "../../components/layout/Header";
+import { EmailList } from "../../components/inbox/EmailList";
+import { EmailDetail } from "../../components/detail/EmailDetail";
+import { CalendarView } from "../../components/calendar/CalendarView";
+import { RAGSettingsView } from "../../components/rag/RAGSettingsView";
+import { ComposeWindow } from "../../components/inbox/ComposeWindow";
+import { TrashToast } from "../../components/shared/TrashToast";
+import { EvaluationView } from "../../components/evaluation/EvaluationView";
+import { MetricsView } from "../../components/metrics/MetricsView";
+import { TasksView } from "../../components/tasks/TasksView";
+import { FeedbackModal } from "../../components/shared/FeedbackModal";
+import { OnboardingFlow } from "../../components/onboarding/OnboardingFlow";
 
-import { useEmails } from '../../hooks/useEmails';
-import { useEmailDetail } from '../../hooks/useEmailDetail';
-import { useCommitments } from '../../hooks/useCommitments';
-import { useCalendar } from '../../hooks/useCalendar';
-import { checkAuthStatus, logoutUser, createCalendarEvent, overrideEmailPriority, AccountInfo } from '../../lib/api';
-import { rememberLogin, getRememberMe, clearRememberedLogin, Provider } from '../../lib/session';
-import { userStorage } from '../../lib/userStorage';
-import { CalendarEvent, Priority } from '../../lib/types';
-import { OverridePriority } from '../../components/inbox/PriorityOverrideMenu';
+import { useEmails } from "../../hooks/useEmails";
+import { useEmailDetail } from "../../hooks/useEmailDetail";
+import { useCommitments } from "../../hooks/useCommitments";
+import { useCalendar } from "../../hooks/useCalendar";
+import {
+  checkAuthStatus,
+  logoutUser,
+  createCalendarEvent,
+  overrideEmailPriority,
+  AccountInfo,
+} from "../../lib/api";
+import {
+  rememberLogin,
+  getRememberMe,
+  clearRememberedLogin,
+  Provider,
+} from "../../lib/session";
+import { userStorage } from "../../lib/userStorage";
+import { CalendarEvent, Priority } from "../../lib/types";
+import { OverridePriority } from "../../components/inbox/PriorityOverrideMenu";
 
 export default function Home() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('Inbox');
-  const [themeMode, setThemeMode] = useState<'light' | 'dark'>('dark');
+  const [activeTab, setActiveTab] = useState("Inbox");
+  const [themeMode, setThemeMode] = useState<"light" | "dark">("dark");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   const [authenticated, setAuthenticated] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<AccountInfo | null>(null);
-  const [provider, setProvider] = useState<Provider>('microsoft');
+  const [provider, setProvider] = useState<Provider>("microsoft");
   const [checkingAuth, setCheckingAuth] = useState(true);
   // Per-tab state — NOT persisted server-side (multi-tab safety).
   // Initialized from the default account on first auth check.
@@ -47,7 +58,9 @@ export default function Home() {
   const [doneEmailIds, setDoneEmailIds] = useState<Set<string>>(new Set());
   // Local priority overrides (id → priority) so the badge updates instantly
   // while the correction is persisted + fed into the triage loop server-side.
-  const [priorityOverrides, setPriorityOverrides] = useState<Record<string, Priority>>({});
+  const [priorityOverrides, setPriorityOverrides] = useState<
+    Record<string, Priority>
+  >({});
 
   const markEmailDone = (id: string) => {
     setDoneEmailIds((prev) => new Set([...prev, id]));
@@ -60,7 +73,7 @@ export default function Home() {
     current: Priority,
   ) => {
     // Optimistic UI: DONE hides the badge, anything else recolors it.
-    if (next === 'DONE') {
+    if (next === "DONE") {
       markEmailDone(id);
     } else {
       setPriorityOverrides((prev) => ({ ...prev, [id]: next }));
@@ -71,16 +84,23 @@ export default function Home() {
       override_priority: next,
       original_priority: current,
     }).catch((err) => {
-      console.error('Priority override failed:', err);
+      console.error("Priority override failed:", err);
       // Roll back the optimistic change on failure.
-      if (next === 'DONE') {
-        setDoneEmailIds((prev) => { const n = new Set(prev); n.delete(id); return n; });
+      if (next === "DONE") {
+        setDoneEmailIds((prev) => {
+          const n = new Set(prev);
+          n.delete(id);
+          return n;
+        });
       } else {
-        setPriorityOverrides((prev) => { const n = { ...prev }; delete n[id]; return n; });
+        setPriorityOverrides((prev) => {
+          const n = { ...prev };
+          delete n[id];
+          return n;
+        });
       }
     });
   };
-
 
   // Load auth status on mount — retries up to 3× (500ms apart) to handle the
   // race where cookies from the OAuth popup haven't been flushed to the browser
@@ -89,12 +109,13 @@ export default function Home() {
     async function loadAuthStatus() {
       const MAX_ATTEMPTS = 3;
       for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        if (attempt > 0) await new Promise(r => setTimeout(r, 600));
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 600));
         try {
           const data = await checkAuthStatus();
           if (data.authenticated) {
             setAuthenticated(true);
-            const email = data.user?.primary_email ?? data.default_account?.email ?? null;
+            const email =
+              data.user?.primary_email ?? data.default_account?.email ?? null;
             const displayName = data.user?.display_name ?? null;
             setUserEmail(email);
             setUserName(displayName);
@@ -102,7 +123,7 @@ export default function Home() {
               setUserProfile(data.default_account);
               setCurrentAccountId(data.default_account.id);
               const p = data.default_account.provider;
-              if (p === 'google' || p === 'microsoft') setProvider(p);
+              if (p === "google" || p === "microsoft") setProvider(p);
             }
             if (email) {
               userStorage.setUser(email);
@@ -120,24 +141,32 @@ export default function Home() {
         }
       }
       // All retries exhausted — redirect to login
-      router.push('/login');
+      router.push("/login");
     }
     loadAuthStatus();
   }, [router]);
 
   const toggleTheme = () => {
-    setThemeMode((prev) => (prev === 'light' ? 'dark' : 'light'));
+    setThemeMode((prev) => (prev === "light" ? "dark" : "light"));
   };
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed((prev) => !prev);
   };
 
-  const MAIL_TABS = ['Inbox', 'Drafts', 'Sent', 'Spam', 'Trash', 'Starred', 'Important'];
-  const activeFolder = MAIL_TABS.includes(activeTab) ? activeTab : 'Inbox';
+  const MAIL_TABS = [
+    "Inbox",
+    "Drafts",
+    "Sent",
+    "Spam",
+    "Trash",
+    "Starred",
+    "Important",
+  ];
+  const activeFolder = MAIL_TABS.includes(activeTab) ? activeTab : "Inbox";
   // The AI pipeline (triage / commitments / draft reply) doesn't apply to mail
   // you've already sent — hide it for the Sent folder.
-  const showPipeline = activeFolder !== 'Sent';
+  const showPipeline = activeFolder !== "Sent";
 
   const {
     emails,
@@ -177,7 +206,12 @@ export default function Home() {
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const scoreFor = (p: Priority): number =>
-    ({ CRITICAL: 90, HIGH: 65, MEDIUM: 40, LOW: 10 } as Record<Priority, number>)[p];
+    (
+      ({ CRITICAL: 90, HIGH: 65, MEDIUM: 40, LOW: 10 }) as Record<
+        Priority,
+        number
+      >
+    )[p];
 
   // Apply local overrides to the emails before rendering the list.
   const displayEmails = React.useMemo(
@@ -188,7 +222,9 @@ export default function Home() {
         return {
           ...e,
           composite_score: scoreFor(ov),
-          triage: e.triage ? { ...e.triage, priority: ov, composite_score: scoreFor(ov) } : e.triage,
+          triage: e.triage
+            ? { ...e.triage, priority: ov, composite_score: scoreFor(ov) }
+            : e.triage,
         };
       }),
     [emails, priorityOverrides],
@@ -285,7 +321,9 @@ export default function Home() {
       <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary">
         <div className="text-center">
           <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin mx-auto mb-4"></div>
-          <p className="text-xs text-base-content/60 font-medium">Checking authorization status...</p>
+          <p className="text-xs text-base-content/60 font-medium">
+            Checking authorization status...
+          </p>
         </div>
       </div>
     );
@@ -300,7 +338,7 @@ export default function Home() {
       }
       await logoutUser();
     } catch (err) {
-      console.error('Logout request failed (signing out anyway)', err);
+      console.error("Logout request failed (signing out anyway)", err);
     } finally {
       // Always sign the user out locally and return to the login page, even if
       // the backend logout call failed.
@@ -312,14 +350,16 @@ export default function Home() {
       setAuthenticated(false);
       setUserEmail(null);
       setUserProfile(null);
-      router.replace('/login');
+      router.replace("/login");
     }
   };
 
   return (
     <div
       className={`flex h-screen w-screen overflow-hidden text-text-primary transition-colors duration-200 ${
-        themeMode === 'light' ? 'theme-light bg-bg-base' : 'theme-dark bg-bg-base'
+        themeMode === "light"
+          ? "theme-light bg-bg-base"
+          : "theme-dark bg-bg-base"
       }`}
       id="app-workspace"
     >
@@ -354,7 +394,9 @@ export default function Home() {
               <div
                 id="email-list-panel"
                 className={`h-full flex flex-col overflow-hidden transition-all duration-200 ${
-                  selectedEmailId ? 'w-[45%] border-r border-base-300' : 'flex-1'
+                  selectedEmailId
+                    ? "w-[45%] border-r border-base-300"
+                    : "flex-1"
                 }`}
               >
                 <EmailList
@@ -405,8 +447,6 @@ export default function Home() {
                     error={detailError}
                     classification={classification}
                     triageResult={triageResult}
-                    onRetriage={retriage}
-                    isRetriaging={isRetriaging}
                     precedents={precedents}
                     aiDraft={aiDraft}
                     setAiDraft={setAiDraft}
@@ -437,7 +477,7 @@ export default function Home() {
             </>
           )}
 
-          {activeTab === 'Calendar' && (
+          {activeTab === "Calendar" && (
             <CalendarView
               events={calendarEvents}
               loading={calendarLoading}
@@ -446,18 +486,18 @@ export default function Home() {
               provider={provider}
               onCreateEvent={async (event: Partial<CalendarEvent>) => {
                 await createCalendarEvent({
-                  title: event.title || '',
-                  start_time: event.start_time || '',
+                  title: event.title || "",
+                  start_time: event.start_time || "",
                   end_time: event.end_time,
                 });
               }}
             />
           )}
 
-          {activeTab === 'RAG Settings' && <RAGSettingsView />}
-          {activeTab === 'Tasks' && <TasksView />}
-          {activeTab === 'Evaluation' && <EvaluationView />}
-          {activeTab === 'Metrics' && <MetricsView />}
+          {activeTab === "RAG Settings" && <RAGSettingsView />}
+          {activeTab === "Tasks" && <TasksView />}
+          {activeTab === "Evaluation" && <EvaluationView />}
+          {activeTab === "Metrics" && <MetricsView />}
         </div>
       </div>
 
@@ -492,7 +532,10 @@ export default function Home() {
           onComplete={({ role, goals }) => {
             setShowOnboarding(false);
             if (userEmail) {
-              localStorage.setItem(`mailmind_onboarded_${userEmail}`, JSON.stringify({ role, goals, ts: Date.now() }));
+              localStorage.setItem(
+                `mailmind_onboarded_${userEmail}`,
+                JSON.stringify({ role, goals, ts: Date.now() }),
+              );
             }
           }}
         />

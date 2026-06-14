@@ -263,20 +263,6 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   useEffect(() => { activeFolderRef.current = activeFolder; }, [activeFolder]);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
-  // Patch a single email's triage in place (list + paged cache). Called when the
-  // detail panel backfills the full 5-axis breakdown or the user re-triages, so
-  // the axes persist on the email object and are shown instantly on reopen.
-  const patchEmailTriage = useCallback((emailId: string, triage: Email['triage']) => {
-    if (!triage) return;
-    const score = Math.round(triage.composite_score ?? 0);
-    const apply = (e: Email): Email =>
-      e.id === emailId ? { ...e, triage, composite_score: score } : e;
-    allEmailsRef.current = allEmailsRef.current.map(apply);
-    emailsRef.current = emailsRef.current.map(apply);
-    setAllEmails((prev) => prev.map(apply));
-    setEmails((prev) => prev.map(apply));
-  }, [setEmails]);
-
   // Triage a slice of emails — uses stable refs, no state in deps.
   // This avoids triageSlice changing on every pageIndex change which would
   // cascade into loadEmails re-creating → useEffects firing → repeated GETs.
@@ -1044,7 +1030,5 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     triageProgress,
     triageActive,
     triageTotal,
-    // Patch one email's triage in place (used by detail backfill + re-triage).
-    patchEmailTriage,
   };
 }
