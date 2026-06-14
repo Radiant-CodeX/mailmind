@@ -994,6 +994,8 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   return {
     emails: filteredAndSortedEmails,
     totalCount: emails.length,
+    // Every email loaded so far across all fetched pages (for global counts).
+    allEmails,
     selectedEmail,
     selectedEmailId,
     setSelectedEmailId,
