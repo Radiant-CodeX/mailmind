@@ -131,6 +131,7 @@ export async function triageEmail(payload: {
   subject: string;
   body: string;
   received_at: string;
+  force?: boolean;  // Bypass cache on re-triage
 }) {
   const res = await apiFetch(`${BASE}/api/agent/triage`, {
     method: "POST",

@@ -735,6 +735,28 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     });
   }, []);
 
+  // Update triage data on an email in the list (called by detail view when
+  // triage axes are backfilled). Keeps the list and allEmails in sync so
+  // reopening the email shows the cached breakdown instantly.
+  const patchEmailTriage = useCallback((emailId: string, triage: Email['triage']) => {
+    setAllEmails((prev) =>
+      prev.map((e) =>
+        e.id === emailId ? { ...e, triage } : e
+      )
+    );
+    setEmailsRaw((prev) =>
+      prev.map((e) =>
+        e.id === emailId ? { ...e, triage } : e
+      )
+    );
+    allEmailsRef.current = allEmailsRef.current.map((e) =>
+      e.id === emailId ? { ...e, triage } : e
+    );
+    emailsRef.current = emailsRef.current.map((e) =>
+      e.id === emailId ? { ...e, triage } : e
+    );
+  }, []);
+
   // --------------------------------------------------------------------------
   // Trash with 5-second undo window
   // API call is deferred; clicking Undo cancels it entirely.
@@ -1030,5 +1052,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     triageProgress,
     triageActive,
     triageTotal,
+    // Patch triage data on an email in the list
+    patchEmailTriage,
   };
 }

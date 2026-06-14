@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Attachment,
   Email,
@@ -84,6 +84,7 @@ export function useEmailDetail(
   email: Email | null,
   enabled: boolean = true,
   currentUserEmail?: string | null,
+  onTriageEnriched?: (emailId: string, triage: Email['triage']) => void,
 ) {
   const [loading, setLoading] = useState(false); // Phase 1 triage loading
   const [enriching, setEnriching] = useState(false); // Phase 2 enrichment loading
@@ -115,6 +116,43 @@ export function useEmailDetail(
     indepth: null,
   });
   const [isDraftApproved, setIsDraftApproved] = useState(false);
+  const [isRetriaging, setIsRetriaging] = useState(false);
+
+  // Re-triage a single email by calling the API with force: true (bypass cache).
+  // On success, backfill the axes from the server response and persist to list.
+  const retriage = useCallback(async () => {
+    if (!email) return;
+    setIsRetriaging(true);
+    try {
+      const result = await triageEmail({
+        email_id: email.id,
+        sender: email.sender,
+        subject: email.subject,
+        body: email.body,
+        received_at: email.received_at,
+        force: true,  // Bypass cache
+      });
+      if (result) {
+        setTriageResult(result);
+        // Notify the list component so it can update its copy
+        if (onTriageEnriched) {
+          onTriageEnriched(email.id, {
+            composite_score: result.composite_score,
+            priority: result.priority,
+            approval_mode: result.approval_mode,
+            axes: result.axes || [],
+            email_type: result.email_type,
+            triage_reasoning: result.triage_reasoning,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[detail] re-triage failed:', err);
+      setError(err instanceof Error ? err.message : 'Re-triage failed');
+    } finally {
+      setIsRetriaging(false);
+    }
+  }, [email, onTriageEnriched]);
 
   useEffect(() => {
     if (!email || !enabled) {
