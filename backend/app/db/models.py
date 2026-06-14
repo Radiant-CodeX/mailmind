@@ -70,6 +70,8 @@ class User(Base):
 
     # Display metadata — not unique, can change, can be None.
     primary_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # Legacy NOT NULL column in Supabase schema — kept in sync with primary_email.
+    email: Mapped[str] = mapped_column(String(320), nullable=False, default="")
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)

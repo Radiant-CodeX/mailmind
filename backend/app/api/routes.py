@@ -135,7 +135,7 @@ def _finish_oauth_connect(
             user = db.query(User).filter_by(id=account.user_id).first()
         else:
             # New account — find or create a User
-            user = User(display_name=display_name, primary_email=email)
+            user = User(display_name=display_name, primary_email=email, email=email or "")
             db.add(user)
             db.flush()
             account = OAuthAccount(
@@ -159,6 +159,7 @@ def _finish_oauth_connect(
             account.display_name = display_name
             user.display_name = display_name
         user.primary_email = user.primary_email or email
+        user.email = user.primary_email or email or ""  # keep legacy NOT NULL column in sync
         from app.services.session_service import _now
         user.last_login_at = _now()
         db.flush()
