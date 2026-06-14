@@ -232,6 +232,10 @@ class GraphClient:
         # over the process-level _user_token_cache.
         self._injected_access_token = access_token
         self._injected_refresh_token = refresh_token
+        # Account-bound metadata (msal_cache, account_email, id). Only populated
+        # by the legacy account-bound path; the v3 adapter path injects a token
+        # directly and leaves this None.
+        self.account = None
         if not self.use_mock:
             if msal is None:
                 raise RuntimeError("msal package is required for Graph integration; pip install msal")
@@ -410,7 +414,9 @@ class GraphClient:
             return "/me"
 
         # Account-bound or active user session — we act as the delegated user.
-        if self.account or _user_token_cache["access_token"]:
+        # The v3 adapter path injects a delegated user token directly, so that
+        # also means we should query the signed-in user's own mailbox (/me).
+        if self._injected_access_token or self.account or _user_token_cache["access_token"]:
             return "/me"
         
         # Check if UPN is explicitly configured in Settings
