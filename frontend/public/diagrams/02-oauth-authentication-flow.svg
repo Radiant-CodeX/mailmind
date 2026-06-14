@@ -1,0 +1,110 @@
+<svg viewBox="0 0 1200 880" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .col{font-size:13px;font-weight:700;letter-spacing:1px}
+    .lbl{font-size:13.5px;font-weight:600}
+    .li{font-size:12px;fill:#334155}
+    .edge{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    .elbl{font-size:11.5px;fill:#475569}
+  </style>
+
+  <text x="600" y="46" text-anchor="middle" class="title">OAuth Login &amp; Token Exchange</text>
+  <text x="600" y="72" text-anchor="middle" class="sub">Google / Microsoft OAuth 2.0 · popup + polling · refresh token persisted for Quick Login</text>
+
+  <!-- swimlane headers -->
+  <rect x="40"  y="100" width="270" height="40" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="175" y="126" text-anchor="middle" class="col" fill="#1e3a8a">FRONTEND</text>
+  <rect x="330" y="100" width="270" height="40" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="465" y="126" text-anchor="middle" class="col" fill="#5b21b6">BACKEND</text>
+  <rect x="620" y="100" width="270" height="40" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="755" y="126" text-anchor="middle" class="col" fill="#166534">OAUTH PROVIDER</text>
+  <rect x="910" y="100" width="250" height="40" rx="8" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="1035" y="126" text-anchor="middle" class="col" fill="#115e59">STORAGE</text>
+
+  <!-- FE step 1 -->
+  <rect x="40" y="170" width="270" height="74" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="175" y="196" text-anchor="middle" class="lbl" fill="#1e3a8a">1 · User enters email</text>
+  <text x="175" y="216" text-anchor="middle" class="li">domain → provider detect</text>
+  <text x="175" y="232" text-anchor="middle" class="li">open popup (keep gesture)</text>
+
+  <line x1="310" y1="207" x2="328" y2="207" class="edge"/>
+
+  <!-- BE step 2 -->
+  <rect x="330" y="170" width="270" height="74" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="465" y="196" text-anchor="middle" class="lbl" fill="#5b21b6">2 · login-initiate</text>
+  <text x="465" y="216" text-anchor="middle" class="li">generate state = UUID</text>
+  <text x="465" y="232" text-anchor="middle" class="li">build_auth_url(state)</text>
+
+  <line x1="465" y1="244" x2="465" y2="290" class="edge"/>
+  <text x="475" y="272" class="elbl">returns auth_url + state</text>
+
+  <!-- FE step 3 -->
+  <rect x="40" y="292" width="270" height="74" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="175" y="318" text-anchor="middle" class="lbl" fill="#1e3a8a">3 · Navigate popup</text>
+  <text x="175" y="338" text-anchor="middle" class="li">to consent URL</text>
+  <text x="175" y="354" text-anchor="middle" class="li">start polling every 2.5s</text>
+
+  <path d="M310 329 L330 329 L330 300 L618 300" class="edge"/>
+  <text x="620" y="294" class="elbl">redirect to consent</text>
+
+  <!-- Provider step 4 -->
+  <rect x="620" y="292" width="270" height="74" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="755" y="318" text-anchor="middle" class="lbl" fill="#166534">4 · User consents</text>
+  <text x="755" y="338" text-anchor="middle" class="li">scopes: mail · calendar</text>
+  <text x="755" y="354" text-anchor="middle" class="li">contacts · profile</text>
+
+  <line x1="755" y1="366" x2="465" y2="412" class="edge"/>
+  <text x="560" y="392" class="elbl">callback?code=…&amp;state=…</text>
+
+  <!-- BE step 5 -->
+  <rect x="330" y="414" width="270" height="92" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="465" y="440" text-anchor="middle" class="lbl" fill="#5b21b6">5 · Callback handler</text>
+  <text x="465" y="460" text-anchor="middle" class="li">exchange_code(code)</text>
+  <text x="465" y="478" text-anchor="middle" class="li">→ access + refresh token</text>
+  <text x="465" y="496" text-anchor="middle" class="li">decode id_token → email</text>
+
+  <line x1="600" y1="450" x2="755" y2="412" class="edge"/>
+  <text x="615" y="430" class="elbl">POST token endpoint</text>
+
+  <line x1="600" y1="475" x2="908" y2="490" class="edge"/>
+  <text x="700" y="470" class="elbl">store refresh token</text>
+
+  <!-- Storage -->
+  <rect x="910" y="414" width="250" height="92" rx="10" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="1035" y="440" text-anchor="middle" class="lbl" fill="#115e59">Encrypted store</text>
+  <text x="1035" y="460" text-anchor="middle" class="li">oauth_accounts table</text>
+  <text x="1035" y="478" text-anchor="middle" class="li">Fernet-encrypted at rest</text>
+  <text x="1035" y="496" text-anchor="middle" class="li">credentials cache</text>
+
+  <line x1="465" y1="506" x2="465" y2="552" class="edge"/>
+  <text x="475" y="534" class="elbl">create session → Set-Cookie</text>
+
+  <!-- BE step 6 -->
+  <rect x="330" y="554" width="270" height="92" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="465" y="580" text-anchor="middle" class="lbl" fill="#5b21b6">6 · Issue session</text>
+  <text x="465" y="600" text-anchor="middle" class="li">mm_session (24h)</text>
+  <text x="465" y="618" text-anchor="middle" class="li">mm_quick (7d)</text>
+  <text x="465" y="636" text-anchor="middle" class="li">HttpOnly · Secure · SameSite</text>
+
+  <path d="M330 600 L175 600 L175 562" class="edge"/>
+  <text x="120" y="556" class="elbl">poll detects success</text>
+
+  <!-- FE final -->
+  <rect x="40" y="566" width="270" height="74" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="175" y="592" text-anchor="middle" class="lbl" fill="#1e3a8a">7 · Redirect</text>
+  <text x="175" y="612" text-anchor="middle" class="li">router.push(/dashboard)</text>
+  <text x="175" y="628" text-anchor="middle" class="li">userStorage.setUser()</text>
+
+  <!-- security callout -->
+  <rect x="40" y="700" width="1120" height="120" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="60" y="726" class="col" fill="#991b1b">SECURITY GUARANTEES</text>
+  <text x="60" y="752" class="li">• Raw tokens are NEVER returned in any response body or written to logs — only HttpOnly cookies leave the server.</text>
+  <text x="60" y="774" class="li">• Session tokens are stored as SHA-256 hashes; the plaintext token exists only in the user's cookie jar.</text>
+  <text x="60" y="796" class="li">• OAuth refresh tokens are encrypted at rest with Fernet; `state` UUID prevents CSRF on the OAuth callback.</text>
+</svg>

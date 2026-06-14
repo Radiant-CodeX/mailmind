@@ -1,0 +1,80 @@
+<svg viewBox="0 0 1100 720" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#ef4444"/>
+    </marker>
+    <marker id="arrowG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#16a34a"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .lbl{font-size:14px;font-weight:600}
+    .li{font-size:12.5px;fill:#334155}
+    .edge{stroke:#64748b;stroke-width:2;fill:none;marker-end:url(#arrow)}
+    .yes{stroke:#16a34a;stroke-width:2;fill:none;marker-end:url(#arrowG)}
+    .no{stroke:#ef4444;stroke-width:2;fill:none;marker-end:url(#arrowR)}
+    .tag{font-size:12px;font-weight:700}
+  </style>
+
+  <text x="550" y="46" text-anchor="middle" class="title">Session Auth &amp; Cookie Rotation</text>
+  <text x="550" y="72" text-anchor="middle" class="sub">get_current_user dependency — runs on every protected request</text>
+
+  <!-- request -->
+  <rect x="400" y="100" width="300" height="56" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="550" y="125" text-anchor="middle" class="lbl" fill="#1e3a8a">Incoming request + cookies</text>
+  <text x="550" y="144" text-anchor="middle" class="li">mm_session? · mm_quick?</text>
+
+  <line x1="550" y1="156" x2="550" y2="196" class="edge"/>
+
+  <!-- decision 1 -->
+  <polygon points="550,196 720,256 550,316 380,256" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+  <text x="550" y="250" text-anchor="middle" class="lbl" fill="#854d0e">mm_session valid?</text>
+  <text x="550" y="270" text-anchor="middle" class="li">SHA-256 lookup</text>
+
+  <line x1="720" y1="256" x2="840" y2="256" class="yes"/>
+  <text x="752" y="246" class="tag" fill="#16a34a">YES</text>
+
+  <!-- success -->
+  <rect x="840" y="226" width="230" height="60" rx="10" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="955" y="252" text-anchor="middle" class="lbl" fill="#166534">Return User</text>
+  <text x="955" y="271" text-anchor="middle" class="li">authenticated ✓</text>
+
+  <line x1="550" y1="316" x2="550" y2="356" class="no"/>
+  <text x="560" y="340" class="tag" fill="#ef4444">NO / expired</text>
+
+  <!-- decision 2 -->
+  <polygon points="550,356 720,416 550,476 380,416" fill="#fef9c3" stroke="#eab308" stroke-width="1.5"/>
+  <text x="550" y="410" text-anchor="middle" class="lbl" fill="#854d0e">mm_quick valid?</text>
+  <text x="550" y="430" text-anchor="middle" class="li">try_quick_login</text>
+
+  <line x1="380" y1="416" x2="260" y2="416" class="no"/>
+  <text x="300" y="406" class="tag" fill="#ef4444">NO</text>
+
+  <!-- 401 -->
+  <rect x="30" y="386" width="230" height="60" rx="10" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="145" y="412" text-anchor="middle" class="lbl" fill="#991b1b">401 Unauthorized</text>
+  <text x="145" y="431" text-anchor="middle" class="li">→ redirect to /login</text>
+
+  <line x1="550" y1="476" x2="550" y2="520" class="yes"/>
+  <text x="560" y="502" class="tag" fill="#16a34a">YES</text>
+
+  <!-- rotate -->
+  <rect x="360" y="520" width="380" height="96" rx="10" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="550" y="546" text-anchor="middle" class="lbl" fill="#5b21b6">Rotate credentials</text>
+  <text x="550" y="568" text-anchor="middle" class="li">issue fresh mm_session (24h)</text>
+  <text x="550" y="588" text-anchor="middle" class="li">issue fresh mm_quick (7d)</text>
+  <text x="550" y="608" text-anchor="middle" class="li">Set-Cookie · HttpOnly · Secure · SameSite</text>
+
+  <path d="M740 568 L840 568 L840 286" class="yes"/>
+  <text x="752" y="560" class="tag" fill="#16a34a">re-auth</text>
+
+  <!-- note -->
+  <rect x="30" y="640" width="1040" height="56" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="50" y="664" class="li"><tspan font-weight="700">Why two cookies:</tspan> mm_session is short-lived for safety; mm_quick silently re-mints it so users stay signed in for a week without</text>
+  <text x="50" y="684" class="li">re-entering OAuth. Tokens are opaque + stored only as hashes server-side — a stolen DB row cannot reconstruct a usable session.</text>
+</svg>

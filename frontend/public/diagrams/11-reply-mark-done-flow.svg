@@ -1,0 +1,61 @@
+<svg viewBox="0 0 1100 640" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <style>
+    .title{font-size:30px;font-weight:700;fill:#0f172a}
+    .sub{font-size:15px;fill:#64748b}
+    .lbl{font-size:14px;font-weight:600}
+    .li{font-size:12px;fill:#334155}
+    .edge{stroke:#475569;stroke-width:2;fill:none;marker-end:url(#arrow)}
+  </style>
+
+  <text x="550" y="46" text-anchor="middle" class="title">Reply &amp; Mark-as-Done Workflow</text>
+  <text x="550" y="72" text-anchor="middle" class="sub">Keeping the "what still needs me" view honest — two paths to Done</text>
+
+  <!-- PATH A header -->
+  <rect x="60" y="100" width="460" height="34" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="290" y="123" text-anchor="middle" class="lbl" fill="#166534">PATH A — Reply sent</text>
+
+  <rect x="100" y="150" width="380" height="56" rx="11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="290" y="174" text-anchor="middle" class="lbl" fill="#1e3a8a">User approves draft → sendDraft()</text>
+  <text x="290" y="194" text-anchor="middle" class="li">sendEmailReply(id, comment)</text>
+  <line x1="290" y1="206" x2="290" y2="240" class="edge"/>
+
+  <rect x="100" y="242" width="380" height="56" rx="11" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+  <text x="290" y="266" text-anchor="middle" class="lbl" fill="#5b21b6">isDraftApproved = true</text>
+  <text x="290" y="286" text-anchor="middle" class="li">success state set in useEmailDetail</text>
+  <line x1="290" y1="298" x2="290" y2="332" class="edge"/>
+
+  <rect x="100" y="334" width="380" height="64" rx="11" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="290" y="360" text-anchor="middle" class="lbl" fill="#166534">useEffect auto-marks Done</text>
+  <text x="290" y="382" text-anchor="middle" class="li">markEmailDone(selectedEmail.id)</text>
+
+  <!-- PATH B header -->
+  <rect x="580" y="100" width="460" height="34" rx="8" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+  <text x="810" y="123" text-anchor="middle" class="lbl" fill="#115e59">PATH B — No reply needed</text>
+
+  <rect x="620" y="150" width="380" height="56" rx="11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="810" y="174" text-anchor="middle" class="lbl" fill="#1e3a8a">User clicks "Mark as Done"</text>
+  <text x="810" y="194" text-anchor="middle" class="li">quick action in EmailListItem</text>
+  <line x1="810" y1="206" x2="810" y2="334" class="edge"/>
+
+  <rect x="620" y="334" width="380" height="64" rx="11" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="810" y="360" text-anchor="middle" class="lbl" fill="#166534">onMarkDone(id)</text>
+  <text x="810" y="382" text-anchor="middle" class="li">manual — not all email needs a reply</text>
+
+  <!-- merge -->
+  <line x1="290" y1="398" x2="540" y2="450" class="edge"/>
+  <line x1="810" y1="398" x2="560" y2="450" class="edge"/>
+
+  <rect x="350" y="452" width="400" height="64" rx="11" fill="#ede9fe" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="550" y="478" text-anchor="middle" class="lbl" fill="#5b21b6">doneEmailIds Set updated (dashboard)</text>
+  <text x="550" y="500" text-anchor="middle" class="li">single source of truth for Done state</text>
+  <line x1="550" y1="516" x2="550" y2="550" class="edge"/>
+
+  <rect x="330" y="552" width="440" height="56" rx="11" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="550" y="576" text-anchor="middle" class="lbl" fill="#1e3a8a">EmailListItem shows ✓ Done</text>
+  <text x="550" y="596" text-anchor="middle" class="li">High / Critical badge suppressed — no false urgency</text>
+</svg>

@@ -22,7 +22,7 @@ crisp in PowerPoint / Google Slides. PNG copies (if generated) live in `png/`.
 
 ## Shared visual language
 
-- **Blue** = frontend / I-O · **Violet** = backend services · **Green** = LLM reasoning (GPT-4o)
+- **Blue** = frontend / I-O · **Violet** = backend services · **Green** = LLM reasoning (GPT-4o-mini)
 - **Teal** = data / infra · **Red** = security / PII · **Yellow** = human supervision / decision
 
 ## Regenerating PNGs

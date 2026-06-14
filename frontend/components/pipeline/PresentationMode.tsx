@@ -42,7 +42,7 @@ export function PresentationMode({
   const [currentSlide, setCurrentSlide] = useState(0);
 
   // Define presentation slides
-  const slides = [
+  const baseSlides = [
     {
       id: 'title',
       title: 'MailMind Email Pipeline',
@@ -300,6 +300,86 @@ export function PresentationMode({
       ),
     },
   ];
+
+  // ── Architecture diagrams (served from /public/diagrams) ────────────────
+  // Kept in sync with docs/diagrams. Order matches docs/diagrams/README.md.
+  const diagrams = [
+    { file: '01-system-architecture.svg', title: 'System Architecture', subtitle: 'Two-tier: Next.js frontend · FastAPI + LangGraph backend' },
+    { file: '02-oauth-authentication-flow.svg', title: 'OAuth Authentication', subtitle: 'Google / Microsoft login + token exchange' },
+    { file: '03-session-auth-rotation.svg', title: 'Session Auth & Rotation', subtitle: 'HMAC-signed cookie sessions, Fernet tokens at rest' },
+    { file: '04-agentic-pipeline-dag.svg', title: 'Agentic Pipeline (DAG)', subtitle: 'LangGraph 6-node DAG — the centerpiece' },
+    { file: '05-triage-scoring-engine.svg', title: 'Triage Scoring Engine', subtitle: '5-axis explainable scoring' },
+    { file: '06-dashboard-inbox-init.svg', title: 'Dashboard & Inbox Init', subtitle: 'Mailbox mirror load + priority chips' },
+    { file: '07-email-open-parallel-pipeline.svg', title: 'Email Open Pipeline', subtitle: 'Open → parallel AI enrichment calls' },
+    { file: '08-rag-retrieval-flow.svg', title: 'RAG Retrieval', subtitle: 'Precedent retrieval via ChromaDB' },
+    { file: '09-draft-generation-flow.svg', title: 'Draft Generation', subtitle: 'RAG + Tone DNA via shared agent LLM' },
+    { file: '10-commitment-extraction-flow.svg', title: 'Commitment Extraction', subtitle: 'Tasks + deadlines → calendar' },
+    { file: '11-reply-mark-done-flow.svg', title: 'Reply & Mark Done', subtitle: 'Send reply, archive, mark resolved' },
+    { file: '12-feedback-submission-flow.svg', title: 'Feedback Submission', subtitle: 'DB-first with graceful fallback' },
+    { file: '13-onboarding-flow.svg', title: 'Onboarding', subtitle: 'Four-phase first-run experience' },
+    { file: '14-security-pii-masking.svg', title: 'Security & PII Masking', subtitle: 'Defense in depth, mask before LLM' },
+  ];
+
+  // The thumbnail-grid slide sits right after the base slides; each diagram
+  // gets its own full-screen slide immediately after the grid.
+  const diagramStartIndex = baseSlides.length + 1;
+
+  const diagramIndexSlide = {
+    id: 'diagram-index',
+    title: 'Architecture Diagrams',
+    subtitle: 'Click any diagram to open it full-screen',
+    content: (
+      <div className="max-w-6xl mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        {diagrams.map((d, i) => (
+          <button
+            key={d.file}
+            onClick={() => setCurrentSlide(diagramStartIndex + i)}
+            className="group bg-base-100 rounded-lg border border-base-200 p-3 text-left hover:border-blue-500 hover:shadow-lg transition-all"
+            title={`Open: ${d.title}`}
+          >
+            <div className="aspect-video w-full overflow-hidden rounded bg-white flex items-center justify-center mb-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/diagrams/${d.file}`}
+                alt={d.title}
+                className="w-full h-full object-contain group-hover:scale-[1.03] transition-transform"
+              />
+            </div>
+            <p className="text-sm font-semibold text-base-content leading-tight">
+              {i + 1}. {d.title}
+            </p>
+            <p className="text-xs text-base-content/60 mt-0.5 leading-tight">{d.subtitle}</p>
+          </button>
+        ))}
+      </div>
+    ),
+  };
+
+  const diagramSlides = diagrams.map((d) => ({
+    id: `diagram-${d.file}`,
+    title: d.title,
+    subtitle: d.subtitle,
+    content: (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-3">
+        <div className="w-full flex-1 min-h-0 flex items-center justify-center bg-white rounded-lg border border-base-200 p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/diagrams/${d.file}`}
+            alt={d.title}
+            className="max-w-full max-h-full object-contain"
+          />
+        </div>
+        <button
+          onClick={() => setCurrentSlide(baseSlides.length)}
+          className="text-xs text-base-content/60 hover:text-base-content underline transition-colors"
+        >
+          ← Back to all diagrams
+        </button>
+      </div>
+    ),
+  }));
+
+  const slides = [...baseSlides, diagramIndexSlide, ...diagramSlides];
 
   const totalSlides = slides.length;
 

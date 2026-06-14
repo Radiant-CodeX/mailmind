@@ -134,16 +134,31 @@ def _finish_oauth_connect(
         if account:
             user = db.query(User).filter_by(id=account.user_id).first()
         else:
-            # New account — find or create a User
-            user = User(display_name=display_name, primary_email=email, email=email or "")
-            db.add(user)
-            db.flush()
+            # New account — reuse an existing User with this email if one exists
+            # (e.g. an orphaned row from a previous partial sign-in, or adding a
+            # second provider for the same person) before creating a new one.
+            user = (
+                db.query(User)
+                .filter((User.email == email) | (User.primary_email == email))
+                .first()
+                if email
+                else None
+            )
+            if user is None:
+                user = User(display_name=display_name, primary_email=email, email=email or "")
+                db.add(user)
+                db.flush()
+            # Only make this the default account if the user has none yet
+            # (a reused User may already have a default from another provider).
+            has_default = bool(
+                db.query(OAuthAccount).filter_by(user_id=user.id, is_default=True).first()
+            )
             account = OAuthAccount(
                 user_id=user.id,
                 provider=provider,
                 provider_account_id=provider_account_id,
                 account_email=email,
-                is_default=True,
+                is_default=not has_default,
             )
             db.add(account)
             db.flush()
