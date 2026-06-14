@@ -173,6 +173,7 @@ export default function Home() {
     triageActive,
     triageTotal,
     patchEmailTriage,
+    allEmails,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const scoreFor = (p: Priority): number =>
@@ -193,16 +194,18 @@ export default function Home() {
     [emails, priorityOverrides],
   );
 
-  // Priority distribution for the visible page — drives the count chips that
-  // replaced the search bar at the top of the list.
+  // Priority distribution across ALL loaded pages (not just the visible one) —
+  // drives the count chips that replaced the search bar. Applies any local
+  // priority overrides so the counts match what the user sees.
   const priorityCounts = React.useMemo(() => {
     const c = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-    for (const e of displayEmails) {
-      const p = e.triage?.priority as keyof typeof c | undefined;
+    for (const e of allEmails) {
+      const ov = priorityOverrides[e.id];
+      const p = (ov || e.triage?.priority) as keyof typeof c | undefined;
       if (p && p in c) c[p] += 1;
     }
     return c;
-  }, [displayEmails]);
+  }, [allEmails, priorityOverrides]);
 
   // Opening an email marks it read.
   const handleSelectEmail = (id: string) => {
