@@ -3,6 +3,9 @@
 import React, { useEffect, useState } from 'react';
 
 interface TriageStreamingPanelProps {
+  /** Whether the triage SSE stream is currently open. Drives visibility even
+   *  before the to_triage count arrives (or when everything is cached). */
+  streaming?: boolean;
   /** Emails still being LLM-triaged right now (cache hits excluded). */
   count: number;
   /** Total LLM triage jobs in this batch. */
@@ -11,24 +14,30 @@ interface TriageStreamingPanelProps {
   done: number;
 }
 
-export function TriageStreamingPanel({ count, total, done }: TriageStreamingPanelProps) {
+export function TriageStreamingPanel({ streaming = false, count, total, done }: TriageStreamingPanelProps) {
   const [visible, setVisible] = useState(false);
 
-  // Fade in when work starts, linger briefly then fade out when done.
-  useEffect(() => {
-    if (count > 0 || (total > 0 && done < total)) {
-      setVisible(true);
-    } else if (total > 0 && done >= total) {
-      // Keep visible for 1.2s after completion so the 100% bar is seen.
-      const t = setTimeout(() => setVisible(false), 1200);
-      return () => clearTimeout(t);
-    }
-  }, [count, total, done]);
+  // Drive the lifecycle off the stream flag alone: it's set true when the SSE
+  // opens and false in the stream's finally (even on disconnect/error), so the
+  // panel can never get stuck. count/total/done only drive the progress display.
+  const working = streaming || count > 0;
 
-  if (!visible && count <= 0) return null;
+  // Show as soon as work starts (even before the to_triage count lands), then
+  // linger ~1.4s after it finishes so the completed state is actually seen.
+  useEffect(() => {
+    if (working) {
+      setVisible(true);
+      return;
+    }
+    const t = setTimeout(() => setVisible(false), 1400);
+    return () => clearTimeout(t);
+  }, [working]);
+
+  if (!visible) return null;
 
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const isDone = total > 0 && done >= total;
+  // Done once the stream has closed and no LLM work remains.
+  const isDone = !working;
 
   return (
     <div
@@ -50,8 +59,12 @@ export function TriageStreamingPanel({ count, total, done }: TriageStreamingPane
           )}
           <span className={`text-[11px] font-bold ${isDone ? 'text-success' : 'text-base-content'}`}>
             {isDone
-              ? `Triage complete — ${total} ${total === 1 ? 'email' : 'emails'} scored`
-              : `Triaging ${count} ${count === 1 ? 'email' : 'emails'}…`}
+              ? total > 0
+                ? `Triage complete — ${total} ${total === 1 ? 'email' : 'emails'} scored`
+                : 'Inbox up to date'
+              : count > 0
+                ? `Triaging ${count} ${count === 1 ? 'email' : 'emails'}…`
+                : 'Triaging inbox…'}
           </span>
         </div>
 

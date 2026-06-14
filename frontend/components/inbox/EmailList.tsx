@@ -94,7 +94,7 @@ export function EmailList({
       id="email-list"
     >
       {/* Live triage streaming progress — counts only real LLM triage work */}
-      <TriageStreamingPanel count={triageActive} total={triageTotal} done={triageProgress} />
+      <TriageStreamingPanel streaming={isStreaming} count={triageActive} total={triageTotal} done={triageProgress} />
 
       {/* Header and counter */}
       <div className="p-4 border-b border-base-200 flex items-center justify-between">

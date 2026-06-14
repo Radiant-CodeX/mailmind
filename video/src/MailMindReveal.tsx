@@ -4,26 +4,26 @@ import { TransitionSeries, linearTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
 import { FONT_FAMILY } from "./fonts";
 import { SoundDesign } from "./SoundDesign";
+import { SCENE_ORDER, TRANSITION, TOTAL_DURATION } from "./timeline";
 import { SceneIntro } from "./scenes/SceneIntro";
 import { SceneLogo } from "./scenes/SceneLogo";
+import { SceneDashboard } from "./scenes/SceneDashboard";
 import { SceneTriage } from "./scenes/SceneTriage";
 import { SceneToneDNA } from "./scenes/SceneToneDNA";
 import { SceneFeatures } from "./scenes/SceneFeatures";
 import { SceneCTA } from "./scenes/SceneCTA";
 
-export const SCENE_DURATIONS = {
-  intro: 105,
-  logo: 100,
-  triage: 130,
-  tone: 150,
-  features: 140,
-  cta: 120,
-} as const;
+export { TOTAL_DURATION };
 
-export const TRANSITION = 15;
-
-export const TOTAL_DURATION =
-  Object.values(SCENE_DURATIONS).reduce((a, b) => a + b, 0) - TRANSITION * 5;
+const SCENE_COMPONENT: Record<string, React.FC> = {
+  intro: SceneIntro,
+  logo: SceneLogo,
+  dashboard: SceneDashboard,
+  triage: SceneTriage,
+  tone: SceneToneDNA,
+  features: SceneFeatures,
+  cta: SceneCTA,
+};
 
 const t = () => linearTiming({ durationInFrames: TRANSITION });
 
@@ -32,34 +32,24 @@ export const MailMindReveal: React.FC = () => {
     <AbsoluteFill style={{ backgroundColor: "#05060a", fontFamily: FONT_FAMILY }}>
       <SoundDesign />
       <TransitionSeries>
-        <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.intro}>
-          <SceneIntro />
-        </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
-
-        <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.logo}>
-          <SceneLogo />
-        </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
-
-        <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.triage}>
-          <SceneTriage />
-        </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
-
-        <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.tone}>
-          <SceneToneDNA />
-        </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
-
-        <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.features}>
-          <SceneFeatures />
-        </TransitionSeries.Sequence>
-        <TransitionSeries.Transition presentation={fade()} timing={t()} />
-
-        <TransitionSeries.Sequence durationInFrames={SCENE_DURATIONS.cta}>
-          <SceneCTA />
-        </TransitionSeries.Sequence>
+        {SCENE_ORDER.flatMap((s, i) => {
+          const Comp = SCENE_COMPONENT[s.key];
+          const nodes = [
+            <TransitionSeries.Sequence key={s.key} durationInFrames={s.duration}>
+              <Comp />
+            </TransitionSeries.Sequence>,
+          ];
+          if (i < SCENE_ORDER.length - 1) {
+            nodes.push(
+              <TransitionSeries.Transition
+                key={`${s.key}-t`}
+                presentation={fade()}
+                timing={t()}
+              />,
+            );
+          }
+          return nodes;
+        })}
       </TransitionSeries>
     </AbsoluteFill>
   );

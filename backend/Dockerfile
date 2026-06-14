@@ -6,6 +6,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download the spaCy model used for date NER (commitment extraction) and PII
+# detection. Without this the app boots but logs "en_core_web_sm not loaded"
+# and silently degrades to regex-only extraction.
+RUN python -m spacy download en_core_web_sm
+
 # Copy the rest of the backend files
 COPY . .
 

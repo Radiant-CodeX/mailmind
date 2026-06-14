@@ -222,6 +222,9 @@ class GmailAdapter(ProviderAdapter):
     def fetch_calendar(self) -> list[dict[str, Any]]:
         return self._get_client().fetch_calendar()
 
+    def get_calendar_events(self, start_time, end_time) -> list[dict[str, Any]]:
+        return self._get_client().get_calendar_events(start_time, end_time)
+
     def create_calendar_event(self, email_id, commitment, deadline=None) -> str:
         return self._get_client().create_calendar_event(email_id, commitment, deadline)
 
@@ -327,6 +330,9 @@ class OutlookAdapter(ProviderAdapter):
 
     def fetch_calendar(self) -> list[dict[str, Any]]:
         return self._get_client().fetch_calendar()
+
+    def get_calendar_events(self, start_time, end_time) -> list[dict[str, Any]]:
+        return self._get_client().get_calendar_events(start_time, end_time)
 
     def create_calendar_event(self, email_id, commitment, deadline=None) -> str:
         return self._get_client().create_calendar_event(email_id, commitment, deadline)

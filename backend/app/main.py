@@ -75,6 +75,21 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logging.warning(f"Database init skipped: {_e}")
 
+    # Ensure the RAG index directory + file exist so the lightweight loaders
+    # (pipeline/enrichment/agent_routes) don't warn on a fresh container and
+    # ChromaDBIndex can persist. An empty index is valid — it fills as the user
+    # accrues precedents from sent mail / past decisions.
+    try:
+        from app.config.settings import settings as _settings
+        chroma_dir = os.path.abspath(_settings.chroma_storage_path)
+        os.makedirs(chroma_dir, exist_ok=True)
+        index_file = os.path.join(chroma_dir, "index.json")
+        if not os.path.exists(index_file):
+            with open(index_file, "w", encoding="utf-8") as f:
+                f.write("[]")
+    except Exception as _e:
+        logging.warning(f"Could not initialise RAG index directory: {_e}")
+
     # Tone DNA profiles are built on demand via POST /api/tone-dna/build — not
     # on startup — because we don't have a user identity at boot time.
     try:

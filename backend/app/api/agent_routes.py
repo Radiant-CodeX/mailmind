@@ -37,6 +37,7 @@ from app.db import repository as repo
 from app.graph.pipeline import run_pipeline
 from app.monitoring.metrics import set_queue_depth, track_stage
 from app.queue.backends import get_queue_backend
+from app.services.tracing import flush_tracers
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +247,11 @@ async def stream_pipeline(request: AgentProcessRequest, current_user=Depends(get
 
         except Exception as e:
             yield f'data: {{"error": "{str(e)}"}}\n\n'
+        finally:
+            # Force buffered LangSmith runs out before the stream connection
+            # unwinds — otherwise the periodic flush never fires and the runs
+            # produced while serving this SSE response are dropped.
+            flush_tracers()
 
     return StreamingResponse(
         event_generator(),
@@ -515,7 +521,7 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
         finally:
             live_metrics.record_latency("triage", (_time.perf_counter() - _start) * 1000)
 
-    async def event_generator():
+    async def _stream_body():
         if not requests:
             yield 'data: {"done": true}\n\n'
             return
@@ -637,6 +643,16 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                         yield f"data: {json.dumps(payload)}\n\n"
 
         yield 'data: {"done": true}\n\n'
+
+    async def event_generator():
+        # Thin wrapper so buffered LangSmith runs from the per-email triage
+        # (run on worker threads) are flushed once the stream finishes — without
+        # this they sit in the tracer's queue and the SSE request unwinds first.
+        try:
+            async for chunk in _stream_body():
+                yield chunk
+        finally:
+            flush_tracers()
 
     return StreamingResponse(
         event_generator(),
