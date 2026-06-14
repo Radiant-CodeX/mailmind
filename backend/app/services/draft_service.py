@@ -20,23 +20,11 @@ class DraftService:
 
     def _get_llm_client(self):
         """
-        Return a LangChain AzureChatOpenAI client so that every draft generation
-        call is automatically traced in LangSmith (same client used by the agent nodes).
-        Returns None when credentials are missing — caller handles gracefully.
+        Return the shared agent LLM so draft_service uses exactly the same
+        deployment, api_version, and caching as the rest of the pipeline.
         """
-        if settings.azure_openai_api_key and settings.azure_openai_base_endpoint:
-            try:
-                from langchain_openai import AzureChatOpenAI
-                return AzureChatOpenAI(
-                    azure_endpoint=settings.azure_openai_base_endpoint,
-                    azure_deployment=settings.azure_openai_chat_deployment,
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                    temperature=0.7,
-                )
-            except Exception as e:
-                logger.warning("LangChain AzureChatOpenAI init failed: %s", e)
-        return None
+        from app.agents.nodes import _get_llm
+        return _get_llm(temperature=0.7)
 
     def _get_clean_name(self, sender: str | None) -> str:
         if not sender:

@@ -47,7 +47,7 @@ class EmbeddingProvider:
             if settings.azure_openai_api_key and settings.azure_openai_endpoint:
                 return AzureOpenAI(
                     api_key=settings.azure_openai_api_key,
-                    api_version="2024-02-01",
+                    api_version=settings.azure_openai_api_version,
                     azure_endpoint=settings.azure_openai_endpoint,
                     max_retries=0,  # 404s are permanent — don't retry
                 ), settings.azure_openai_embedding_deployment
