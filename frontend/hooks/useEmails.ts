@@ -529,7 +529,10 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setEmailsRaw(newEmails);
       // Once the server reports no more pages, the accumulated count IS the
       // real total — clamp to it so the pager never claims more than exist.
-      setTotal(hasMore ? (page.total || total) : combined.length);
+      // Use functional updater: `total` from the outer closure is stale (always 0
+      // from useState init) because `total` is not in nextPage's dep array.
+      // The mirror always returns total=0, so fall back to combined.length.
+      setTotal((prev) => hasMore ? Math.max(prev, combined.length) : combined.length);
       setSelectedEmailId(null);
 
       triageSlice(newEmails);
