@@ -612,7 +612,7 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
 
         # ── Run LLM for misses in parallel, emit as they complete ──────────
         if misses:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {executor.submit(_timed_triage, req, user_key): idx for idx, req in misses}
                 for future in concurrent.futures.as_completed(futures):
                     idx = futures[future]

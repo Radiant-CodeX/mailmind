@@ -90,13 +90,24 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         logging.warning(f"Could not initialise RAG index directory: {_e}")
 
-    # Tone DNA profiles are built on demand via POST /api/tone-dna/build — not
-    # on startup — because we don't have a user identity at boot time.
+    # Pre-warm Presidio + spaCy. Without this the AnalyzerEngine initializes
+    # lazily on the first triage request thread, blocking it for 4+ seconds
+    # while the NLP engine loads — users see a 9s delay on their first inbox
+    # page. The pii_sanitizer singleton already exists (module-level), so
+    # touching it here forces the underlying spaCy model into memory now.
     try:
-        import spacy
-        spacy.load("en_core_web_sm")
+        from app.services.pii import pii_sanitizer as _pii
+        if _pii.use_presidio:
+            _pii.analyzer.analyze(text="warmup", language="en")
+            logging.info("Presidio/spaCy pre-warmed — triage cold-start latency eliminated.")
+        else:
+            try:
+                import spacy as _spacy
+                _spacy.load("en_core_web_sm")
+            except Exception as _e:
+                logging.warning(f"spaCy 'en_core_web_sm' not loaded: {_e}")
     except Exception as e:
-        logging.warning(f"spaCy 'en_core_web_sm' not loaded: {e}")
+        logging.warning(f"Presidio pre-warm failed (non-fatal): {e}")
 
     # Definitive LangSmith status — surfaces in the deployed logs whether tracing
     # is actually live (enabled + key/endpoint valid) instead of failing silently.
