@@ -49,8 +49,8 @@ jobs:
             --registry-username ${{ secrets.AZURE_REGISTRY_USERNAME }} \
             --registry-password ${{ secrets.AZURE_REGISTRY_PASSWORD }} \
             --os-type Linux \
-            --cpu 1 \
-            --memory 1.5 \
+            --cpu 2 \
+            --memory 8 \
             --ports 80 \
             --protocol TCP \
             --dns-name-label mailmind-backend \
