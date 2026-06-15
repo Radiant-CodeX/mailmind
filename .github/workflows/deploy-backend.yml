@@ -69,8 +69,11 @@ jobs:
               GOOGLE_CLIENT_ID="${{ secrets.GOOGLE_CLIENT_ID }}" \
               GOOGLE_CLIENT_SECRET="${{ secrets.GOOGLE_CLIENT_SECRET }}" \
               GOOGLE_REDIRECT_URI="${{ secrets.GOOGLE_REDIRECT_URI }}" \
-              FRONTEND_ORIGIN="${{ secrets.FRONTEND_ORIGIN }}" \
-              APPROVAL_TOKEN="${{ secrets.APPROVAL_TOKEN }}"
+              FRONTEND_ORIGIN="https://mailmind.radiantsofficial.com" \
+              APPROVAL_TOKEN="${{ secrets.APPROVAL_TOKEN }}" \
+              LANGSMITH_TRACING="true" \
+              LANGSMITH_PROJECT="mailmind" \
+              LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}"
 
       - name: Get container URL
         run: |
