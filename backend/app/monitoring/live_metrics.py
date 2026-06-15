@@ -37,10 +37,11 @@ class _LiveMetrics:
         # LLM outcome counters
         self._llm_ok = 0
         self._llm_err = 0
-        # recent end-to-end pipeline runs (parallel wall-clock ms)
-        self._pipeline_runs: deque[float] = deque(maxlen=_MAX_SAMPLES)
-        # recent per-run stage breakdowns: list[dict[stage, ms]]
-        self._stage_runs: deque[dict[str, float]] = deque(maxlen=_MAX_SAMPLES)
+        # recent end-to-end pipeline runs, each a (sequential_ms, parallel_ms)
+        # pair measured from the SAME batch so the speedup is apples-to-apples:
+        #   sequential_ms = sum of every item's individual processing time
+        #   parallel_ms   = wall-clock of the concurrent batch
+        self._pipeline_runs: deque[tuple[float, float]] = deque(maxlen=_MAX_SAMPLES)
         self._started = time.time()
 
     # ── recording ────────────────────────────────────────────────────
@@ -59,12 +60,18 @@ class _LiveMetrics:
             else:
                 self._llm_err += 1
 
-    def record_pipeline_run(self, parallel_ms: float, stage_breakdown: dict[str, float] | None = None) -> None:
-        """Record one end-to-end pipeline run's wall-clock time and per-stage split."""
+    def record_pipeline_run(self, parallel_ms: float, sequential_ms: float | None = None) -> None:
+        """
+        Record one batch's parallel wall-clock and the equivalent sequential cost.
+
+        ``sequential_ms`` is the sum of each item's individual processing time —
+        i.e. what the batch WOULD have cost run one-after-another. When omitted
+        the run is ignored for the speedup model (we never fabricate a baseline).
+        """
+        if sequential_ms is None or parallel_ms <= 0:
+            return
         with self._lock:
-            self._pipeline_runs.append(float(parallel_ms))
-            if stage_breakdown:
-                self._stage_runs.append({k: float(v) for k, v in stage_breakdown.items()})
+            self._pipeline_runs.append((float(sequential_ms), float(parallel_ms)))
 
     # ── reporting ────────────────────────────────────────────────────
     @staticmethod
@@ -123,24 +130,27 @@ class _LiveMetrics:
 
     def speedup(self) -> dict[str, Any]:
         """
-        Sequential-vs-parallel speedup.
+        Sequential-vs-parallel speedup, measured from real batches.
 
-        The pipeline fires its independent enrichment calls concurrently. We
-        compare:
-          • sequential = sum of each stage's median latency (what it would cost
-            run-one-after-another)
-          • parallel   = measured end-to-end wall-clock median (what we actually
-            achieve by overlapping them)
+        For each batch we recorded a matched pair:
+          • sequential = sum of every item's own processing time (the cost of
+            running them one-after-another)
+          • parallel   = the concurrent batch's wall-clock time
 
-        Returns measured=False with zeroed figures until enough real runs are
-        recorded — we never fabricate staged numbers.
+        We report the median of each across recent batches, so the figures are a
+        true apples-to-apples comparison rather than mixing single-call medians
+        with multi-item batch timings.
+
+        Returns measured=False with zeroed figures until at least one real batch
+        is recorded — we never fabricate a baseline.
         """
-        pct = self.latency_percentiles()["per_stage"]
-        sequential_ms = sum(s["p50"] for s in pct.values())
-
         with self._lock:
             runs = list(self._pipeline_runs)
-        parallel_ms = self._percentile(runs, 50) if runs else 0.0
+
+        seq_samples = [s for s, _ in runs]
+        par_samples = [p for _, p in runs]
+        sequential_ms = self._percentile(seq_samples, 50) if seq_samples else 0.0
+        parallel_ms = self._percentile(par_samples, 50) if par_samples else 0.0
 
         measured = sequential_ms > 0 and parallel_ms > 0
 
@@ -166,7 +176,6 @@ class _LiveMetrics:
             self._llm_ok = 0
             self._llm_err = 0
             self._pipeline_runs.clear()
-            self._stage_runs.clear()
             self._started = time.time()
 
 

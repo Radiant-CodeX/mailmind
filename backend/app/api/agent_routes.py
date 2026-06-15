@@ -413,14 +413,26 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
     # Run LLM only for misses, 5 at a time (respects Azure OpenAI rate limits)
     if misses:
         import time as _time
+
+        def _timed_triage(req: TriageOnlyRequest) -> tuple[dict[str, Any], float]:
+            """Run triage and return (result, true_duration_ms) measured inside
+            the worker thread so it reflects actual execution, not queue wait."""
+            t0 = _time.perf_counter()
+            r = _run_triage_for_email(req, user_key)
+            return r, (_time.perf_counter() - t0) * 1000
+
         batch_start = _time.perf_counter()
+        # Sum of each email's own processing time = what this batch WOULD have
+        # cost run one-after-another (the "sequential" baseline for speedup).
+        sequential_ms = 0.0
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(_run_triage_for_email, req, user_key): idx for idx, req in misses}
-            for future, idx in futures.items():
-                call_start = _time.perf_counter()
+            futures = {executor.submit(_timed_triage, req): idx for idx, req in misses}
+            for future in concurrent.futures.as_completed(futures):
+                idx = futures[future]
                 try:
-                    results[idx] = future.result(timeout=30)
-                    elapsed_ms = (_time.perf_counter() - call_start) * 1000
+                    result, elapsed_ms = future.result(timeout=30)
+                    results[idx] = result
+                    sequential_ms += elapsed_ms
                     live_metrics.record_latency("triage", elapsed_ms)
                     live_metrics.record_llm(success=True)
                 except Exception as e:
@@ -428,8 +440,13 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
                     logger.warning("[triage-page] LLM triage failed for index %d: %s", idx, e)
                     results[idx] = {"email_id": requests[idx].email_id, "priority": "MEDIUM",
                                     "composite_score": 0.0, "axes": [], "errors": [str(e)]}
-        # wall-clock for the whole concurrent batch = the "parallel" figure
-        live_metrics.record_pipeline_run((_time.perf_counter() - batch_start) * 1000)
+        # parallel = wall-clock of the concurrent batch; sequential = summed
+        # per-email cost. Recording both as a matched pair makes the dashboard's
+        # speedup an honest apples-to-apples comparison.
+        live_metrics.record_pipeline_run(
+            parallel_ms=(_time.perf_counter() - batch_start) * 1000,
+            sequential_ms=sequential_ms,
+        )
 
     return [r for r in results if r is not None]
 
@@ -502,8 +519,12 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
 
     from app.monitoring.live_metrics import live_metrics
 
-    def _timed_triage(req: TriageOnlyRequest, user_key: str) -> dict[str, Any]:
+    def _timed_triage(req: TriageOnlyRequest, user_key: str) -> tuple[dict[str, Any], float]:
         """Run triage for one miss and record stage latency + LLM metrics.
+
+        Returns (result, duration_ms). The duration is measured inside the worker
+        thread so it reflects real execution time, and is summed by the caller to
+        form the "sequential" baseline for the speedup card.
 
         Only genuine LLM runs (not the inner Redis/DB cache hits) count toward
         the LLM success rate; every run still records triage-stage latency so the
@@ -514,12 +535,13 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
             r = _run_triage_for_email(req, user_key)
             if not r.get("_cached"):
                 live_metrics.record_llm(success=True)
-            return r
+            elapsed_ms = (_time.perf_counter() - _start) * 1000
+            live_metrics.record_latency("triage", elapsed_ms)
+            return r, elapsed_ms
         except Exception:
             live_metrics.record_llm(success=False)
-            raise
-        finally:
             live_metrics.record_latency("triage", (_time.perf_counter() - _start) * 1000)
+            raise
 
     async def _stream_body():
         if not requests:
@@ -612,13 +634,18 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
 
         # ── Run LLM for misses in parallel, emit as they complete ──────────
         if misses:
+            batch_start = _time.perf_counter()
+            # Sum of each email's own processing time = the one-after-another
+            # ("sequential") baseline the speedup card compares against.
+            sequential_ms = 0.0
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {executor.submit(_timed_triage, req, user_key): idx for idx, req in misses}
                 for future in concurrent.futures.as_completed(futures):
                     idx = futures[future]
                     req = requests[idx]
                     try:
-                        result = future.result(timeout=30)
+                        result, elapsed_ms = future.result(timeout=30)
+                        sequential_ms += elapsed_ms
                         results[idx] = result
                         payload = {
                             "email_id": result.get("email_id"),
@@ -641,6 +668,13 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                             "error": str(e),
                         }
                         yield f"data: {json.dumps(payload)}\n\n"
+
+            # parallel = wall-clock of the concurrent batch; sequential = summed
+            # per-email cost. Matched pair → honest speedup on the dashboard.
+            live_metrics.record_pipeline_run(
+                parallel_ms=(_time.perf_counter() - batch_start) * 1000,
+                sequential_ms=sequential_ms,
+            )
 
         yield 'data: {"done": true}\n\n'
 
