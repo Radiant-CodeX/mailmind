@@ -344,8 +344,21 @@ def _load_rag_index() -> list[dict]:
             _rag_index_cache = json.load(f)
             logger.info(f"RAG index loaded from {index_file}: {len(_rag_index_cache)} documents")
             return _rag_index_cache
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        logger.warning(f"RAG index not found at {index_file}: {e} — returning empty index")
+    except FileNotFoundError:
+        # Expected on a fresh container — the index fills as precedents accrue
+        # from sent mail / past decisions. Seed an empty file so the path is
+        # writable and we don't log a scary "not found" on every cold start.
+        try:
+            os.makedirs(index_path, exist_ok=True)
+            with open(index_file, "w", encoding="utf-8") as f:
+                f.write("[]")
+        except Exception as seed_err:
+            logger.debug(f"Could not seed empty RAG index at {index_file}: {seed_err}")
+        logger.info(f"No RAG index yet at {index_file} — starting with an empty index.")
+        _rag_index_cache = []
+        return _rag_index_cache
+    except json.JSONDecodeError as e:
+        logger.warning(f"RAG index at {index_file} is corrupt ({e}) — starting empty.")
         _rag_index_cache = []
         return _rag_index_cache
 

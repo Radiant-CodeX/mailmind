@@ -34,6 +34,59 @@ def tracing_enabled() -> bool:
     )
 
 
+def log_tracing_status() -> None:
+    """Emit one definitive line at startup about LangSmith so prod logs reveal
+    whether tracing is actually live — instead of failing silently.
+
+    Distinguishes the real root causes:
+      • tracing flag not set        → "DISABLED"
+      • flag set but no API key     → "no API key"
+      • key/endpoint rejected       → "VALIDATION FAILED: …401/403…"
+      • all good                    → "ENABLED … key valid"
+    The validation makes one cheap authenticated call; it never raises into boot.
+    """
+    enabled = tracing_enabled()
+    project = (
+        os.getenv("LANGCHAIN_PROJECT") or os.getenv("LANGSMITH_PROJECT") or "default"
+    )
+    endpoint = (
+        os.getenv("LANGCHAIN_ENDPOINT")
+        or os.getenv("LANGSMITH_ENDPOINT")
+        or "https://api.smith.langchain.com"
+    )
+    key = os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY") or ""
+
+    if not enabled:
+        logger.warning(
+            "[langsmith] tracing DISABLED — LANGSMITH_TRACING/LANGCHAIN_TRACING_V2 "
+            "is not set in this process, so NO runs will be sent. (Is .env loaded "
+            "in the container?)"
+        )
+        return
+    if not key:
+        logger.warning(
+            "[langsmith] tracing flag is on but NO API KEY resolved — runs are dropped."
+        )
+        return
+
+    try:
+        from langsmith import Client
+
+        client = Client(api_key=key, api_url=endpoint)
+        # Cheapest authenticated call; raises on bad key (401) or wrong region (403/404).
+        list(client.list_projects(limit=1))
+        logger.info(
+            "[langsmith] tracing ENABLED → project=%s endpoint=%s key=%s… (reachable, key valid)",
+            project, endpoint, key[:10],
+        )
+    except Exception as exc:  # pragma: no cover - diagnostics must not break boot
+        logger.warning(
+            "[langsmith] tracing enabled but VALIDATION FAILED for project=%s endpoint=%s "
+            "key=%s… → %s: %s  (bad/rotated key, or wrong region endpoint)",
+            project, endpoint, key[:10], type(exc).__name__, exc,
+        )
+
+
 def flush_tracers() -> None:
     """Force any buffered LangSmith runs to be posted *now*.
 

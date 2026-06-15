@@ -97,6 +97,14 @@ async def lifespan(app: FastAPI):
         spacy.load("en_core_web_sm")
     except Exception as e:
         logging.warning(f"spaCy 'en_core_web_sm' not loaded: {e}")
+
+    # Definitive LangSmith status — surfaces in the deployed logs whether tracing
+    # is actually live (enabled + key/endpoint valid) instead of failing silently.
+    try:
+        from app.services.tracing import log_tracing_status
+        log_tracing_status()
+    except Exception as e:
+        logging.warning(f"LangSmith status check skipped: {e}")
     yield
 
 

@@ -17,6 +17,10 @@ if os.getenv("LANGSMITH_API_KEY"):
     os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGSMITH_API_KEY")
 if os.getenv("LANGSMITH_PROJECT"):
     os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGSMITH_PROJECT")
+# Region matters: an EU/other-region workspace silently 403s if the SDK posts to
+# the default US endpoint. Map a configured endpoint through so it's honoured.
+if os.getenv("LANGSMITH_ENDPOINT"):
+    os.environ["LANGCHAIN_ENDPOINT"] = os.getenv("LANGSMITH_ENDPOINT")
 
 
 def _bool_env(name: str, default: bool) -> bool:
