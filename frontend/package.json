@@ -15,6 +15,7 @@
     "@types/three": "^0.184.1",
     "@vercel/analytics": "^2.0.1",
     "daisyui": "^5.5.23",
+    "dexie": "^4.4.3",
     "dompurify": "^3.4.8",
     "gsap": "^3.15.0",
     "next": "^16.2.9",

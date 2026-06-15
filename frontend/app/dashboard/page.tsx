@@ -34,6 +34,7 @@ import {
   Provider,
 } from "../../lib/session";
 import { userStorage } from "../../lib/userStorage";
+import { clearScores } from "../../lib/scoreCache";
 import { CalendarEvent, Priority } from "../../lib/types";
 import { OverridePriority } from "../../components/inbox/PriorityOverrideMenu";
 
@@ -346,6 +347,8 @@ export default function Home() {
       // impersonating this user. When the same user logs back in, their quick login
       // will be automatically re-saved.
       clearRememberedLogin();
+      const _uid = userStorage.getUser();
+      if (_uid) await clearScores(_uid);
       userStorage.logout();
       setAuthenticated(false);
       setUserEmail(null);

@@ -15,41 +15,9 @@ import {
   reportSpam as apiReportSpam,
 } from '../lib/api';
 import { userStorage } from '../lib/userStorage';
+import { loadScores, saveScores, clearScores, evictStaleScores } from '../lib/scoreCache';
 
-// Persistent triage-score cache (by email id) so refreshes/page revisits don't
-// re-run the NLP classifier. Capped to avoid unbounded growth.
-// Keys are SCOPED to the current user via userStorage to prevent cross-account leaks.
-//
-// Cache versioning: bump TRIAGE_CACHE_VERSION to invalidate all clients and
-// force a fresh triage + DB write on next load. Do this after backend changes
-// that affect triage scoring.
-const TRIAGE_CACHE_VERSION = 'v3'; // v3 = fixed 0-score bug (max_tokens + prompt template)
-const TRIAGE_CACHE_KEY = `triage_cache_${TRIAGE_CACHE_VERSION}`;
 type TriageLite = NonNullable<Email['triage']>;
-
-function readTriageCache(): Record<string, TriageLite> {
-  if (typeof window === 'undefined') return {};
-  try { return JSON.parse(userStorage.getItem(TRIAGE_CACHE_KEY) || '{}'); } catch { return {}; }
-}
-
-function writeTriageCache(entries: Record<string, { composite_score: number }>): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const merged = { ...readTriageCache(), ...entries } as Record<string, TriageLite>;
-    const keys = Object.keys(merged);
-    // Keep the cache bounded (most-recent ~1000 entries).
-    const trimmed = keys.length > 1000
-      ? Object.fromEntries(keys.slice(keys.length - 1000).map((k) => [k, merged[k]]))
-      : merged;
-    userStorage.setItem(TRIAGE_CACHE_KEY, JSON.stringify(trimmed));
-  } catch {}
-}
-
-/** Clear localStorage triage cache — forces re-triage + DB writes on next load. */
-export function clearTriageCache(): void {
-  if (typeof window === 'undefined') return;
-  userStorage.removeItem(TRIAGE_CACHE_KEY);
-}
 
 // Email cache TTL — how long to trust cached emails before re-fetching from API.
 // On reload within this window, emails are shown from cache instantly with zero
@@ -191,6 +159,21 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   const [filters, setFilters] = useState<MailFilters>(DEFAULT_FILTERS);
 
   // --------------------------------------------------------------------------
+  // IndexedDB score cache — loaded once per mount into a ref so mapRaw and
+  // triageSlice can read/write synchronously without async prop-drilling.
+  // Pre-loading before loadEmails means the first render already has badges.
+  // --------------------------------------------------------------------------
+  const scoreCacheRef = useRef<Record<string, TriageLite>>({});
+  const userId = userStorage.getUser() || 'anon';
+
+  useEffect(() => {
+    // Load all cached scores into the ref before the email fetch fires.
+    loadScores(userId).then((scores) => { scoreCacheRef.current = scores; });
+    // Opportunistic TTL eviction — fire-and-forget, never blocks render.
+    evictStaleScores();
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // --------------------------------------------------------------------------
   // emails state — dual-write to a ref so trashEmail can read the current list
   // synchronously inside a callback without capturing a stale closure.
   // --------------------------------------------------------------------------
@@ -231,9 +214,9 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   const folderParam = (f: string) =>
     (['Inbox', 'Starred', 'Important'].includes(f) ? 'inbox' : f.toLowerCase());
 
-  // Map raw API response to Email objects, reusing localStorage triage cache.
+  // Map raw API response to Email objects, reusing IndexedDB triage score cache.
   const mapRaw = useCallback((raw: RawEmail[]): Email[] => {
-    const tcache = readTriageCache();
+    const tcache = scoreCacheRef.current;
     return raw.map((e) => {
       const id = e.email_id || e.id || '';
       const triage = resolveTriage(e, tcache[id]);
@@ -324,7 +307,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
         }
       }
 
-      writeTriageCache(byId);
+      // Merge into the in-memory ref immediately so mapRaw sees fresh scores
+      // on the next call (e.g. pagination) without waiting for the async write.
+      scoreCacheRef.current = { ...scoreCacheRef.current, ...byId };
+      // Persist to IndexedDB in the background — no quota limit, no JSON blob.
+      saveScores(userId, byId);
 
       const apply = (e: Email) =>
         byId[e.id] ? { ...e, composite_score: Math.round(byId[e.id].composite_score), triage: byId[e.id] } : e;
@@ -342,7 +329,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   }, []); // stable — zero deps, reads only from refs
 
   const mapRawEmails = (rawList: RawEmail[]): Email[] => {
-    const tcache = readTriageCache();
+    const tcache = scoreCacheRef.current;
     return rawList.map((e) => {
       const id = e.email_id || e.id || '';
       const triage = resolveTriage(e, tcache[id]);
