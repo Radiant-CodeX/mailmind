@@ -54,6 +54,7 @@ class EmailAgentState(TypedDict):
 
     # ── Triage outputs ───────────────────────────────────────────────────────
     masked_body: Optional[str]                # PII-scrubbed body
+    masked_subject: Optional[str]             # PII-scrubbed subject (shares mask_mapping)
     mask_mapping: Optional[dict[str, str]]    # Mapping to restore PII
     axes: list[AxisScore]                     # Five individual axis scores
     dynamic_weights: dict[str, float]         # LLM-assigned per-axis weights (sum=1.0)

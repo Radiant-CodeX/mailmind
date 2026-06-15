@@ -54,6 +54,23 @@ class Settings:
     rag_similarity_threshold: float = float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.78"))
     commitment_confidence_threshold: float = float(os.getenv("COMMITMENT_CONFIDENCE_THRESHOLD", "0.80"))
     approval_token: str = os.getenv("APPROVAL_TOKEN", "secret-approval-token")
+    # Private-beta access control. ADMIN_TOKEN gates the /api/admin/* endpoints
+    # (waitlist approvals + feedback viewing). bootstrap_allowed_emails are always
+    # allowed to sign in regardless of waitlist status, so the owner can never be
+    # locked out by their own gate.
+    admin_token: str = os.getenv("ADMIN_TOKEN", "change-me-admin-token")
+    bootstrap_allowed_emails: str = os.getenv(
+        "BOOTSTRAP_ALLOWED_EMAILS", "radiantcodex@outlook.com"
+    )
+
+    @property
+    def bootstrap_allowed_set(self) -> set[str]:
+        """Lower-cased set of always-allowed owner emails."""
+        return {
+            e.strip().lower()
+            for e in self.bootstrap_allowed_emails.split(",")
+            if e.strip()
+        }
     chroma_storage_path: str = os.getenv("CHROMA_DATA_PATH", "./data/chroma")
     index_max_size: int = int(os.getenv("RAG_INDEX_MAX_SIZE", "1000"))
     # Azure / Graph configuration

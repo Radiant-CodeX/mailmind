@@ -462,6 +462,55 @@ class PIISanitizer:
 
         return masked, mapping
 
+    def mask_fields(self, texts: List[str]) -> Tuple[List[str], Dict[str, str]]:
+        """
+        Mask several texts (e.g. subject + body) under ONE shared mapping.
+
+        A value that appears in more than one field gets the SAME placeholder
+        across all of them (e.g. a name in both subject and body → ``[PERSON_1]``
+        in both), and numbering never collides — which a per-field ``mask_text``
+        call could not guarantee. Returns ``(masked_texts, mapping)`` where
+        ``mapping`` reverses every placeholder used.
+
+        Only PII *terms* are replaced; all surrounding text is preserved verbatim.
+        """
+        mapping: Dict[str, str] = {}
+        counter: Dict[str, int] = defaultdict(int)
+        value_to_placeholder: Dict[str, str] = {}
+        masked_texts: List[str] = []
+
+        for text in texts:
+            if not text:
+                masked_texts.append(text or "")
+                continue
+
+            entities = self.detect_pii(text)
+            spans: List[Tuple[int, int, str]] = []
+            for ent in sorted(entities, key=lambda e: e.start):
+                prefix = ENTITY_PREFIX.get(ent.entity_type)
+                if not prefix:
+                    continue
+                placeholder = value_to_placeholder.get(ent.text)
+                if placeholder is None:
+                    counter[prefix] += 1
+                    placeholder = f"[{prefix}_{counter[prefix]}]"
+                    value_to_placeholder[ent.text] = placeholder
+                    mapping[placeholder] = ent.text
+                spans.append((ent.start, ent.end, placeholder))
+
+            masked = text
+            for start, end, placeholder in sorted(spans, key=lambda s: s[0], reverse=True):
+                masked = masked[:start] + placeholder + masked[end:]
+            masked_texts.append(masked)
+
+        if mapping:
+            summary: Dict[str, int] = defaultdict(int)
+            for p in mapping:
+                summary[p.rsplit("_", 1)[0].strip("[]")] += 1
+            logger.info(f"PII masked: {dict(summary)}")
+
+        return masked_texts, mapping
+
     def restore_text(self, masked_text: str, mapping: Dict[str, str]) -> str:
         """
         Restore original PII values into a masked string using ``mapping``.

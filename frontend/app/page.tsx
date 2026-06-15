@@ -6,6 +6,7 @@ import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { HeroCanvas } from '../components/landing/HeroCanvas';
 import { Preloader } from '../components/landing/Preloader';
+import { WaitlistForm } from '../components/landing/WaitlistForm';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -261,12 +262,12 @@ export default function LandingPage() {
             >
               Sign in
             </Link>
-            <Link
-              href="/login"
+            <a
+              href="#waitlist"
               className="text-sm font-medium bg-white text-black px-4 py-2 rounded-full hover:bg-white/90 transition-all hover:scale-[1.03] active:scale-[0.98]"
             >
-              Get started
-            </Link>
+              Request access
+            </a>
           </div>
         </div>
       </nav>
@@ -305,15 +306,15 @@ export default function LandingPage() {
           </p>
 
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
+            <a
               data-hero-cta
               data-magnetic
-              href="/login"
+              href="#waitlist"
               className="group relative px-8 py-4 rounded-full bg-gradient-to-r from-indigo-500 to-violet-600 font-semibold text-[15px] shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 transition-shadow active:scale-[0.98]"
             >
-              Start free with your inbox
+              Request early access
               <span className="inline-block ml-2 transition-transform group-hover:translate-x-1">→</span>
-            </Link>
+            </a>
             <a
               data-hero-cta
               data-magnetic
@@ -558,28 +559,31 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Final CTA ──────────────────────────────────── */}
-      <section className="relative py-36 px-6 text-center overflow-hidden">
+      {/* ── Final CTA / Waitlist ───────────────────────── */}
+      <section id="waitlist" className="relative scroll-mt-20 py-36 px-6 text-center overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_bottom,rgba(99,102,241,0.15),transparent_60%)] pointer-events-none" />
         <div data-final-cta className="relative max-w-3xl mx-auto">
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-white/70 backdrop-blur">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+            Private beta · Limited spots
+          </div>
           <h2 className="text-5xl sm:text-6xl font-black tracking-[-0.04em] leading-[1.0]">
             Stop managing email.
             <span className="block bg-gradient-to-r from-indigo-400 to-cyan-300 bg-clip-text text-transparent pb-2">
               Start commanding it.
             </span>
           </h2>
-          <p className="mt-6 text-white/50 text-lg">
-            Connect Gmail or Outlook and watch your inbox organize itself in under a minute.
+          <p className="mt-6 mb-10 text-white/50 text-lg">
+            MailMind is invite-only while we onboard our first users. Request early access and
+            we&apos;ll reach out when your spot opens up.
           </p>
-          <Link
-            href="/login"
-            data-magnetic
-            className="group inline-block mt-10 px-10 py-5 rounded-full bg-white text-black font-bold text-base active:scale-[0.98] shadow-2xl shadow-indigo-500/20"
-          >
-            Connect your inbox
-            <span className="inline-block ml-2 transition-transform group-hover:translate-x-1.5">→</span>
-          </Link>
-          <div className="mt-5 text-xs text-white/30">Free to start · No card required · OAuth only, we never see your password</div>
+          <WaitlistForm />
+          <div className="mt-6 text-xs text-white/30">
+            Already approved?{' '}
+            <Link href="/login" className="font-medium text-white/60 underline-offset-2 hover:underline">
+              Sign in
+            </Link>
+          </div>
         </div>
       </section>
 

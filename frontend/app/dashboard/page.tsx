@@ -12,6 +12,7 @@ import { ComposeWindow } from "../../components/inbox/ComposeWindow";
 import { TrashToast } from "../../components/shared/TrashToast";
 import { EvaluationView } from "../../components/evaluation/EvaluationView";
 import { MetricsView } from "../../components/metrics/MetricsView";
+import { PrivacyView } from "../../components/privacy/PrivacyView";
 import { TasksView } from "../../components/tasks/TasksView";
 import { FeedbackModal } from "../../components/shared/FeedbackModal";
 import { OnboardingFlow } from "../../components/onboarding/OnboardingFlow";
@@ -501,6 +502,7 @@ export default function Home() {
           {activeTab === "Tasks" && <TasksView />}
           {activeTab === "Evaluation" && <EvaluationView />}
           {activeTab === "Metrics" && <MetricsView />}
+          {activeTab === "Privacy" && <PrivacyView />}
         </div>
       </div>
 

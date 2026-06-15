@@ -40,6 +40,7 @@ export default function LoginPage() {
   const [googleWaiting, setGoogleWaiting] = useState(false);
   const [msWaiting, setMsWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [waitlistBlocked, setWaitlistBlocked] = useState<string | null>(null);
   const [signedOutNotice, setSignedOutNotice] = useState<"session" | "full" | null>(null);
   const pollingIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
   const googlePopupRef = React.useRef<Window | null>(null);
@@ -95,10 +96,24 @@ export default function LoginPage() {
     persistRememberMe(val);
   };
 
+  // Route sign-in failures: the backend's private-beta gate returns a
+  // WAITLIST_PENDING message, which we surface as a dedicated notice instead of
+  // a generic red error box.
+  const reportSignInError = (message: string) => {
+    if (message.includes("WAITLIST_PENDING")) {
+      const clean = message.split("WAITLIST_PENDING:").pop()?.trim() || message;
+      setWaitlistBlocked(clean);
+      setError(null);
+    } else {
+      setError(message);
+    }
+  };
+
   // ── Microsoft (OAuth popup flow) ───────────────────────────────────────────
   const handleMicrosoft = async (forceOAuth = false) => {
     persistRememberMe(rememberMe);
     setError(null);
+    setWaitlistBlocked(null);
     // Open the popup SYNCHRONOUSLY to preserve the click gesture.
     msPopupRef.current = window.open("", "ms-login", "width=520,height=680");
     setLoading(true);
@@ -143,7 +158,7 @@ export default function LoginPage() {
           clearInterval(pollingIntervalRef.current);
         setLoading(false);
         setMsWaiting(false);
-        setError(
+        reportSignInError(
           err instanceof Error ? err.message : "Microsoft sign-in failed",
         );
       }
@@ -154,6 +169,7 @@ export default function LoginPage() {
   const handleGoogle = async (emailHint?: string, forceOAuth = false) => {
     persistRememberMe(rememberMe);
     setError(null);
+    setWaitlistBlocked(null);
     // Open the popup SYNCHRONOUSLY (inside the click) so the browser keeps the
     // user-gesture and doesn't block it. We navigate it once we have the URL.
     googlePopupRef.current = window.open(
@@ -205,7 +221,7 @@ export default function LoginPage() {
           clearInterval(pollingIntervalRef.current);
         setLoading(false);
         setGoogleWaiting(false);
-        setError(err instanceof Error ? err.message : "Google sign-in failed");
+        reportSignInError(err instanceof Error ? err.message : "Google sign-in failed");
       }
     }, 2500);
   };
@@ -333,6 +349,24 @@ export default function LoginPage() {
         {error && (
           <div className="mb-6 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-lg text-xs font-semibold text-center max-h-32 overflow-y-auto">
             {error}
+          </div>
+        )}
+
+        {waitlistBlocked && (
+          <div className="mb-6 p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-center">
+            <div className="mx-auto mb-2 flex h-9 w-9 items-center justify-center rounded-full bg-indigo-500/15 text-indigo-400">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <p className="text-sm font-bold text-base-content">You&apos;re on the waitlist</p>
+            <p className="mt-1 text-xs text-base-content/60 leading-relaxed">{waitlistBlocked}</p>
+            <Link
+              href="/#waitlist"
+              className="mt-3 inline-block text-[11px] font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+            >
+              Learn more about the beta →
+            </Link>
           </div>
         )}
 

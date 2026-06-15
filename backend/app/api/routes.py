@@ -118,10 +118,25 @@ def _finish_oauth_connect(
       5. Return HTMLResponse with mm_session + mm_quick cookies set directly on it
     """
     from app.api.deps import _set_quick_cookie, _set_session_cookie
+    from app.api.waitlist_routes import ensure_pending_entry, is_email_allowed
     from app.db.database import get_db as _get_db
     from app.db.models import OAuthAccount, User
     from app.services.session_service import SessionService, DBSessionBackend
     from app.services.token_encryption import encrypt_token
+
+    # ── Private-beta access gate ──────────────────────────────────────────────
+    # Enforced HERE (the single chokepoint both providers pass through) rather
+    # than on the login page, so no one can bypass it by calling the OAuth
+    # endpoints directly. Un-approved emails are auto-added to the waitlist as
+    # pending and rejected with a clear, frontend-detectable message.
+    if not is_email_allowed(email):
+        ensure_pending_entry(email, name=display_name)
+        audit.warning("AUTH_LOGIN_BLOCKED reason=not_approved provider=%s email=%s", provider, email)
+        raise HTTPException(
+            status_code=403,
+            detail="WAITLIST_PENDING: Your email isn't approved for the MailMind private beta yet. "
+                   "You've been added to the waitlist — we'll email you when you're approved.",
+        )
 
     db = next(_get_db())
     try:
@@ -532,10 +547,21 @@ def get_trash_emails(limit: int = 10, account=Depends(get_default_account)) -> l
 def send_email_reply(email_id: str, payload: ReplyRequest, account=Depends(get_default_account)) -> dict[str, Any]:
     """Send a reply to the specified email via the active provider."""
     client = AccountService.get_adapter(account)
+    logger.info(
+        "[reply] sending reply email_id=%s via account=%s (%s) comment_len=%d",
+        email_id, account.id, account.account_email, len(payload.comment or ""),
+    )
     try:
         client.send_reply(email_id, payload.comment)
+        logger.info("[reply] sent OK email_id=%s account=%s", email_id, account.account_email)
         return {"success": True}
+    except HTTPException as he:
+        # Adapter already classified the failure (e.g. 401 re-auth, 502 Gmail). Log
+        # the real reason and pass the detail through unchanged so the UI shows it.
+        logger.warning("[reply] send FAILED email_id=%s account=%s: %s", email_id, account.account_email, he.detail)
+        raise
     except Exception as e:
+        logger.exception("[reply] send FAILED email_id=%s account=%s", email_id, account.account_email)
         raise HTTPException(status_code=400, detail=f"Failed to send reply: {str(e)}")
 
 

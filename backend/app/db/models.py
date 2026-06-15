@@ -498,3 +498,33 @@ class GraphSubscription(Base):
     __table_args__ = (
         UniqueConstraint("account_id", "resource", name="uq_sub_account_resource"),
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACCESS CONTROL (private beta)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class Waitlist(Base):
+    """
+    Private-beta waitlist + allow-list (one table serves both roles).
+
+    Joining the public waitlist inserts a ``pending`` row. The owner approves an
+    email by flipping ``status`` to ``approved`` (via the admin endpoints). Login
+    is gated on an ``approved`` row existing for the signing-in email, so the
+    waitlist *is* the allow-list — approval is a single status change.
+    """
+
+    __tablename__ = "waitlist"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    use_case: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # pending | approved | rejected
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", index=True)
+    # How the row was created: "signup" (public form) or "login" (auto-added on
+    # an un-approved sign-in attempt).
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="signup")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

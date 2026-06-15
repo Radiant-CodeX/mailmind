@@ -603,7 +603,16 @@ export async function sendEmailReply(emailId: string, comment: string) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ comment }),
   });
-  if (!res.ok) throw new Error("Failed to send email reply");
+  if (!res.ok) {
+    // Surface the backend's real reason (e.g. "Gmail API: …", re-auth needed)
+    // instead of a generic message that hides why the send failed.
+    let message = "Failed to send email reply";
+    try {
+      const d = await res.json();
+      if (d?.detail) message = typeof d.detail === "string" ? d.detail : JSON.stringify(d.detail);
+    } catch {}
+    throw new Error(message);
+  }
   return res.json();
 }
 
@@ -942,6 +951,141 @@ export async function submitFeedback(payload: FeedbackPayload): Promise<{ ok: bo
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error("Failed to submit feedback");
+  return res.json();
+}
+
+// ── Waitlist / private-beta access ───────────────────────────────────────────
+
+export interface WaitlistJoinResult {
+  ok: boolean;
+  status: "pending" | "approved" | "rejected";
+  already_joined: boolean;
+}
+
+/** Join the public waitlist. Idempotent on email. */
+export async function joinWaitlist(payload: {
+  email: string;
+  name?: string;
+  use_case?: string;
+}): Promise<WaitlistJoinResult> {
+  const res = await apiFetch(`${BASE}/api/waitlist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    let message = "Failed to join the waitlist";
+    try {
+      const d = await res.json();
+      if (d?.detail) message = d.detail;
+    } catch {}
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+// ── Admin (secret-token gated) ───────────────────────────────────────────────
+
+export interface WaitlistEntry {
+  id: string;
+  email: string;
+  name: string | null;
+  use_case: string | null;
+  status: "pending" | "approved" | "rejected";
+  source: string;
+  created_at: string | null;
+  approved_at: string | null;
+}
+
+export interface AdminFeedbackEntry {
+  id: string;
+  rating: number;
+  category: string;
+  message: string;
+  user_email: string | null;
+  role: string | null;
+  timestamp: string | null;
+}
+
+async function adminFetch(token: string, path: string, init?: RequestInit) {
+  const res = await apiFetch(`${BASE}${path}`, {
+    ...init,
+    headers: { "Content-Type": "application/json", "X-Admin-Token": token, ...(init?.headers || {}) },
+  });
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const d = await res.json();
+      if (d?.detail) message = d.detail;
+    } catch {}
+    const err = new Error(message) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+export async function adminListWaitlist(token: string): Promise<{
+  count: number;
+  counts: Record<string, number>;
+  entries: WaitlistEntry[];
+}> {
+  return adminFetch(token, "/api/admin/waitlist");
+}
+
+export async function adminApproveEmail(token: string, email: string): Promise<{ ok: boolean; entry: WaitlistEntry }> {
+  return adminFetch(token, "/api/admin/waitlist/approve", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function adminRejectEmail(token: string, email: string): Promise<{ ok: boolean; entry: WaitlistEntry }> {
+  return adminFetch(token, "/api/admin/waitlist/reject", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function adminListFeedback(token: string): Promise<{
+  count: number;
+  entries: AdminFeedbackEntry[];
+}> {
+  return adminFetch(token, "/api/admin/feedback");
+}
+
+// ── PII masking preview (privacy demo) ───────────────────────────────────────
+
+export interface PIIEntitySpan {
+  type: string;
+  start: number;
+  end: number;
+}
+
+export interface PIIPreviewResult {
+  original_length: number;
+  masked: string;
+  entities: PIIEntitySpan[];
+  counts: Record<string, number>;
+  total: number;
+  engine: "presidio" | "regex";
+}
+
+/** Mask arbitrary text and return detected entity spans — the privacy showcase. */
+export async function previewPII(text: string): Promise<PIIPreviewResult> {
+  const res = await apiFetch(`${BASE}/api/pii/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    let message = "PII preview failed";
+    try {
+      const d = await res.json();
+      if (d?.detail) message = d.detail;
+    } catch {}
+    throw new Error(message);
+  }
   return res.json();
 }
 

@@ -195,7 +195,11 @@ def ingest_node(state: EmailAgentState) -> dict[str, Any]:
 
     from app.services.pii import pii_sanitizer
     with observe_node("ingest"):
-        masked, mapping = pii_sanitizer.mask_text(state["body"])
+        # Mask subject + body under one shared mapping so a value appearing in
+        # both gets the same token and restoration stays consistent.
+        (masked_subject, masked), mapping = pii_sanitizer.mask_fields(
+            [state.get("subject") or "", state["body"]]
+        )
 
     # Record PII coverage by category (counts only — never raw values).
     if mapping:
@@ -207,6 +211,7 @@ def ingest_node(state: EmailAgentState) -> dict[str, Any]:
 
     return {
         "masked_body": masked,
+        "masked_subject": masked_subject,
         "mask_mapping": mapping,
         "current_step": "ingest",
         "errors": [],
@@ -430,9 +435,12 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
 
     if llm:
         try:
+            # Subject is masked too (shares mask_mapping with the body) so no PII
+            # in the subject line reaches the LLM.
+            subject_for_triage = state.get("masked_subject") or state["subject"]
             user_prompt = (
                 f"Sender: {state['sender']}\n"
-                f"Subject: {state['subject']}\n"
+                f"Subject: {subject_for_triage}\n"
                 f"Received: {state['received_at']}\n"
                 f"Body:\n{body_for_triage}"
             )
