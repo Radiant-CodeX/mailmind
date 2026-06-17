@@ -50,7 +50,7 @@ jobs:
             --registry-password ${{ secrets.AZURE_REGISTRY_PASSWORD }} \
             --os-type Linux \
             --cpu 1 \
-            --memory 1.5 \
+            --memory 3 \
             --ports 80 \
             --protocol TCP \
             --dns-name-label mailmind-backend \
