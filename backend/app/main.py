@@ -156,7 +156,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     # Explicit header list — the CORS spec forbids "*" when credentials are allowed.
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token", "X-MailMind-Session"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token", "X-MailMind-Session", "X-Admin-Token"],
 )
 
 logger = logging.getLogger(__name__)

@@ -7,6 +7,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { HeroCanvas } from '../components/landing/HeroCanvas';
 import { Preloader } from '../components/landing/Preloader';
 import { WaitlistForm } from '../components/landing/WaitlistForm';
+import { LogoGlyph } from '../components/shared/LogoGlyph';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -245,8 +246,8 @@ export default function LandingPage() {
       >
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-black text-sm shadow-lg shadow-indigo-500/30">
-              M
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+              <LogoGlyph className="w-5 h-5 text-white" />
             </div>
             <span className="font-semibold tracking-tight text-[15px]">MailMind</span>
           </div>
@@ -591,8 +592,8 @@ export default function LandingPage() {
       <footer className="border-t border-white/5 px-6 py-10">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-white/35">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-black text-[10px] text-white">
-              M
+            <div className="w-6 h-6 rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white">
+              <LogoGlyph className="w-3.5 h-3.5 text-white" />
             </div>
             MailMind — AI email co-pilot
           </div>

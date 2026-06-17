@@ -578,12 +578,19 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setAllEmails(combined);
       setHasMoreOnServer(!!newToken);
       if (!newToken) setTotal(combined.length);
+
+      // Triage-ahead: score the prefetched page NOW, while the user is still
+      // reading the current one. By the time they click Next, scores are already
+      // in the cache + on the rows, so triageSlice() finds nothing to do and the
+      // page appears fully triaged instantly. The SSE/LLM cost is overlapped
+      // with read time instead of being paid on the click.
+      triageSlice(newEmails);
     } catch {
       /* prefetch is best-effort — a failure just means the click pays the cost */
     } finally {
       prefetchingRef.current = false;
     }
-  }, [mapRaw]);
+  }, [mapRaw, triageSlice]);
 
   // Non-destructive refresh: fetch the newest page, merge any genuinely new
   // emails onto the top, and KEEP every page the user has already loaded plus

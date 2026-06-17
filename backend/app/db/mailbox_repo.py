@@ -135,49 +135,74 @@ def upsert_messages(account_id: str, folder: str, messages: list[dict[str, Any]]
       email_id, sender, sender_name, subject, snippet, received_at,
       is_read, is_starred, has_attachments, thread_id
     """
-    if not is_persistence_enabled():
+    if not is_persistence_enabled() or not messages:
         return (0, 0)
+
+    # De-dupe by email_id (a page can repeat an id) preserving last-wins.
+    by_eid: dict[str, dict[str, Any]] = {}
+    for m in messages:
+        eid = m.get("email_id") or m.get("id")
+        if eid:
+            by_eid[eid] = m
+    if not by_eid:
+        return (0, 0)
+
     new_count = updated = 0
+    eids = list(by_eid.keys())
+    # Commit in chunks so a single transaction never grows large enough to hit
+    # the database statement timeout (a 500-row INSERT in one txn was timing out
+    # on the remote pooler and holding a connection long enough to starve the
+    # triage path). Each chunk fetches its existing rows in ONE query rather than
+    # a per-message session.get round-trip.
+    CHUNK = 100
     with get_session() as session:
         if session is None:
             return (0, 0)
-        for m in messages:
-            eid = m.get("email_id") or m.get("id")
-            if not eid:
-                continue
-            row = session.get(MailboxMessage, eid)
-            received = _parse_dt(m.get("received_at"))
-            if row is None:
-                session.add(MailboxMessage(
-                    email_id=eid,
-                    account_id=account_id,
-                    folder=folder,
-                    thread_id=m.get("thread_id"),
-                    sender=m.get("sender") or "unknown@example.com",
-                    sender_name=m.get("sender_name"),
-                    subject=m.get("subject"),
-                    snippet=(m.get("snippet") or m.get("body") or "")[:2000] or None,
-                    received_at=received,
-                    is_read=bool(m.get("is_read", True)),
-                    is_starred=bool(m.get("is_starred", False)),
-                    has_attachments=bool(m.get("has_attachments", False)),
-                    state="active",
-                ))
-                new_count += 1
-            else:
-                row.folder = folder
-                row.state = "active"
-                row.is_read = bool(m.get("is_read", row.is_read))
-                row.is_starred = bool(m.get("is_starred", row.is_starred))
-                row.has_attachments = bool(m.get("has_attachments", row.has_attachments))
-                if m.get("subject") is not None:
-                    row.subject = m.get("subject")
-                if received is not None:
-                    row.received_at = received
-                if m.get("thread_id"):
-                    row.thread_id = m.get("thread_id")
-                updated += 1
-        session.commit()
+        for start in range(0, len(eids), CHUNK):
+            chunk_ids = eids[start:start + CHUNK]
+            existing = {
+                row.email_id: row
+                for row in session.scalars(
+                    select(MailboxMessage).where(MailboxMessage.email_id.in_(chunk_ids))
+                )
+            }
+            for eid in chunk_ids:
+                m = by_eid[eid]
+                received = _parse_dt(m.get("received_at"))
+                row = existing.get(eid)
+                if row is None:
+                    session.add(MailboxMessage(
+                        email_id=eid,
+                        account_id=account_id,
+                        folder=folder,
+                        thread_id=m.get("thread_id"),
+                        sender=m.get("sender") or "unknown@example.com",
+                        sender_name=m.get("sender_name"),
+                        subject=m.get("subject"),
+                        snippet=(m.get("snippet") or m.get("body") or "")[:2000] or None,
+                        received_at=received,
+                        is_read=bool(m.get("is_read", True)),
+                        is_starred=bool(m.get("is_starred", False)),
+                        has_attachments=bool(m.get("has_attachments", False)),
+                        state="active",
+                    ))
+                    new_count += 1
+                else:
+                    row.folder = folder
+                    # Preserve "done" state — sync must not un-mark user overrides.
+                    if row.state != "done":
+                        row.state = "active"
+                    row.is_read = bool(m.get("is_read", row.is_read))
+                    row.is_starred = bool(m.get("is_starred", row.is_starred))
+                    row.has_attachments = bool(m.get("has_attachments", row.has_attachments))
+                    if m.get("subject") is not None:
+                        row.subject = m.get("subject")
+                    if received is not None:
+                        row.received_at = received
+                    if m.get("thread_id"):
+                        row.thread_id = m.get("thread_id")
+                    updated += 1
+            session.commit()
     return (new_count, updated)
 
 
@@ -248,6 +273,7 @@ def list_page(
             .where(MailboxMessage.account_id == account_id)
             .where(MailboxMessage.folder == folder)
             .where(MailboxMessage.state == "active")
+            .where((EmailEnrichment.status == None) | (EmailEnrichment.status != "done"))
             .order_by(MailboxMessage.received_at.desc().nullslast())
             .limit(limit + 1)  # Fetch one extra to detect next page
             .offset(offset)
