@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="public/mailmind-logo.svg" alt="MailMind Logo" width="72" height="72" />
+<img src="frontend/public/mailmind-logo.svg" alt="MailMind Logo" width="72" height="72" />
 
 # MailMind
 
