@@ -36,19 +36,13 @@ MailMind sits alongside Gmail and Outlook as an intelligent co-pilot. It triages
 ## Screenshots
 
 ### Inbox View with Triage Scores
-![Inbox with CRITICAL, HIGH, MEDIUM priority badges](https://via.placeholder.com/800x400?text=Inbox+View+with+Triage+Scores)
+<img src="frontend/public/readme/inboxview.png" alt="Inbox View with Triage" width="100%" />
 
 ### Email Detail Panel & Five-Axis Triage Breakdown
-![Email detail showing triage reasoning across 5 axes](https://via.placeholder.com/800x400?text=Email+Detail+%26+Triage)
+<img src="frontend/public/readme/emaildetail.png" alt="Email Detail with Triage Breakdown" width="100%" />
 
-### Draft Generation with Tone DNA & Calendar Conflicts
-![Draft panel with calendar conflict badge](https://via.placeholder.com/800x400?text=Draft+Generation)
-
-### Commitment Extraction & Approval Gate
-![Commitments list with calendar conflict flags](https://via.placeholder.com/800x400?text=Commitments+Extraction)
-
-### Admin Waitlist Panel
-![Waitlist approval interface](https://via.placeholder.com/800x400?text=Admin+Panel)
+### Draft Generation with Tone DNA & Commitment Extraction
+<img src="frontend/public/readme/draftrag.png" alt="Draft Panel with Commitment Extraction" width="100%" />
 
 ---
 
