@@ -500,50 +500,244 @@ class GraphClient:
     def get_inbox_emails(self, limit: int = 10) -> List[dict[str, Any]]:
         """Return messages from the user's Inbox."""
         if self.use_mock:
-            # Shift received times relative to now so mock inbox is always active and fresh
+            # All times are relative to now so the demo inbox always looks live and fresh.
             now = datetime.utcnow()
             return [
+                # ── CRITICAL ────────────────────────────────────────────────────────────
                 {
                     "email_id": "email-1",
-                    "sender": "sarah.chen@acmecorp.com",
-                    "subject": "URGENT: Production API down — clients impacted",
-                    "body": "Hi team,\n\nOur production API has been returning 500 errors for the past 30 minutes. Three enterprise clients have already called in. We need this resolved ASAP.\n\nPlease review the logs immediately and confirm status.\n\nSarah Chen\nCTO, Acme Corp",
-                    "received_at": (now - timedelta(minutes=10)).isoformat() + "Z",
+                    "sender": "victoria.hayes@nexuscapital.com",
+                    "sender_name": "Victoria Hayes",
+                    "subject": "URGENT: $4.2M wire transfer — authorize before market close today",
+                    "body": (
+                        "Hi,\n\n"
+                        "The Nexus Capital board has approved the Series B tranche. To meet the closing "
+                        "conditions your legal team confirmed yesterday, we need the $4.2M wire authorization "
+                        "signed and submitted to First Republic before 3:00 PM EST today.\n\n"
+                        "Failure to hit this window pushes close to next quarter due to bank blackout dates.\n\n"
+                        "Please confirm authorization by replying to this email or calling me directly at "
+                        "+1 (212) 555-0192 before 2:30 PM.\n\n"
+                        "Victoria Hayes\nManaging Director, Nexus Capital\nvictoria.hayes@nexuscapital.com"
+                    ),
+                    "received_at": (now - timedelta(minutes=8)).isoformat() + "Z",
+                    "is_read": False,
+                    "is_starred": True,
+                    "has_attachments": True,
                 },
+                # ── CRITICAL ────────────────────────────────────────────────────────────
                 {
                     "email_id": "email-2",
-                    "sender": "james.wright@partnerfirm.com",
-                    "subject": "Contract review — sign by Friday EOD",
-                    "body": "Hi,\n\nPlease find attached the revised service agreement for Q3. Legal has approved from our side.\n\nWe need your signature by Friday end of day to proceed with the engagement.\n\nBest,\nJames Wright",
-                    "received_at": (now - timedelta(hours=2)).isoformat() + "Z",
+                    "sender": "cto@globalretail.com",
+                    "sender_name": "Daniel Park",
+                    "subject": "PRODUCTION DOWN — checkout flow returning 500s, revenue impact",
+                    "body": (
+                        "Team,\n\n"
+                        "Our production checkout API has been returning HTTP 500 errors for the last 22 minutes. "
+                        "Payment processing is completely offline. Estimated revenue loss is $18K/minute at current "
+                        "traffic.\n\n"
+                        "Three enterprise clients (RetailMax, FreshCart, StyleHub) have already escalated to their "
+                        "account managers. RetailMax is threatening SLA penalties if this exceeds 30 minutes.\n\n"
+                        "I need a status update and an ETA for resolution immediately. Do not wait for a postmortem "
+                        "— call me now: +1 (415) 555-0847.\n\n"
+                        "Daniel Park\nCTO, Global Retail Inc."
+                    ),
+                    "received_at": (now - timedelta(minutes=22)).isoformat() + "Z",
+                    "is_read": False,
+                    "is_starred": False,
+                    "has_attachments": False,
                 },
+                # ── HIGH ────────────────────────────────────────────────────────────────
                 {
                     "email_id": "email-3",
-                    "sender": "priya.sharma@internal.com",
-                    "subject": "Q3 budget approval needed before Monday",
-                    "body": "Hi,\n\nThe Q3 engineering budget proposal is ready for your review and approval. Finance needs sign-off by Monday morning to proceed with vendor payments.\n\nDeck is attached. Happy to walk through it.\n\nPriya",
-                    "received_at": (now - timedelta(hours=4)).isoformat() + "Z",
+                    "sender": "james.whitfield@lexpartners.com",
+                    "sender_name": "James Whitfield",
+                    "subject": "MSA redline — countersignature required by Friday 5 PM",
+                    "body": (
+                        "Hi,\n\n"
+                        "Please find attached the redlined Master Services Agreement incorporating your legal "
+                        "team's feedback from the 14th. Our counsel has approved all remaining open points.\n\n"
+                        "We need your countersignature by Friday at 5:00 PM GMT to maintain the go-live date "
+                        "of the 28th. If we miss Friday, the implementation team cannot hold the slot and we "
+                        "will need to reschedule to Q4.\n\n"
+                        "Please review Section 8.3 (liability cap) and Section 12 (data processing addendum) "
+                        "in particular — those were the substantive changes from our side.\n\n"
+                        "Let me know if you need a call to walk through anything.\n\n"
+                        "Best regards,\n"
+                        "James Whitfield\nSenior Partner, Lex & Partners LLP"
+                    ),
+                    "received_at": (now - timedelta(hours=1, minutes=45)).isoformat() + "Z",
+                    "is_read": False,
+                    "is_starred": False,
+                    "has_attachments": True,
                 },
-                {
-                    "email_id": "email-5",
-                    "sender": "support-tickets@zendesk.com",
-                    "subject": "Customer ticket #10482: Login issue on Chrome",
-                    "body": "A new support ticket has been created:\n\nCustomer: TechStart Inc\nIssue: Login page spinning indefinitely on Chrome v120\nPriority: High\n\nPlease assign and respond within 4 hours per SLA.",
-                    "received_at": (now - timedelta(hours=8)).isoformat() + "Z",
-                },
+                # ── HIGH ────────────────────────────────────────────────────────────────
                 {
                     "email_id": "email-4",
-                    "sender": "alex.kim@team.com",
-                    "subject": "Reminder: Weekly sync tomorrow 10am",
-                    "body": "Hi all,\n\nJust a reminder that our weekly engineering sync is tomorrow at 10am in the main conference room.\n\nAgenda: sprint review, blockers, upcoming milestones.\n\nAlex",
-                    "received_at": (now - timedelta(hours=6)).isoformat() + "Z",
+                    "sender": "priya.nair@internal.acme",
+                    "sender_name": "Priya Nair",
+                    "subject": "Q3 headcount plan — CFO needs approval by Monday 9 AM",
+                    "body": (
+                        "Hi,\n\n"
+                        "The Q3 headcount proposal is finalised. We're requesting approval for 6 new engineering "
+                        "hires (4 senior, 2 mid-level) and 2 product managers — total annualised cost $1.1M.\n\n"
+                        "The CFO has a board pre-read call at 9:00 AM Monday and needs your sign-off before then "
+                        "so finance can include the headcount numbers in the operating model.\n\n"
+                        "Deck is attached. Key slides: 4 (hiring rationale), 7 (cost breakdown), 9 (timeline).\n\n"
+                        "Happy to jump on a call Friday afternoon if you want to talk through it first.\n\n"
+                        "Priya Nair\nVP Engineering, Acme Corp"
+                    ),
+                    "received_at": (now - timedelta(hours=3, minutes=10)).isoformat() + "Z",
+                    "is_read": False,
+                    "is_starred": False,
+                    "has_attachments": True,
                 },
+                # ── HIGH ────────────────────────────────────────────────────────────────
+                {
+                    "email_id": "email-5",
+                    "sender": "security-alerts@crowdstrike.com",
+                    "sender_name": "CrowdStrike Falcon",
+                    "subject": "[ALERT] Suspicious login attempt — admin panel, Singapore IP",
+                    "body": (
+                        "Security Alert — Action Required\n\n"
+                        "We detected a suspicious login attempt on your admin panel:\n\n"
+                        "  Time:        2024-06-17 04:31 UTC\n"
+                        "  IP Address:  103.86.xx.xx (Singapore)\n"
+                        "  Account:     admin@acme.com\n"
+                        "  Result:      BLOCKED (MFA challenge failed)\n\n"
+                        "This IP has been associated with credential stuffing campaigns in the past 48 hours "
+                        "across 3 other enterprise customers.\n\n"
+                        "Recommended actions:\n"
+                        "1. Rotate the admin@acme.com password immediately\n"
+                        "2. Review audit logs for the past 72 hours\n"
+                        "3. Confirm no sessions were opened from this IP\n\n"
+                        "If you did not initiate this login, contact our SOC at +1 (888) 555-0123.\n\n"
+                        "CrowdStrike Falcon Platform"
+                    ),
+                    "received_at": (now - timedelta(hours=5)).isoformat() + "Z",
+                    "is_read": False,
+                    "is_starred": False,
+                    "has_attachments": False,
+                },
+                # ── MEDIUM ──────────────────────────────────────────────────────────────
                 {
                     "email_id": "email-6",
-                    "sender": "newsletter@techdigest.io",
-                    "subject": "This week in AI: GPT updates, new models",
-                    "body": "Hello,\n\nHere is your weekly digest of AI news and updates. This week: new model releases, industry trends, and upcoming conferences.\n\nClick here to read more.",
-                    "received_at": (now - timedelta(days=1)).isoformat() + "Z",
+                    "sender": "alex.kim@acme.com",
+                    "sender_name": "Alex Kim",
+                    "subject": "Sprint 24 retro notes + action items",
+                    "body": (
+                        "Hi team,\n\n"
+                        "Notes from today's Sprint 24 retrospective:\n\n"
+                        "What went well:\n"
+                        "- Shipped the new onboarding flow on schedule\n"
+                        "- Zero P1 bugs in production this sprint\n\n"
+                        "What to improve:\n"
+                        "- PR review turnaround still averaging 3 days — target is 1 day\n"
+                        "- Staging environment instability blocked QA twice\n\n"
+                        "Action items:\n"
+                        "1. @you — schedule staging infrastructure review with DevOps by Wednesday\n"
+                        "2. Alex — set up PR review rotation starting next Monday\n"
+                        "3. Team — update runbooks for the new deployment process by EOW\n\n"
+                        "Please confirm you've seen item 1 — I'll chase if I don't hear back by Thursday.\n\n"
+                        "Alex Kim\nEngineering Manager"
+                    ),
+                    "received_at": (now - timedelta(hours=6, minutes=30)).isoformat() + "Z",
+                    "is_read": True,
+                    "is_starred": False,
+                    "has_attachments": False,
+                },
+                # ── MEDIUM ──────────────────────────────────────────────────────────────
+                {
+                    "email_id": "email-7",
+                    "sender": "onboarding@stripe.com",
+                    "sender_name": "Stripe",
+                    "subject": "Action required: complete your Stripe Connect verification",
+                    "body": (
+                        "Hi there,\n\n"
+                        "To continue processing payments above $10,000/month you need to complete identity "
+                        "verification for your Stripe Connect account.\n\n"
+                        "What you need to submit:\n"
+                        "- Government-issued ID for the account owner\n"
+                        "- Business registration document\n"
+                        "- Bank account statement (last 3 months)\n\n"
+                        "Deadline: You have 14 days from today before payouts are paused.\n\n"
+                        "Complete verification → https://dashboard.stripe.com/verify\n\n"
+                        "Questions? Reply to this email or contact support@stripe.com.\n\n"
+                        "The Stripe Team"
+                    ),
+                    "received_at": (now - timedelta(hours=9)).isoformat() + "Z",
+                    "is_read": True,
+                    "is_starred": False,
+                    "has_attachments": False,
+                },
+                # ── MEDIUM ──────────────────────────────────────────────────────────────
+                {
+                    "email_id": "email-8",
+                    "sender": "rachel.torres@designstudio.io",
+                    "sender_name": "Rachel Torres",
+                    "subject": "Brand refresh — 3 concepts ready for feedback",
+                    "body": (
+                        "Hi,\n\n"
+                        "We've completed the first round of brand concepts based on the brief you shared "
+                        "on June 10th. Three directions are ready in Figma:\n\n"
+                        "  Concept A — 'Precision' (clean, minimal, enterprise)\n"
+                        "  Concept B — 'Momentum' (dynamic, gradient-forward, tech)\n"
+                        "  Concept C — 'Clarity' (warm, approachable, SaaS-standard)\n\n"
+                        "Figma link: https://figma.com/file/demo-brand-refresh\n\n"
+                        "I'd love to get your thoughts before we present to the wider team on Thursday. "
+                        "Even a quick 'leaning toward A' would help us focus the next iteration.\n\n"
+                        "Let me know if you'd like a walkthrough call.\n\n"
+                        "Rachel Torres\nCreative Director, Design Studio"
+                    ),
+                    "received_at": (now - timedelta(hours=11)).isoformat() + "Z",
+                    "is_read": True,
+                    "is_starred": False,
+                    "has_attachments": True,
+                },
+                # ── LOW ─────────────────────────────────────────────────────────────────
+                {
+                    "email_id": "email-9",
+                    "sender": "newsletter@tldr.tech",
+                    "sender_name": "TLDR Newsletter",
+                    "subject": "TLDR Tech — Anthropic raises $3B, Apple WWDC recap",
+                    "body": (
+                        "Good morning!\n\n"
+                        "Today's top stories:\n\n"
+                        "🤖 AI — Anthropic closes $3B Series E at $18B valuation. Focus: safety research and "
+                        "Claude model family expansion.\n\n"
+                        "🍎 APPLE — WWDC 2024 recap: Apple Intelligence, iOS 18, macOS Sequoia announced. "
+                        "On-device ML models for Mail, Messages, and Photos.\n\n"
+                        "⚡ INFRA — Cloudflare announces R2 storage price cuts of 40%. Major win for "
+                        "egress-heavy workloads.\n\n"
+                        "🔒 SECURITY — Critical CVE in OpenSSH (CVE-2024-6387) allows unauthenticated RCE "
+                        "on glibc-based Linux. Patch immediately.\n\n"
+                        "Read more at tldr.tech"
+                    ),
+                    "received_at": (now - timedelta(hours=14)).isoformat() + "Z",
+                    "is_read": True,
+                    "is_starred": False,
+                    "has_attachments": False,
+                },
+                # ── LOW ─────────────────────────────────────────────────────────────────
+                {
+                    "email_id": "email-10",
+                    "sender": "no-reply@notion.so",
+                    "sender_name": "Notion",
+                    "subject": "Your Notion workspace usage report — June 2024",
+                    "body": (
+                        "Hi there,\n\n"
+                        "Here's your Notion workspace summary for June 2024:\n\n"
+                        "  Pages created:    47\n"
+                        "  Edits made:      312\n"
+                        "  Team members:     18 active\n"
+                        "  Most active page: 'Product Roadmap Q3 2024'\n\n"
+                        "Your team is in the top 15% for collaboration activity this month. 🎉\n\n"
+                        "Explore your analytics → notion.so/analytics\n\n"
+                        "The Notion Team"
+                    ),
+                    "received_at": (now - timedelta(days=1, hours=2)).isoformat() + "Z",
+                    "is_read": True,
+                    "is_starred": False,
+                    "has_attachments": False,
                 },
             ]
 
@@ -965,24 +1159,39 @@ class GraphClient:
         if self.use_mock:
             now = datetime.utcnow()
             return [
+                # Conflicts with email-1 (wire transfer deadline today ~3 PM)
                 {
-                    "title": "Production Deployment Sync",
+                    "title": "Investor Relations All-Hands",
                     "start_time": now + timedelta(hours=2),
-                    "end_time": now + timedelta(hours=3),
-                    "organizer": "sarah.chen@acmecorp.com"
+                    "end_time": now + timedelta(hours=3, minutes=30),
+                    "organizer": "victoria.hayes@nexuscapital.com",
+                },
+                # Conflicts with email-3 (MSA countersignature Friday 5 PM)
+                {
+                    "title": "Legal Review — Contract Finalization",
+                    "start_time": now + timedelta(days=2, hours=3),
+                    "end_time": now + timedelta(days=2, hours=4),
+                    "organizer": "james.whitfield@lexpartners.com",
+                },
+                # Conflicts with email-4 (CFO headcount review Monday 9 AM)
+                {
+                    "title": "CFO Board Pre-Read Call",
+                    "start_time": now + timedelta(days=3, hours=9),
+                    "end_time": now + timedelta(days=3, hours=10),
+                    "organizer": "priya.nair@internal.acme",
                 },
                 {
-                    "title": "Acme Budget Review",
-                    "start_time": now + timedelta(days=1, hours=4),
-                    "end_time": now + timedelta(days=1, hours=5),
-                    "organizer": "priya.sharma@internal.com"
+                    "title": "Sprint 25 Planning",
+                    "start_time": now + timedelta(days=1, hours=10),
+                    "end_time": now + timedelta(days=1, hours=11, minutes=30),
+                    "organizer": "alex.kim@acme.com",
                 },
                 {
-                    "title": "Weekly Engineering Sync",
-                    "start_time": now + timedelta(days=2, hours=1),
-                    "end_time": now + timedelta(days=2, hours=2),
-                    "organizer": "alex.kim@team.com"
-                }
+                    "title": "Brand Refresh Presentation",
+                    "start_time": now + timedelta(days=3, hours=14),
+                    "end_time": now + timedelta(days=3, hours=15),
+                    "organizer": "rachel.torres@designstudio.io",
+                },
             ]
 
         # Ensure timestamps are RFC3339 with timezone (use Z for UTC if naive)
@@ -1283,16 +1492,308 @@ class GraphClient:
     def fetch_sent_emails(self, days: int = 180) -> List[dict[str, Any]]:
         """Fetch sent emails from the last N days."""
         if self.use_mock:
-            # Return >= 50 mock sent emails to satisfy the test case and delta query verification
-            mock_emails = []
-            for i in range(55):
-                mock_emails.append({
-                    "id": f"msg-sent-{i}",
-                    "subject": f"Follow-up discussion on project part {i}",
-                    "body": f"Hi team, just wanted to check in on task {i}. Please make sure to complete it by next week. Let me know if any questions. Contact me at john.doe{i}@example.com or +1-555-0199.",
-                    "sentDateTime": datetime.utcnow().isoformat() + "Z"
+            # Rich sent-mail history for realistic Tone DNA — VP/Director persona, enterprise tech company.
+            # Stylistic profile: direct opener, short declarative sentences, numbered action items,
+            # "Thanks" sign-off (never "Best regards"), mild formality, no filler phrases.
+            now = datetime.utcnow()
+            def _days_ago(d: int) -> str:
+                return (now - timedelta(days=d)).isoformat() + "Z"
+
+            rich_sent = [
+                {
+                    "id": "sent-s01",
+                    "subject": "Re: Q3 OKR alignment — action items",
+                    "body": (
+                        "Team,\n\n"
+                        "Good session today. Here is what I need from each of you before Friday:\n\n"
+                        "1. Engineering — finalise capacity estimate for the auth migration.\n"
+                        "2. Product — lock the KR metrics with Priya by Wednesday EOD.\n"
+                        "3. Design — share the revised onboarding flow with me for review.\n\n"
+                        "I'll consolidate and send the deck to the exec team Thursday morning.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(2),
+                },
+                {
+                    "id": "sent-s02",
+                    "subject": "Re: Board pre-read — revenue section",
+                    "body": (
+                        "Marcus,\n\n"
+                        "The ARR slide needs two changes before it goes to the board:\n\n"
+                        "- Remove the enterprise segment breakdown — that is still under NDA with Nexus.\n"
+                        "- Add the net revenue retention number for Q2. Finance has it.\n\n"
+                        "Send me the updated version by 9 AM tomorrow. Board call is at 11.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(4),
+                },
+                {
+                    "id": "sent-s03",
+                    "subject": "Re: Headcount request — 3 senior engineers",
+                    "body": (
+                        "Priya,\n\n"
+                        "I've reviewed the JD and the capacity model. Approved in principle.\n\n"
+                        "Two conditions:\n"
+                        "1. Requisitions need to be live by Monday so we hit the Q3 hiring window.\n"
+                        "2. Loop in Finance before posting — they flagged a budget re-forecast last week.\n\n"
+                        "Let me know once reqs are posted.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(6),
+                },
+                {
+                    "id": "sent-s04",
+                    "subject": "Re: MSA countersignature — Nexus Capital",
+                    "body": (
+                        "James,\n\n"
+                        "I've reviewed the redlines. Section 9.2 indemnification is still too broad — "
+                        "we cannot accept unlimited liability on data breaches outside our control.\n\n"
+                        "Proposed language attached. If Nexus accepts, I can sign by Friday 5 PM.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(7),
+                },
+                {
+                    "id": "sent-s05",
+                    "subject": "Re: Production incident — payment service",
+                    "body": (
+                        "Daniel,\n\n"
+                        "Acknowledged. Three things I need right now:\n\n"
+                        "1. Customer impact count — how many transactions failed?\n"
+                        "2. Is the rollback deployed or still in progress?\n"
+                        "3. Who owns the external comms if this goes past 30 minutes?\n\n"
+                        "Bridge me in once you have answers.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(10),
+                },
+                {
+                    "id": "sent-s06",
+                    "subject": "Re: Sprint 24 retro — process improvements",
+                    "body": (
+                        "Hi team,\n\n"
+                        "Good retro. The two things I want us to actually change (not just discuss):\n\n"
+                        "1. PR review SLA — 24 hours max. If blocked, escalate, don't wait.\n"
+                        "2. Definition of done must include a staging deployment before marking a ticket ready for QA.\n\n"
+                        "I'll check on these in the Sprint 25 kickoff.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(12),
+                },
+                {
+                    "id": "sent-s07",
+                    "subject": "Re: Stripe verification — business documents",
+                    "body": (
+                        "Hi,\n\n"
+                        "Documents submitted: certificate of incorporation, EIN letter, and bank statement.\n\n"
+                        "Please confirm receipt and let me know if anything else is needed to complete verification.\n\n"
+                        "Thanks,\nAlex Chen\nVP Engineering, TechCorp"
+                    ),
+                    "sentDateTime": _days_ago(14),
+                },
+                {
+                    "id": "sent-s08",
+                    "subject": "Re: CrowdStrike alert — endpoint policy",
+                    "body": (
+                        "Shan,\n\n"
+                        "Understood. Isolate the affected machine now and open a P1 in the security tracker.\n\n"
+                        "I want a preliminary root-cause summary by 3 PM today. "
+                        "If this touches production infra, loop in legal immediately.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(15),
+                },
+                {
+                    "id": "sent-s09",
+                    "subject": "Re: Partnership proposal — DataSync integration",
+                    "body": (
+                        "Hi Sarah,\n\n"
+                        "Thanks for the proposal. The integration looks promising.\n\n"
+                        "To move forward, I need:\n"
+                        "- A technical spec showing how DataSync handles our event schema.\n"
+                        "- Your security posture doc (SOC 2 Type II preferred).\n\n"
+                        "Send those over and we can schedule a technical review next week.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(18),
+                },
+                {
+                    "id": "sent-s10",
+                    "subject": "Re: Annual SaaS renewal — Datadog",
+                    "body": (
+                        "Hi,\n\n"
+                        "We're open to renewing but the current pricing is 18 % above last year with no usage increase. "
+                        "We need a revised quote at the same per-host rate as the previous contract.\n\n"
+                        "If that's possible, I can approve by end of month.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(20),
+                },
+                {
+                    "id": "sent-s11",
+                    "subject": "Re: Performance review — Rithish K",
+                    "body": (
+                        "HR,\n\n"
+                        "Review submitted. Rating: Exceeds Expectations.\n\n"
+                        "Note for the record: Rithish led the LangGraph migration under significant time pressure "
+                        "and delivered on schedule. The promotion recommendation is mine.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(22),
+                },
+                {
+                    "id": "sent-s12",
+                    "subject": "Re: Architecture review — async queue migration",
+                    "body": (
+                        "Team,\n\n"
+                        "I've reviewed the Redis AOF proposal. Approved.\n\n"
+                        "One requirement before we cut over: load test the worker pool at 4× normal volume. "
+                        "I don't want to discover queue lag under the first real traffic spike.\n\n"
+                        "Schedule the cutover for a Tuesday — never Friday.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(25),
+                },
+                {
+                    "id": "sent-s13",
+                    "subject": "Re: On-call rotation — holiday coverage",
+                    "body": (
+                        "Manish,\n\n"
+                        "Rotation looks fair. One note: whoever is primary on December 25th gets a "
+                        "comp day in January — confirm with HR.\n\n"
+                        "Publish the final schedule by Friday so everyone can plan.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(28),
+                },
+                {
+                    "id": "sent-s14",
+                    "subject": "Re: Brand refresh — copy review",
+                    "body": (
+                        "Hi,\n\n"
+                        "Feedback on the tagline options:\n\n"
+                        "1. 'Work smarter' — too generic, every SaaS uses this.\n"
+                        "2. 'Inbox clarity at enterprise scale' — close, but wordy.\n"
+                        "3. 'Your inbox, under control' — this one works. Clear and direct.\n\n"
+                        "Go with option 3. Let me know when the final deck is ready.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(30),
+                },
+                {
+                    "id": "sent-s15",
+                    "subject": "Re: Investor update — July metrics",
+                    "body": (
+                        "Victoria,\n\n"
+                        "July metrics attached. Highlights:\n\n"
+                        "- ARR: $3.2M (up 14 % MoM)\n"
+                        "- NRR: 118 %\n"
+                        "- Churn: 1.2 %\n\n"
+                        "The wire for the next tranche should be timed before Thursday per the term sheet. "
+                        "Let me know if you need anything else before the close.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(32),
+                },
+                {
+                    "id": "sent-s16",
+                    "subject": "Re: PII masking — compliance review",
+                    "body": (
+                        "Shan,\n\n"
+                        "Reviewed the Presidio implementation. Two gaps:\n\n"
+                        "1. Phone numbers in non-standard formats (e.g., +44 20 XXXX XXXX) are not caught.\n"
+                        "2. The audit log currently stores the unmasked entity type label — confirm it never logs the value.\n\n"
+                        "Fix both before we submit the SOC 2 evidence package.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(35),
+                },
+                {
+                    "id": "sent-s17",
+                    "subject": "Re: Database migration — Supabase cutover",
+                    "body": (
+                        "Manish,\n\n"
+                        "Migration plan looks solid. Run it against staging first — full data set, not a subset.\n\n"
+                        "Two things to confirm before production:\n"
+                        "1. Connection pooler tested at 50 concurrent connections.\n"
+                        "2. Rollback script tested and timed — I want that under 5 minutes.\n\n"
+                        "Ping me when staging is green.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(38),
+                },
+                {
+                    "id": "sent-s18",
+                    "subject": "Re: Customer escalation — Acme Corp",
+                    "body": (
+                        "Hi,\n\n"
+                        "I've reviewed the ticket history. This is on us — the webhook delay was "
+                        "a configuration error on our side, not the customer's.\n\n"
+                        "Offer them one month credit and a dedicated post-mortem call. "
+                        "I'll join if they want exec involvement.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(40),
+                },
+                {
+                    "id": "sent-s19",
+                    "subject": "Re: Notion workspace audit",
+                    "body": (
+                        "Hi,\n\n"
+                        "Noted. Archive anything not touched in 6 months.\n\n"
+                        "Keep the Engineering and Product spaces as primary. "
+                        "Everything else should be a sub-page, not a top-level space.\n\n"
+                        "Thanks"
+                    ),
+                    "sentDateTime": _days_ago(42),
+                },
+                {
+                    "id": "sent-s20",
+                    "subject": "Re: Sprint 23 planning — velocity concerns",
+                    "body": (
+                        "Rithish,\n\n"
+                        "Velocity drop makes sense given the infrastructure work last sprint — "
+                        "that is not feature points but it is real work.\n\n"
+                        "For Sprint 23: cap at 60 % feature tickets, 40 % tech debt and infra. "
+                        "I'd rather ship less and keep the codebase healthy.\n\n"
+                        "Thanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(45),
+                },
+            ]
+
+            # Pad to 55 entries with brief follow-ups to satisfy the >= 50 test requirement.
+            filler_subjects = [
+                "Re: Weekly sync — notes", "Re: Slack channel cleanup", "Re: Expense report approval",
+                "Re: Meeting reschedule", "Re: Document access request", "Re: Team lunch — Thursday",
+                "Re: GitHub org permissions", "Re: Monitoring alert — disk usage",
+                "Re: Candidate interview — debrief", "Re: Offsite agenda — October",
+                "Re: Tool evaluation — Figma seats", "Re: Quarterly finance review",
+                "Re: AWS cost optimisation", "Re: New hire onboarding — checklist",
+                "Re: Legal hold — document preservation", "Re: Release notes — v2.4",
+                "Re: Blog post review", "Re: Customer advisory board — agenda",
+                "Re: Penetration test — scope approval", "Re: Annual review — team calibration",
+                "Re: Roadmap sync — next quarter", "Re: Security training — completion reminder",
+                "Re: Demo environment access", "Re: Analytics dashboard — KPI alignment",
+                "Re: Data retention policy — sign-off", "Re: Contractor agreement — renewal",
+                "Re: Office lease — renewal discussion", "Re: Stakeholder update — August",
+                "Re: Product feedback — enterprise pilot", "Re: Interview panel — candidate review",
+                "Re: Budget reforecast — Q4", "Re: Marketing alignment — launch plan",
+                "Re: Support ticket SLA — policy update", "Re: Infrastructure cost review",
+                "Re: LangGraph upgrade — v0.2",
+            ]
+            for idx, subj in enumerate(filler_subjects):
+                rich_sent.append({
+                    "id": f"sent-f{idx:02d}",
+                    "subject": subj,
+                    "body": (
+                        "Hi,\n\nThanks for flagging. "
+                        "Let me know if there's anything blocking and I'll unblock it.\n\nThanks,\nAlex"
+                    ),
+                    "sentDateTime": _days_ago(50 + idx),
                 })
-            return mock_emails
+
+            return rich_sent
 
         # Live Graph query
         prefix = self._get_prefix()

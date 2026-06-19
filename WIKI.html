@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MailMind — Implementation Wiki</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d0f;
+    --surface: #16161a;
+    --surface2: #1e1e24;
+    --border: #2a2a35;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --text: #e4e4f0;
+    --muted: #6b6b82;
+    --green: #22d3a0;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --orange: #fb923c;
+    --blue: #60a5fa;
+    --purple: #c084fc;
+    --tag-bg: #1e1e2e;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent2);
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+  }
+
+  .logo span { color: var(--muted); font-weight: 400; }
+
+  #search {
+    flex: 1;
+    max-width: 560px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 14px 9px 38px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236b6b82' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 12px center;
+  }
+  #search::placeholder { color: var(--muted); }
+  #search:focus { border-color: var(--accent); }
+
+  #count {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* ── LAYOUT ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: calc(100vh - 57px);
+  }
+
+  /* ── SIDEBAR ── */
+  aside {
+    border-right: 1px solid var(--border);
+    padding: 20px 0;
+    position: sticky;
+    top: 57px;
+    height: calc(100vh - 57px);
+    overflow-y: auto;
+  }
+
+  .nav-section {
+    padding: 0 16px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 16px;
+  }
+  .nav-section:first-child { margin-top: 0; }
+
+  aside a {
+    display: block;
+    padding: 6px 16px;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+    transition: all 0.12s;
+  }
+  aside a:hover { color: var(--text); background: var(--surface); }
+  aside a.active { color: var(--accent2); border-left-color: var(--accent); background: var(--surface); }
+
+  /* ── MAIN ── */
+  main {
+    padding: 28px 36px;
+    max-width: 900px;
+  }
+
+  /* ── SECTION HEADER ── */
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-top: 36px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ── FEATURE CARD ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .card:hover { border-color: #3a3a50; }
+  .card.hidden { display: none; }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .card-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  .card-title {
+    font-weight: 600;
+    font-size: 14px;
+    flex: 1;
+  }
+
+  .card-subtitle {
+    font-size: 12px;
+    color: var(--muted);
+    flex: 1;
+    margin-top: 1px;
+  }
+
+  .card-badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .chevron {
+    color: var(--muted);
+    font-size: 11px;
+    transition: transform 0.2s;
+  }
+  .card.open .chevron { transform: rotate(90deg); }
+
+  .card-body {
+    display: none;
+    border-top: 1px solid var(--border);
+    padding: 16px;
+  }
+  .card.open .card-body { display: block; }
+
+  /* ── ENTRY ROWS ── */
+  .entry {
+    display: grid;
+    grid-template-columns: 200px 1fr auto;
+    gap: 10px;
+    align-items: start;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .entry:last-child { border-bottom: none; padding-bottom: 0; }
+  .entry:first-child { padding-top: 0; }
+
+  .entry-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    padding-top: 1px;
+  }
+
+  .entry-value {
+    font-size: 12px;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  /* ── FILE CHIP ── */
+  .file {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 11.5px;
+    color: var(--accent2);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: all;
+    margin: 2px 2px 2px 0;
+    transition: background 0.12s;
+  }
+  .file:hover { background: #25253a; }
+  .file .line { color: var(--green); }
+
+  /* ── TAG ── */
+  .tag {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin: 2px 2px 2px 0;
+  }
+  .tag-ai { background: #1e1560; color: #818cf8; }
+  .tag-db { background: #0f2a1a; color: #22d3a0; }
+  .tag-api { background: #1a1505; color: #fbbf24; }
+  .tag-sec { background: #2a0f0f; color: #f87171; }
+  .tag-infra { background: #0f1a2a; color: #60a5fa; }
+  .tag-sync { background: #1a0f2a; color: #c084fc; }
+  .tag-ux { background: #1a120f; color: #fb923c; }
+
+  /* ── HIGHLIGHT for search ── */
+  mark {
+    background: #fbbf2430;
+    color: var(--yellow);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+  /* ── COLORS per category ── */
+  .c-ai { background: #1e156022; }
+  .c-db { background: #0f2a1a22; }
+  .c-api { background: #1a150522; }
+  .c-sec { background: #2a0f0f22; }
+  .c-infra { background: #0f1a2a22; }
+  .c-sync { background: #1a0f2a22; }
+  .c-ux { background: #1a120f22; }
+
+  /* ── EMPTY STATE ── */
+  #empty {
+    display: none;
+    text-align: center;
+    padding: 64px 0;
+    color: var(--muted);
+  }
+  #empty.visible { display: block; }
+  #empty h3 { font-size: 16px; margin-bottom: 6px; color: var(--text); }
+
+  /* ── COPY TOAST ── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--accent);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all 0.2s;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ── KEYBOARD HINT ── */
+  kbd {
+    display: inline-block;
+    font-size: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: monospace;
+    color: var(--muted);
+  }
+
+  .hint { color: var(--muted); font-size: 12px; }
+
+  @media (max-width: 768px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { display: none; }
+    main { padding: 16px; }
+    .entry { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">MailMind <span>/ Implementation Wiki</span></div>
+  <input id="search" type="text" placeholder="Search features, files, functions… (⌘K)" autocomplete="off" />
+  <div id="count"></div>
+</header>
+
+<div class="layout">
+  <aside id="sidebar">
+    <div class="nav-section">AI Pipeline</div>
+    <a href="#triage">Five-Axis Triage</a>
+    <a href="#pii">PII Masking</a>
+    <a href="#tone">Tone DNA</a>
+    <a href="#draft">Draft Generation</a>
+    <a href="#commitments">Commitment Extraction</a>
+    <a href="#calendar">Calendar Conflict</a>
+    <a href="#rag">RAG Retrieval</a>
+
+    <div class="nav-section">Data & Sync</div>
+    <a href="#sync">Inbox Sync</a>
+    <a href="#webhooks">Webhooks</a>
+    <a href="#queue">Queue / Worker</a>
+    <a href="#override">Priority Override</a>
+    <a href="#audit">Audit Log</a>
+
+    <div class="nav-section">Auth & Security</div>
+    <a href="#session">Session Auth</a>
+    <a href="#oauth">OAuth Connect</a>
+    <a href="#waitlist">Waitlist Gate</a>
+    <a href="#ratelimit">Rate Limiting</a>
+
+    <div class="nav-section">Frontend</div>
+    <a href="#sse">SSE Streaming</a>
+    <a href="#inbox-ui">Inbox UI</a>
+    <a href="#detail-ui">Detail Panel</a>
+    <a href="#commit-ui">Commitments UI</a>
+  </aside>
+
+  <main id="main">
+    <!-- ── AI PIPELINE ── -->
+    <div class="section-title" id="sec-ai">AI Pipeline</div>
+
+    <!-- TRIAGE -->
+    <div class="card" id="triage" data-keywords="triage score scorer axis deadline sender authority sentiment thread decay composite aggregator priority critical high medium low">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ai">⚖️</div>
+        <div>
+          <div class="card-title">Five-Axis Triage Scoring</div>
+          <div class="card-subtitle">Composite priority from deadline, sender, sentiment, thread age, action type</div>
+        </div>
+        <span class="tag tag-ai">AI</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">Deadline Scorer</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/scorers.py:24')">backend/app/services/scorers.py<span class="line">:24</span></span>
+            Scores by proximity to deadline extracted from email body. Exponential decay past due date.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Sender Authority</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/scorers.py:124')">backend/app/services/scorers.py<span class="line">:124</span></span>
+            Scores based on sender's job title, domain rank, org hierarchy position.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Thread Age Decay</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/scorers.py:142')">backend/app/services/scorers.py<span class="line">:142</span></span>
+            Reduces score for long-dormant threads; penalises unanswered chains.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Action Type</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/scorers.py:183')">backend/app/services/scorers.py<span class="line">:183</span></span>
+            Classifies email intent (FYI / question / approval request / urgent action).
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Sentiment Urgency</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/scorers.py:209')">backend/app/services/scorers.py<span class="line">:209</span></span>
+            LLM-based sentiment — escalating language, negative emotion, explicit urgency markers.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Composite Aggregator</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/scorers.py:240')">backend/app/services/scorers.py<span class="line">:240</span></span>
+            Weighted combination of all 5 axes → CRITICAL / HIGH / MEDIUM / LOW label.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">LangGraph Node</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/agents/nodes.py')">backend/app/agents/nodes.py</span>
+            <code>triage_node()</code> — calls scorers, writes enrichment row to DB, streams result.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PII -->
+    <div class="card" id="pii" data-keywords="pii masking presidio spacy anonymise privacy gdpr compliance mask restore sanitiser">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sec">🔒</div>
+        <div>
+          <div class="card-title">PII Masking & Restoration</div>
+          <div class="card-subtitle">Presidio + spaCy — masks before LLM, restores after generation</div>
+        </div>
+        <span class="tag tag-sec">Security</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">PIISanitizer class</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/pii.py:304')">backend/app/services/pii.py<span class="line">:304</span></span>
+            Core class. Presidio AnalyzerEngine + spaCy NER pipeline, pre-warmed at startup.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">detect_pii()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/pii.py:344')">backend/app/services/pii.py<span class="line">:344</span></span>
+            Returns list of PII entity spans (type, start, end, score).
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">mask_text()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/pii.py:422')">backend/app/services/pii.py<span class="line">:422</span></span>
+            Replaces PII with reversible tokens e.g. <code>&lt;PERSON_0&gt;</code>. Returns masked text + token map.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">restore_text()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/pii.py:514')">backend/app/services/pii.py<span class="line">:514</span></span>
+            Re-inserts original values from token map into LLM output.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Public API</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/pii.py:594')">backend/app/services/pii.py<span class="line">:594</span></span>
+            Module-level exports used by all pipeline nodes.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Preview endpoint</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/routes.py')">backend/app/api/routes.py</span>
+            <code>POST /api/pii/preview</code> — demo surface for the Privacy tab.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TONE DNA -->
+    <div class="card" id="tone" data-keywords="tone dna stylometric profile voice sent mail formality signature draft persona">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ai">🧬</div>
+        <div>
+          <div class="card-title">Tone DNA</div>
+          <div class="card-subtitle">Per-account stylometric profile built from sent-mail history</div>
+        </div>
+        <span class="tag tag-ai">AI</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">build_profile()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/tone_dna.py:134')">backend/app/services/tone_dna.py<span class="line">:134</span></span>
+            Computes 8 stylometric features (sentence length, formality, sign-off, opener style…) from sent mail corpus.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">load_profile()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/tone_dna.py:162')">backend/app/services/tone_dna.py<span class="line">:162</span></span>
+            Loads from DB or falls back to local JSON file.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">save_profile()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/tone_dna.py:190')">backend/app/services/tone_dna.py<span class="line">:190</span></span>
+            Persists to DB + local file.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">ingest_and_build()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/tone_dna.py:281')">backend/app/services/tone_dna.py<span class="line">:281</span></span>
+            Orchestrates: fetch sent mail → mask PII → build profile → index into RAG.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Mock sent emails</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/graph.py:1494')">backend/app/services/graph.py<span class="line">:1494</span></span>
+            <span class="file" onclick="copy('backend/app/services/gmail.py:999')">backend/app/services/gmail.py<span class="line">:999</span></span>
+            55 rich sent emails (VP/Director persona) — feeds Tone DNA in mock mode.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DRAFT -->
+    <div class="card" id="draft" data-keywords="draft generate reply compose gpt4o tone writing ai generated">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ai">✍️</div>
+        <div>
+          <div class="card-title">Draft Generation</div>
+          <div class="card-subtitle">GPT-4o reply/compose with injected Tone DNA system prompt</div>
+        </div>
+        <span class="tag tag-ai">AI</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">generate_draft()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/draft_service.py:45')">backend/app/services/draft_service.py<span class="line">:45</span></span>
+            Reply draft — GPT-4o with RAG context + Tone DNA system prefix injected.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Tone DNA injection</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/draft_service.py:85')">backend/app/services/draft_service.py<span class="line">:85</span></span>
+            Lines 85–91: profile converted to system prompt constraints before LLM call.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">generate_compose()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/draft_service.py:150')">backend/app/services/draft_service.py<span class="line">:150</span></span>
+            New-email compose from natural language instruction.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">API route</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/agent_routes.py')">backend/app/api/agent_routes.py</span>
+            <code>POST /api/agent/draft</code>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMMITMENTS -->
+    <div class="card" id="commitments" data-keywords="commitment extract action item deadline task todo ner gpt4o promise obligation">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ai">📋</div>
+        <div>
+          <div class="card-title">Commitment Extraction</div>
+          <div class="card-subtitle">GPT-4o NER — action items, deadlines, obligations from email body</div>
+        </div>
+        <span class="tag tag-ai">AI</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">CommitmentService.extract()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/commitments.py:110')">backend/app/services/commitments.py<span class="line">:110</span></span>
+            Entry point. Checks cache first, defers to LLM extraction.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">_extract_uncached()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/commitments.py:131')">backend/app/services/commitments.py<span class="line">:131</span></span>
+            GPT-4o with few-shot examples. Returns structured list of commitment objects.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">_fallback_extract()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/commitments.py:89')">backend/app/services/commitments.py<span class="line">:89</span></span>
+            Regex-based fallback when LLM unavailable.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">LangGraph node</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/agents/nodes.py')">backend/app/agents/nodes.py</span>
+            <code>commitment_node()</code> — runs in deferred worker after initial triage.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CALENDAR CONFLICT -->
+    <div class="card" id="calendar" data-keywords="calendar conflict detection deadline overlap schedule event clash meeting">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ai">📅</div>
+        <div>
+          <div class="card-title">Calendar Conflict Detection</div>
+          <div class="card-subtitle">Cross-references extracted deadlines against upcoming calendar events</div>
+        </div>
+        <span class="tag tag-ai">AI</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">check_calendar_conflict()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/calendar_service.py:6')">backend/app/services/calendar_service.py<span class="line">:6</span></span>
+            Core overlap check. Compares commitment deadline window against fetched calendar events.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">LangGraph node</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/agents/nodes.py')">backend/app/agents/nodes.py</span>
+            <code>calendar_node()</code> — fetches live calendar, calls check_calendar_conflict(), appends conflict flags.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Mock calendar events</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/graph.py')">backend/app/services/graph.py</span>
+            5 events deliberately overlap demo inbox email deadlines (wire transfer, MSA, headcount, etc.)
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RAG -->
+    <div class="card" id="rag" data-keywords="rag retrieval chromadb embedding similarity vector search ada precedent context">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ai">🔍</div>
+        <div>
+          <div class="card-title">RAG Precedent Engine</div>
+          <div class="card-subtitle">ChromaDB cosine similarity on text-embedding-ada-002</div>
+        </div>
+        <span class="tag tag-ai">AI</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">EmbeddingProvider</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/rag.py:27')">backend/app/services/rag.py<span class="line">:27</span></span>
+            Azure OpenAI ada-002 embeddings with deterministic hash fallback for tests.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">ChromaDBIndex</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/rag.py:126')">backend/app/services/rag.py<span class="line">:126</span></span>
+            Local ChromaDB index with JSON persistence on disk.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">ChromaDBIndex.search()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/rag.py:164')">backend/app/services/rag.py<span class="line">:164</span></span>
+            Cosine similarity search. Threshold ≥ 0.78. Returns top-k historical threads.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">RetrievalService.retrieve()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/rag.py')">backend/app/services/rag.py</span>
+            Orchestrates embed → search → format for injection into draft prompt.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DATA & SYNC ── -->
+    <div class="section-title" id="sec-sync">Data & Sync</div>
+
+    <!-- INBOX SYNC -->
+    <div class="card" id="sync" data-keywords="sync delta backfill inbox mirror mailbox cursor upsert messages server side">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sync">🔄</div>
+        <div>
+          <div class="card-title">Inbox Sync (Server-Side Mirror)</div>
+          <div class="card-subtitle">Delta cursor-based sync — MailboxMessage table mirrors live inbox</div>
+        </div>
+        <span class="tag tag-sync">Sync</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">SyncService.backfill()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/sync_service.py:42')">backend/app/services/sync_service.py<span class="line">:42</span></span>
+            Full enumeration on first connect. Paginates to fetch all folders.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">SyncService.delta_sync()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/sync_service.py:85')">backend/app/services/sync_service.py<span class="line">:85</span></span>
+            Incremental sync using Graph delta link / Gmail history ID cursor.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">upsert_messages()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/db/mailbox_repo.py')">backend/app/db/mailbox_repo.py</span>
+            Inserts new rows or updates existing. Preserves <code>state="done"</code> — never resets user overrides.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">list_page()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/db/mailbox_repo.py')">backend/app/db/mailbox_repo.py</span>
+            Paginated inbox query. Filters <code>state="active"</code> AND enrichment status not "done".
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WEBHOOKS -->
+    <div class="card" id="webhooks" data-keywords="webhook push notification graph gmail pubsub subscription renew delta trigger">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sync">📡</div>
+        <div>
+          <div class="card-title">Webhook Handlers</div>
+          <div class="card-subtitle">Microsoft Graph change notifications + Gmail Pub/Sub push</div>
+        </div>
+        <span class="tag tag-sync">Sync</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">graph_webhook()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/sync_routes.py:33')">backend/app/api/sync_routes.py<span class="line">:33</span></span>
+            Validates <code>clientState</code>, parses change notifications, triggers background delta sync.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">gmail_webhook()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/sync_routes.py:68')">backend/app/api/sync_routes.py<span class="line">:68</span></span>
+            Verifies Pub/Sub push token, extracts historyId, triggers delta sync.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">_sync_account()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/sync_routes.py:114')">backend/app/api/sync_routes.py<span class="line">:114</span></span>
+            Background callback — enqueues new messages for enrichment after sync.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Activation requirement</div>
+          <div class="entry-value">
+            Set <code>BACKEND_PUBLIC_URL</code> env var. Renew cron needed for Graph subscription expiry.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUEUE / WORKER -->
+    <div class="card" id="queue" data-keywords="queue worker enqueue dequeue redis enrichment consumer background job processing">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-infra">⚙️</div>
+        <div>
+          <div class="card-title">Queue & Enrichment Worker</div>
+          <div class="card-subtitle">In-memory (dev) / Redis AOF (prod) — deferred pipeline consumer</div>
+        </div>
+        <span class="tag tag-infra">Infra</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">EmailQueue.enqueue()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/queue/queue.py:25')">backend/app/queue/queue.py<span class="line">:25</span></span>
+            Pushes email ID + account ID onto queue.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">EmailQueue.dequeue()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/queue/queue.py:29')">backend/app/queue/queue.py<span class="line">:29</span></span>
+            Blocking pop (Redis: BLPOP; in-memory: deque).
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">EnrichmentWorker.run()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/workers/enrichment.py:164')">backend/app/workers/enrichment.py<span class="line">:164</span></span>
+            Infinite consumer loop. Handles SIGTERM gracefully for zero-downtime deploys.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">EnrichmentWorker.process_one()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/workers/enrichment.py:84')">backend/app/workers/enrichment.py<span class="line">:84</span></span>
+            Runs deferred nodes: commitment extraction, calendar guard, RAG indexing. Exponential backoff retry.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Scale</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('docker-compose.scale.yml:37')">docker-compose.scale.yml<span class="line">:37</span></span>
+            <code>docker compose ... up --scale worker=4</code> — stateless replicas.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRIORITY OVERRIDE -->
+    <div class="card" id="override" data-keywords="priority override done mark complete feedback loop persist db manual change">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-db">✅</div>
+        <div>
+          <div class="card-title">Priority Override / Mark Done</div>
+          <div class="card-subtitle">User override persists to DB, excluded from inbox immediately</div>
+        </div>
+        <span class="tag tag-db">DB</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">API route</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/agent_routes.py:464')">backend/app/api/agent_routes.py<span class="line">:464</span></span>
+            <code>POST /api/agent/override</code> — accepts <code>priority</code> field including <code>"DONE"</code>.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">record_priority_override()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/db/repository.py:245')">backend/app/db/repository.py<span class="line">:245</span></span>
+            Writes <code>TriagePriorityOverride</code> row + sets <code>EmailEnrichment.status = "done"</code> + sets <code>MailboxMessage.state = "done"</code>.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Sync preservation</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/db/mailbox_repo.py')">backend/app/db/mailbox_repo.py</span>
+            <code>upsert_messages()</code>: <code>if row.state != "done": row.state = "active"</code> — delta sync never resets done state.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUDIT LOG -->
+    <div class="card" id="audit" data-keywords="audit log compliance append only trace action history security">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sec">📜</div>
+        <div>
+          <div class="card-title">Audit Log</div>
+          <div class="card-subtitle">Append-only table — every pipeline action, no raw PII</div>
+        </div>
+        <span class="tag tag-sec">Security</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">write_audit()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/db/repository.py:221')">backend/app/db/repository.py<span class="line">:221</span></span>
+            Writes <code>AuditLog</code> row. Never stores raw PII — only masked entity type labels.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Called from</div>
+          <div class="entry-value">
+            Priority override (repository.py ~307), enrichment completion (workers/enrichment.py ~107), OAuth events (routes.py).
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Retention</div>
+          <div class="entry-value">
+            Configurable via <code>DATA_RETENTION_DAYS</code> env var (default 90 days).
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── AUTH & SECURITY ── -->
+    <div class="section-title" id="sec-auth">Auth & Security</div>
+
+    <!-- SESSION -->
+    <div class="card" id="session" data-keywords="session auth cookie httponly sha256 token validate create 24h">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sec">🍪</div>
+        <div>
+          <div class="card-title">Session Auth</div>
+          <div class="card-subtitle">SHA-256 hashed tokens, HttpOnly cookies, 24h TTL</div>
+        </div>
+        <span class="tag tag-sec">Security</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">SessionService</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/session_service.py:241')">backend/app/services/session_service.py<span class="line">:241</span></span>
+            Creates and validates sessions. Token stored as SHA-256 hash, never plaintext.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">create_session()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/session_service.py:252')">backend/app/services/session_service.py<span class="line">:252</span></span>
+            Issues 24h session. Sets <code>HttpOnly; Secure; SameSite=Strict</code> cookie.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">get_user_id_from_session()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/session_service.py:256')">backend/app/services/session_service.py<span class="line">:256</span></span>
+            Validates session token from cookie on every request.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">DBSessionBackend</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/services/session_service.py:124')">backend/app/services/session_service.py<span class="line">:124</span></span>
+            Stores/looks up hashed tokens in DB with TTL expiry.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- OAUTH -->
+    <div class="card" id="oauth" data-keywords="oauth microsoft google callback connect account link token fernet encrypt">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sec">🔑</div>
+        <div>
+          <div class="card-title">OAuth Account Connect</div>
+          <div class="card-subtitle">Microsoft + Google callbacks → account link → Fernet-encrypted token storage</div>
+        </div>
+        <span class="tag tag-sec">Security</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">_finish_oauth_connect()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/routes.py:100')">backend/app/api/routes.py<span class="line">:100</span></span>
+            Shared finaliser: validates waitlist → creates user/account → encrypts token → issues session.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">microsoft_callback()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/routes.py:882')">backend/app/api/routes.py<span class="line">:882</span></span>
+            <code>GET /auth/microsoft/callback</code>
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">google_callback()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/routes.py:976')">backend/app/api/routes.py<span class="line">:976</span></span>
+            <code>GET /auth/google/callback</code>
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Token encryption</div>
+          <div class="entry-value">
+            Fernet-AES-128 at rest. Key from <code>TOKEN_ENCRYPTION_KEY</code> (Azure Key Vault in prod).
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WAITLIST -->
+    <div class="card" id="waitlist" data-keywords="waitlist access gate beta allow list admin approve reject bootstrap">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sec">🚦</div>
+        <div>
+          <div class="card-title">Waitlist / Access Gate</div>
+          <div class="card-subtitle">Private-beta allow-list checked at OAuth callback; admin panel to approve</div>
+        </div>
+        <span class="tag tag-sec">Security</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">join_waitlist()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/waitlist_routes.py:76')">backend/app/api/waitlist_routes.py<span class="line">:76</span></span>
+            Public endpoint. Adds email as <code>status="pending"</code>.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">is_email_allowed()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/waitlist_routes.py:243')">backend/app/api/waitlist_routes.py<span class="line">:243</span></span>
+            Checks bootstrap set (env var) OR approved row. Called in <code>_finish_oauth_connect()</code> at line 132.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">admin_approve()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/waitlist_routes.py:154')">backend/app/api/waitlist_routes.py<span class="line">:154</span></span>
+            Admin endpoint guarded by <code>X-Admin-Token</code> header (<code>ADMIN_TOKEN</code> secret).
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">admin_reject()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/waitlist_routes.py:199')">backend/app/api/waitlist_routes.py<span class="line">:199</span></span>
+            Revokes all active sessions for the rejected email immediately.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Admin UI</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('frontend/app/admin')">frontend/app/admin</span>
+            Next.js admin page — approve/reject queue.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RATE LIMIT -->
+    <div class="card" id="ratelimit" data-keywords="rate limit middleware per session ip 100 request minute throttle">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-sec">🛡️</div>
+        <div>
+          <div class="card-title">Rate Limiting</div>
+          <div class="card-subtitle">100 req/min per session — fixed-window enforced in middleware</div>
+        </div>
+        <span class="tag tag-sec">Security</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">RateLimitMiddleware</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/middleware.py:68')">backend/app/middleware.py<span class="line">:68</span></span>
+            Per-IP fixed-window rate limiter. 100 req/min default, configurable.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Endpoint-level limits</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/routes.py:66')">backend/app/api/routes.py<span class="line">:66</span></span>
+            Stricter per-IP per-minute limits on auth and OAuth endpoints.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── FRONTEND ── -->
+    <div class="section-title" id="sec-frontend">Frontend</div>
+
+    <!-- SSE -->
+    <div class="card" id="sse" data-keywords="sse server sent events stream pipeline realtime enrichment frontend langgraph">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ux">📺</div>
+        <div>
+          <div class="card-title">SSE Streaming</div>
+          <div class="card-subtitle">LangGraph .stream() → SSE → frontend real-time enrichment updates</div>
+        </div>
+        <span class="tag tag-ux">UX</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">stream_pipeline()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/agent_routes.py:209')">backend/app/api/agent_routes.py<span class="line">:209</span></span>
+            <code>POST /api/agent/stream</code> — returns <code>text/event-stream</code>.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">_stream_body()</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/agent_routes.py:235')">backend/app/api/agent_routes.py<span class="line">:235</span></span>
+            Generator. Each LangGraph state update → <code>data: {...}\n\n</code> SSE event.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Batch triage SSE</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('backend/app/api/agent_routes.py:511')">backend/app/api/agent_routes.py<span class="line">:511</span></span>
+            <code>triage_page_stream()</code> — streams enrichment for multiple emails on inbox load.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Frontend hook</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('frontend/hooks')">frontend/hooks/</span>
+            <code>useEmails</code> — EventSource consumer, updates inbox state on each SSE chunk.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INBOX UI -->
+    <div class="card" id="inbox-ui" data-keywords="inbox list ui component email card priority badge frontend react">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ux">📥</div>
+        <div>
+          <div class="card-title">Inbox UI</div>
+          <div class="card-subtitle">Email list with priority badges, real-time triage updates</div>
+        </div>
+        <span class="tag tag-ux">UX</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">Inbox component</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('frontend/components')">frontend/components/</span>
+            Inbox list, email card, priority badge components.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Priority override UI</div>
+          <div class="entry-value">
+            Drop-down on each email card. Calls <code>POST /api/agent/override</code>. Immediately removes "done" emails from list without reload.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">IndexedDB cache</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('frontend/lib')">frontend/lib/</span>
+            Score cache with 30-day TTL per-user namespace. Avoids redundant enrichment requests.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DETAIL PANEL -->
+    <div class="card" id="detail-ui" data-keywords="detail panel email view body triage score reasoning axes sender">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ux">🔎</div>
+        <div>
+          <div class="card-title">Detail Panel</div>
+          <div class="card-subtitle">Full email view with triage reasoning, five-axis breakdown, draft button</div>
+        </div>
+        <span class="tag tag-ux">UX</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">Detail component</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('frontend/components')">frontend/components/</span>
+            Shows email body, five-axis score breakdown with reasoning text, draft/compose buttons.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">DOMPurify sanitisation</div>
+          <div class="entry-value">
+            HTML email bodies sanitised with DOMPurify before rendering. Prevents XSS from email content.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMMITMENTS UI -->
+    <div class="card" id="commit-ui" data-keywords="commitments ui action items list confirm task google calendar todo microsoft">
+      <div class="card-header" onclick="toggle(this)">
+        <div class="card-icon c-ux">☑️</div>
+        <div>
+          <div class="card-title">Commitments UI</div>
+          <div class="card-subtitle">Action item list — confirm to push to MS To-Do / Google Calendar</div>
+        </div>
+        <span class="tag tag-ux">UX</span>
+        <span class="chevron">▶</span>
+      </div>
+      <div class="card-body">
+        <div class="entry">
+          <div class="entry-label">CommitmentGate component</div>
+          <div class="entry-value">
+            <span class="file" onclick="copy('frontend/components')">frontend/components/</span>
+            Renders extracted commitments as interactive checklist. Confirm button calls backend to create calendar event or To-Do task.
+          </div>
+        </div>
+        <div class="entry">
+          <div class="entry-label">Human-in-the-loop</div>
+          <div class="entry-value">
+            No commitment is acted upon without explicit user confirmation. Protocol-layer guarantee, not UI-layer.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty">
+      <h3>No results</h3>
+      <p>Try a different keyword — feature name, file name, or concept.</p>
+    </div>
+  </main>
+</div>
+
+<div id="toast">Copied to clipboard</div>
+
+<script>
+  // ── TOGGLE CARD ──
+  function toggle(header) {
+    header.closest('.card').classList.toggle('open');
+  }
+
+  // ── COPY FILE PATH ──
+  function copy(text) {
+    navigator.clipboard.writeText(text).catch(() => {});
+    const toast = document.getElementById('toast');
+    toast.textContent = `Copied: ${text}`;
+    toast.classList.add('show');
+    clearTimeout(window._toastTimer);
+    window._toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
+  }
+
+  // ── SEARCH ──
+  const searchInput = document.getElementById('search');
+  const countEl = document.getElementById('count');
+  const cards = Array.from(document.querySelectorAll('.card'));
+  const emptyEl = document.getElementById('empty');
+
+  function highlight(el, term) {
+    // Reset inner text first (stored in data-original)
+    el.querySelectorAll('[data-original]').forEach(n => {
+      n.innerHTML = n.dataset.original;
+      delete n.dataset.original;
+    });
+    if (!term) return;
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const re = new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    nodes.forEach(n => {
+      if (!n.textContent.match(re)) return;
+      const span = document.createElement('span');
+      span.dataset.original = n.textContent;
+      span.innerHTML = n.textContent.replace(re, '<mark>$1</mark>');
+      n.parentNode.replaceChild(span, n);
+    });
+  }
+
+  function search(q) {
+    const term = q.trim().toLowerCase();
+    let visible = 0;
+    cards.forEach(card => {
+      const keywords = card.dataset.keywords || '';
+      const text = (card.textContent + ' ' + keywords).toLowerCase();
+      const match = !term || text.includes(term);
+      card.classList.toggle('hidden', !match);
+      if (match) {
+        visible++;
+        highlight(card, term);
+      }
+    });
+    countEl.textContent = term ? `${visible} result${visible !== 1 ? 's' : ''}` : '';
+    emptyEl.classList.toggle('visible', visible === 0 && !!term);
+  }
+
+  searchInput.addEventListener('input', e => search(e.target.value));
+
+  // ── KEYBOARD SHORTCUT ──
+  document.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      searchInput.focus();
+      searchInput.select();
+    }
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      search('');
+      searchInput.blur();
+    }
+  });
+
+  // ── SIDEBAR ACTIVE LINK ──
+  const sideLinks = document.querySelectorAll('aside a');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        sideLinks.forEach(a => {
+          a.classList.toggle('active', a.getAttribute('href') === '#' + id);
+        });
+      }
+    });
+  }, { threshold: 0.4 });
+
+  document.querySelectorAll('.card[id], .section-title[id]').forEach(el => observer.observe(el));
+
+  // ── INIT COUNT ──
+  countEl.textContent = '';
+</script>
+</body>
+</html>

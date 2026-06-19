@@ -36,7 +36,7 @@ interface EmailListProps {
   onArchiveEmail?: (id: string) => void;
   onReportSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
-  onMarkDone?: (id: string) => void;
+  onMarkDone?: (id: string, sender: string, priority?: string) => void;
   onOverridePriority?: (id: string, sender: string, priority: import('./PriorityOverrideMenu').OverridePriority, current: import('../../lib/types').Priority) => void;
   doneEmailIds?: Set<string>;
   // Streaming triage progress

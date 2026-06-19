@@ -13,7 +13,7 @@ interface EmailListItemProps {
   onArchive?: (id: string) => void;
   onSpam?: (id: string) => void;
   onToggleRead?: (id: string, read: boolean) => void;
-  onMarkDone?: (id: string) => void;
+  onMarkDone?: (id: string, sender: string, priority?: string) => void;
   onOverridePriority?: (id: string, sender: string, priority: OverridePriority, current: Priority) => void;
   isFullWidth: boolean;
   /** Whether triage scoring applies to this folder (false for Sent/Drafts/etc). */
@@ -82,7 +82,7 @@ export function EmailListItem({ email, isSelected, onClick, onToggleStar, onTras
 
   const DoneButton = onMarkDone && !isDone ? (
     <button
-      onClick={(e) => { e.stopPropagation(); onMarkDone(email.id); }}
+      onClick={(e) => { e.stopPropagation(); onMarkDone(email.id, email.sender ?? '', email.triage?.priority); }}
       className="p-1 rounded-md text-base-content/60 hover:bg-emerald-500/10 hover:text-emerald-500 transition-all cursor-pointer"
       title="Mark as Done"
       id={`btn-done-${email.id}`}
