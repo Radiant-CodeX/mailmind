@@ -144,7 +144,7 @@ async def demo_login():
 
         try:
             oauth = session.query(OAuthAccount).filter(
-                OAuthAccount.email == DEMO_ACCOUNT_EMAIL
+                OAuthAccount.account_email == DEMO_ACCOUNT_EMAIL
             ).first()
 
             if not oauth:
