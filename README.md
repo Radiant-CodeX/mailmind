@@ -1,21 +1,19 @@
-<div align="center">
-
-<img src="public/mailmind-logo.svg" alt="MailMind Logo" width="72" height="72" />
-
 # MailMind
 
 **The Intelligent Email Co-Pilot for the Enterprise**
 
 AI-powered inbox triage, commitment extraction, calendar conflict detection, and Tone DNA draft generation — with mandatory human-in-the-loop approval on every outbound action.
 
+<div align="center">
+
 [![CI](https://github.com/Radiant-CodeX/mailmind/actions/workflows/ci.yml/badge.svg)](https://github.com/Radiant-CodeX/mailmind/actions/workflows/ci.yml)
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](#license)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Azure](https://img.shields.io/badge/Azure-OpenAI-0078D4?logo=microsoftazure&logoColor=white)](https://azure.microsoft.com/en-us/products/ai-services/openai-service)
 
-[Live Demo](https://mailmind.radiantsofficial.com) · [API Reference](https://api.radiantsofficial.com/docs) · [Architecture](#architecture)
+[📘 Live Demo](https://mailmind.radiantsofficial.com) · [📚 API Docs](https://api.radiantsofficial.com/docs) · [🏗️ Architecture](#architecture) · [📋 Implementation Wiki](WIKI.html)
 
 </div>
 
@@ -28,6 +26,25 @@ Enterprise knowledge workers lose an average of **2.5 hours per day** to email �
 MailMind sits alongside Gmail and Outlook as an intelligent co-pilot. It triages every incoming message across five explainable axes, surfaces action items and deadlines, guards your calendar against conflicts, and drafts context-aware replies in your own voice — while keeping you in complete control of every outgoing send.
 
 > **No email is ever sent automatically.** Human approval is enforced at the protocol layer, not the UI layer.
+
+---
+
+## Screenshots
+
+### Inbox View with Triage Scores
+![Inbox with CRITICAL, HIGH, MEDIUM priority badges](https://via.placeholder.com/800x400?text=Inbox+View+with+Triage+Scores)
+
+### Email Detail Panel & Five-Axis Triage Breakdown
+![Email detail showing triage reasoning across 5 axes](https://via.placeholder.com/800x400?text=Email+Detail+%26+Triage)
+
+### Draft Generation with Tone DNA & Calendar Conflicts
+![Draft panel with calendar conflict badge](https://via.placeholder.com/800x400?text=Draft+Generation)
+
+### Commitment Extraction & Approval Gate
+![Commitments list with calendar conflict flags](https://via.placeholder.com/800x400?text=Commitments+Extraction)
+
+### Admin Waitlist Panel
+![Waitlist approval interface](https://via.placeholder.com/800x400?text=Admin+Panel)
 
 ---
 
@@ -183,6 +200,7 @@ mailmind/
 ├── docker-compose.yml          # Development stack (mock mode)
 ├── docker-compose.prod.yml     # Production overlay (live Azure)
 ├── docker-compose.scale.yml    # Scale overlay (Redis + workers)
+├── WIKI.html                   # Implementation feature wiki (searchable)
 └── LICENSE
 ```
 
@@ -304,11 +322,7 @@ Pull requests must satisfy:
 
 ## License
 
-Copyright (c) 2025 Radiants. All rights reserved.
-
-This software is proprietary and confidential. Unauthorised copying, distribution, modification, or use of this software, in whole or in part, is strictly prohibited without the prior written permission of Radiants.
-
-See [LICENSE](LICENSE) for the full terms.
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 

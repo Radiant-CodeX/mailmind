@@ -572,31 +572,185 @@ class GmailClient:
 
     # ── mock data ──
     def _mock_inbox(self) -> List[dict[str, Any]]:
+        # Mirror the Graph mock so the demo experience is identical on Gmail accounts.
         now = datetime.utcnow()
         return [
+            # ── CRITICAL ────────────────────────────────────────────────────────
             {
                 "email_id": "gmail-1",
-                "sender": "notifications@github.com",
-                "subject": "[GitHub] Your CI run failed on main",
-                "body": "The workflow 'CI' failed on the latest push to main. Review the logs and re-run.",
-                "received_at": (now - timedelta(minutes=12)).isoformat() + "Z",
-                "is_read": False, "has_attachments": False,
+                "sender": "victoria.hayes@nexuscapital.com",
+                "sender_name": "Victoria Hayes",
+                "subject": "URGENT: $4.2M wire transfer — authorize before market close today",
+                "body": (
+                    "Hi,\n\n"
+                    "The Nexus Capital board has approved the Series B tranche. To meet the closing "
+                    "conditions your legal team confirmed yesterday, we need the $4.2M wire authorization "
+                    "signed and submitted to First Republic before 3:00 PM EST today.\n\n"
+                    "Failure to hit this window pushes close to next quarter due to bank blackout dates.\n\n"
+                    "Please confirm authorization by replying to this email or calling me directly at "
+                    "+1 (212) 555-0192 before 2:30 PM.\n\n"
+                    "Victoria Hayes\nManaging Director, Nexus Capital"
+                ),
+                "received_at": (now - timedelta(minutes=8)).isoformat() + "Z",
+                "is_read": False, "is_starred": True, "has_attachments": True,
             },
+            # ── CRITICAL ────────────────────────────────────────────────────────
             {
                 "email_id": "gmail-2",
-                "sender": "team@notion.so",
-                "subject": "Weekly digest: 4 pages updated",
-                "body": "Here's what changed in your workspace this week. 4 pages were updated by your team.",
-                "received_at": (now - timedelta(hours=3)).isoformat() + "Z",
-                "is_read": True, "has_attachments": True,
+                "sender": "cto@globalretail.com",
+                "sender_name": "Daniel Park",
+                "subject": "PRODUCTION DOWN — checkout flow returning 500s, revenue impact",
+                "body": (
+                    "Team,\n\n"
+                    "Our production checkout API has been returning HTTP 500 errors for the last 22 minutes. "
+                    "Payment processing is completely offline. Estimated revenue loss is $18K/minute.\n\n"
+                    "Three enterprise clients have already escalated. RetailMax is threatening SLA penalties "
+                    "if this exceeds 30 minutes.\n\n"
+                    "I need a status update and an ETA for resolution immediately. Call me now: +1 (415) 555-0847.\n\n"
+                    "Daniel Park\nCTO, Global Retail Inc."
+                ),
+                "received_at": (now - timedelta(minutes=22)).isoformat() + "Z",
+                "is_read": False, "is_starred": False, "has_attachments": False,
             },
+            # ── HIGH ────────────────────────────────────────────────────────────
             {
                 "email_id": "gmail-3",
-                "sender": "ravi.kumar@gmail.com",
-                "subject": "Lunch next week?",
-                "body": "Hey! Are you free for lunch sometime next week? Let me know what day works.",
-                "received_at": (now - timedelta(hours=20)).isoformat() + "Z",
-                "is_read": False, "has_attachments": False,
+                "sender": "james.whitfield@lexpartners.com",
+                "sender_name": "James Whitfield",
+                "subject": "MSA redline — countersignature required by Friday 5 PM",
+                "body": (
+                    "Hi,\n\n"
+                    "Please find attached the redlined Master Services Agreement incorporating your legal "
+                    "team's feedback. Our counsel has approved all remaining open points.\n\n"
+                    "We need your countersignature by Friday at 5:00 PM GMT to maintain the go-live date "
+                    "of the 28th. Missing Friday means rescheduling to Q4.\n\n"
+                    "Please review Section 8.3 (liability cap) and Section 12 (data processing addendum).\n\n"
+                    "James Whitfield\nSenior Partner, Lex & Partners LLP"
+                ),
+                "received_at": (now - timedelta(hours=1, minutes=45)).isoformat() + "Z",
+                "is_read": False, "is_starred": False, "has_attachments": True,
+            },
+            # ── HIGH ────────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-4",
+                "sender": "priya.nair@internal.acme",
+                "sender_name": "Priya Nair",
+                "subject": "Q3 headcount plan — CFO needs approval by Monday 9 AM",
+                "body": (
+                    "Hi,\n\n"
+                    "The Q3 headcount proposal is finalised — 6 engineering hires and 2 PMs, total annualised "
+                    "cost $1.1M. The CFO has a board pre-read call at 9:00 AM Monday and needs your sign-off "
+                    "before then so finance can include the numbers in the operating model.\n\n"
+                    "Deck is attached. Key slides: 4 (rationale), 7 (cost), 9 (timeline).\n\n"
+                    "Priya Nair\nVP Engineering, Acme Corp"
+                ),
+                "received_at": (now - timedelta(hours=3, minutes=10)).isoformat() + "Z",
+                "is_read": False, "is_starred": False, "has_attachments": True,
+            },
+            # ── HIGH ────────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-5",
+                "sender": "security-alerts@crowdstrike.com",
+                "sender_name": "CrowdStrike Falcon",
+                "subject": "[ALERT] Suspicious login attempt — admin panel, Singapore IP",
+                "body": (
+                    "Security Alert — Action Required\n\n"
+                    "Suspicious login attempt detected:\n"
+                    "  Time: 2024-06-17 04:31 UTC\n"
+                    "  IP: 103.86.xx.xx (Singapore)\n"
+                    "  Account: admin@acme.com\n"
+                    "  Result: BLOCKED (MFA failed)\n\n"
+                    "Recommended: rotate password, review audit logs, confirm no open sessions.\n\n"
+                    "CrowdStrike Falcon Platform"
+                ),
+                "received_at": (now - timedelta(hours=5)).isoformat() + "Z",
+                "is_read": False, "is_starred": False, "has_attachments": False,
+            },
+            # ── MEDIUM ──────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-6",
+                "sender": "alex.kim@acme.com",
+                "sender_name": "Alex Kim",
+                "subject": "Sprint 24 retro notes + action items",
+                "body": (
+                    "Hi team,\n\nSprint 24 retrospective notes:\n\n"
+                    "Action items:\n"
+                    "1. @you — schedule staging infrastructure review with DevOps by Wednesday\n"
+                    "2. Alex — set up PR review rotation starting next Monday\n"
+                    "3. Team — update runbooks for new deployment process by EOW\n\n"
+                    "Please confirm you've seen item 1 — I'll chase if I don't hear back by Thursday.\n\n"
+                    "Alex Kim\nEngineering Manager"
+                ),
+                "received_at": (now - timedelta(hours=6, minutes=30)).isoformat() + "Z",
+                "is_read": True, "is_starred": False, "has_attachments": False,
+            },
+            # ── MEDIUM ──────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-7",
+                "sender": "onboarding@stripe.com",
+                "sender_name": "Stripe",
+                "subject": "Action required: complete your Stripe Connect verification",
+                "body": (
+                    "Hi there,\n\n"
+                    "To continue processing payments above $10,000/month you need to complete identity "
+                    "verification for your Stripe Connect account. You have 14 days before payouts are paused.\n\n"
+                    "Submit: Government ID, business registration, bank statement.\n\n"
+                    "Complete verification → https://dashboard.stripe.com/verify\n\n"
+                    "The Stripe Team"
+                ),
+                "received_at": (now - timedelta(hours=9)).isoformat() + "Z",
+                "is_read": True, "is_starred": False, "has_attachments": False,
+            },
+            # ── MEDIUM ──────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-8",
+                "sender": "rachel.torres@designstudio.io",
+                "sender_name": "Rachel Torres",
+                "subject": "Brand refresh — 3 concepts ready for feedback",
+                "body": (
+                    "Hi,\n\n"
+                    "Three brand concepts are ready in Figma:\n"
+                    "  Concept A — Precision (minimal, enterprise)\n"
+                    "  Concept B — Momentum (dynamic, gradient)\n"
+                    "  Concept C — Clarity (warm, approachable)\n\n"
+                    "I'd love your thoughts before we present to the wider team on Thursday.\n\n"
+                    "Rachel Torres\nCreative Director"
+                ),
+                "received_at": (now - timedelta(hours=11)).isoformat() + "Z",
+                "is_read": True, "is_starred": False, "has_attachments": True,
+            },
+            # ── LOW ─────────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-9",
+                "sender": "newsletter@tldr.tech",
+                "sender_name": "TLDR Newsletter",
+                "subject": "TLDR Tech — Anthropic raises $3B, Apple WWDC recap",
+                "body": (
+                    "Today's top stories:\n\n"
+                    "🤖 Anthropic closes $3B Series E at $18B valuation.\n"
+                    "🍎 WWDC 2024: Apple Intelligence, iOS 18, macOS Sequoia.\n"
+                    "⚡ Cloudflare R2 storage price cuts of 40%.\n"
+                    "🔒 Critical CVE in OpenSSH — patch immediately.\n\n"
+                    "Read more at tldr.tech"
+                ),
+                "received_at": (now - timedelta(hours=14)).isoformat() + "Z",
+                "is_read": True, "is_starred": False, "has_attachments": False,
+            },
+            # ── LOW ─────────────────────────────────────────────────────────────
+            {
+                "email_id": "gmail-10",
+                "sender": "no-reply@notion.so",
+                "sender_name": "Notion",
+                "subject": "Your Notion workspace usage report — June 2024",
+                "body": (
+                    "Hi there,\n\n"
+                    "June 2024 workspace summary:\n"
+                    "  Pages created: 47 · Edits: 312 · Active members: 18\n\n"
+                    "Your team is in the top 15% for collaboration this month. 🎉\n\n"
+                    "The Notion Team"
+                ),
+                "received_at": (now - timedelta(days=1, hours=2)).isoformat() + "Z",
+                "is_read": True, "is_starred": False, "has_attachments": False,
             },
         ]
 
@@ -843,12 +997,85 @@ class GmailClient:
 
     def fetch_sent_emails(self, days: int = 30) -> List[dict[str, Any]]:
         if self.use_mock:
-            return [
-                {"id": f"gmail-sent-{i}", "subject": f"Re: project sync {i}",
-                 "body": f"Thanks, I'll handle item {i} by end of week.",
-                 "sentDateTime": datetime.utcnow().isoformat() + "Z"}
-                for i in range(5)
+            # Rich sent-mail history — same VP/Director persona as the Graph mock,
+            # so Tone DNA is consistent regardless of which provider the demo uses.
+            now = datetime.utcnow()
+            def _ago(d: int) -> str:
+                return (now - timedelta(days=d)).isoformat() + "Z"
+
+            rich = [
+                {"id": "gs01", "subject": "Re: Q3 OKR alignment — action items",
+                 "body": "Team,\n\nGood session. Before Friday:\n1. Engineering — capacity estimate for auth migration.\n2. Product — lock KR metrics with Priya by Wednesday EOD.\n3. Design — onboarding flow for my review.\n\nI'll send the exec deck Thursday.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(2)},
+                {"id": "gs02", "subject": "Re: Production incident — payment service",
+                 "body": "Daniel,\n\nAcknowledged. I need:\n1. Customer impact count.\n2. Rollback status.\n3. Comms owner if this exceeds 30 minutes.\n\nBridge me in.\n\nThanks",
+                 "sentDateTime": _ago(5)},
+                {"id": "gs03", "subject": "Re: Headcount request — 3 senior engineers",
+                 "body": "Priya,\n\nApproved in principle. Reqs live by Monday, loop in Finance first.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(7)},
+                {"id": "gs04", "subject": "Re: MSA countersignature — Nexus Capital",
+                 "body": "James,\n\nSection 9.2 indemnification is still too broad. Proposed language attached. If Nexus accepts, I can sign by Friday 5 PM.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(9)},
+                {"id": "gs05", "subject": "Re: Architecture review — async queue migration",
+                 "body": "Team,\n\nRedis AOF approved. Load test at 4× before cutover. Schedule for Tuesday — never Friday.\n\nThanks",
+                 "sentDateTime": _ago(12)},
+                {"id": "gs06", "subject": "Re: Sprint 24 retro — process improvements",
+                 "body": "Hi team,\n\nTwo actual changes:\n1. PR review SLA — 24 hours max.\n2. Staging deployment before QA sign-off.\n\nI'll check in Sprint 25 kickoff.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(14)},
+                {"id": "gs07", "subject": "Re: Brand refresh — copy review",
+                 "body": "Hi,\n\nOption 3 — 'Your inbox, under control' — works. Clear and direct. Go with it.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(16)},
+                {"id": "gs08", "subject": "Re: Investor update — July metrics",
+                 "body": "Victoria,\n\nMetrics attached. ARR $3.2M (+14 % MoM), NRR 118 %, churn 1.2 %. Wire timing per term sheet — before Thursday.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(18)},
+                {"id": "gs09", "subject": "Re: CrowdStrike alert — endpoint policy",
+                 "body": "Shan,\n\nIsolate the machine now. Open a P1. Root-cause summary by 3 PM. If it touches prod infra, loop in legal.\n\nThanks",
+                 "sentDateTime": _ago(20)},
+                {"id": "gs10", "subject": "Re: Customer escalation — Acme Corp",
+                 "body": "Hi,\n\nThis is on us. Offer one month credit and a post-mortem call. I'll join if they want exec involvement.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(22)},
+                {"id": "gs11", "subject": "Re: Database migration — Supabase cutover",
+                 "body": "Manish,\n\nRun against staging with full data set first. Pooler tested at 50 conns, rollback under 5 minutes. Ping me when staging is green.\n\nThanks",
+                 "sentDateTime": _ago(25)},
+                {"id": "gs12", "subject": "Re: PII masking — compliance review",
+                 "body": "Shan,\n\nTwo gaps: non-standard phone formats not caught; confirm audit log never stores the raw value. Fix before SOC 2 submission.\n\nThanks",
+                 "sentDateTime": _ago(28)},
+                {"id": "gs13", "subject": "Re: Annual SaaS renewal — Datadog",
+                 "body": "Hi,\n\nPricing is 18 % up with no usage increase. Need the same per-host rate as last year. If possible, I'll approve by end of month.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(30)},
+                {"id": "gs14", "subject": "Re: On-call rotation — holiday coverage",
+                 "body": "Manish,\n\nRotation is fair. Dec 25th primary gets a comp day in January — confirm with HR. Publish by Friday.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(33)},
+                {"id": "gs15", "subject": "Re: Performance review — Rithish K",
+                 "body": "HR,\n\nRating: Exceeds Expectations. Rithish led the LangGraph migration on schedule under pressure. Promotion recommendation is mine.\n\nThanks,\nAlex",
+                 "sentDateTime": _ago(36)},
             ]
+
+            filler = [
+                "Re: Weekly sync — notes", "Re: Expense report approval", "Re: Meeting reschedule",
+                "Re: GitHub org permissions", "Re: Monitoring alert — disk usage",
+                "Re: Candidate debrief", "Re: AWS cost optimisation", "Re: Release notes — v2.4",
+                "Re: Roadmap sync — Q4", "Re: Security training — completion",
+                "Re: Demo environment access", "Re: Data retention policy",
+                "Re: Contractor agreement renewal", "Re: Stakeholder update — August",
+                "Re: Budget reforecast — Q4", "Re: Marketing launch alignment",
+                "Re: Support SLA policy update", "Re: Infrastructure cost review",
+                "Re: LangGraph upgrade — v0.2", "Re: Interview panel debrief",
+                "Re: New hire onboarding", "Re: Blog post review", "Re: Figma seats audit",
+                "Re: Customer advisory board agenda", "Re: Pen-test scope approval",
+                "Re: Offsite agenda — October", "Re: Slack cleanup", "Re: Document access request",
+                "Re: Team lunch — Thursday", "Re: Notion workspace audit",
+                "Re: Partnership proposal — DataSync", "Re: Stripe verification",
+                "Re: Sprint 23 velocity", "Re: Board pre-read", "Re: Q4 planning kickoff",
+            ]
+            for idx, subj in enumerate(filler):
+                rich.append({
+                    "id": f"gf{idx:02d}",
+                    "subject": subj,
+                    "body": "Hi,\n\nThanks for flagging. Let me know if anything is blocking.\n\nThanks,\nAlex",
+                    "sentDateTime": _ago(40 + idx),
+                })
+            return rich
         return self._list_formatted("SENT", 50, date_field="sentDateTime")
 
     def get_draft_emails(self, limit: int = 10) -> List[dict[str, Any]]:

@@ -57,16 +57,11 @@ export default function Home() {
   const [isComposeOpen, setIsComposeOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [doneEmailIds, setDoneEmailIds] = useState<Set<string>>(new Set());
   // Local priority overrides (id → priority) so the badge updates instantly
   // while the correction is persisted + fed into the triage loop server-side.
   const [priorityOverrides, setPriorityOverrides] = useState<
     Record<string, Priority>
   >({});
-
-  const markEmailDone = (id: string) => {
-    setDoneEmailIds((prev) => new Set([...prev, id]));
-  };
 
   const handleOverridePriority = (
     id: string,
@@ -74,34 +69,25 @@ export default function Home() {
     next: OverridePriority,
     current: Priority,
   ) => {
-    // Optimistic UI: DONE hides the badge, anything else recolors it.
     if (next === "DONE") {
-      markEmailDone(id);
+      // markDone handles optimistic removal + cache invalidation + rollback
+      markDone(id, sender, current);
     } else {
       setPriorityOverrides((prev) => ({ ...prev, [id]: next }));
-    }
-    overrideEmailPriority({
-      email_id: id,
-      sender,
-      override_priority: next,
-      original_priority: current,
-    }).catch((err) => {
-      console.error("Priority override failed:", err);
-      // Roll back the optimistic change on failure.
-      if (next === "DONE") {
-        setDoneEmailIds((prev) => {
-          const n = new Set(prev);
-          n.delete(id);
-          return n;
-        });
-      } else {
+      overrideEmailPriority({
+        email_id: id,
+        sender,
+        override_priority: next,
+        original_priority: current,
+      }).catch((err) => {
+        console.error("Priority override failed:", err);
         setPriorityOverrides((prev) => {
           const n = { ...prev };
           delete n[id];
           return n;
         });
-      }
-    });
+      });
+    }
   };
 
   // Load auth status on mount — retries up to 3× (500ms apart) to handle the
@@ -205,6 +191,7 @@ export default function Home() {
     triageTotal,
     patchEmailTriage,
     allEmails,
+    markDone,
   } = useEmails(activeFolder, authenticated && !checkingAuth);
 
   const scoreFor = (p: Priority): number =>
@@ -290,9 +277,9 @@ export default function Home() {
   // Auto-mark email as Done when a reply is successfully sent
   useEffect(() => {
     if (isDraftApproved && selectedEmail?.id) {
-      markEmailDone(selectedEmail.id);
+      markDone(selectedEmail.id, selectedEmail.sender ?? '', selectedEmail.triage?.priority);
     }
-  }, [isDraftApproved, selectedEmail?.id]);
+  }, [isDraftApproved, selectedEmail?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const {
     commitments,
@@ -431,9 +418,9 @@ export default function Home() {
                   onArchiveEmail={archiveEmail}
                   onReportSpam={reportSpam}
                   onToggleRead={markRead}
-                  onMarkDone={markEmailDone}
+                  onMarkDone={markDone}
                   onOverridePriority={handleOverridePriority}
-                  doneEmailIds={doneEmailIds}
+
                   isStreaming={isStreaming}
                   triageProgress={triageProgress}
                   triageActive={triageActive}
