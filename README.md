@@ -1,10 +1,7 @@
-<<<<<<< HEAD
-=======
 <div align="center">
 
 <img src="frontend/public/mailmind-logo.svg" alt="MailMind Logo" width="72" height="72" />
 
->>>>>>> 23d398c1ee54dd3df0c55e7511dc56acbe5663d9
 # MailMind
 
 **The Intelligent Email Co-Pilot for the Enterprise**
