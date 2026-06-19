@@ -129,5 +129,9 @@ async def demo_login():
             raise HTTPException(status_code=500, detail=str(e))
 
     response = RedirectResponse(url=f"{frontend}/dashboard", status_code=303)
+    # Clear any existing auth cookies first so the real account doesn't
+    # override the demo session via mm_quick auto-renewal.
+    response.delete_cookie("mm_session", path="/")
+    response.delete_cookie("mm_quick", path="/")
     _set_session_cookie(response, token, max_age=settings.session_ttl_seconds)
     return response
