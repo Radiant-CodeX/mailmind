@@ -1,16 +1,15 @@
 """
-Demo login endpoint — allows judges/stakeholders to instantly access demo account.
+Demo login endpoint — one click logs in as the pre-seeded demo account.
 
-Usage:
-  GET /api/demo/login → returns HTML with auto-login redirect
-  POST /api/demo/login → returns session token
-
-Enable only in non-production or with DEMO_MODE=true env var.
+GET /api/demo/login  → HTML landing page with "Enter Demo" button
+POST /api/demo/login → sets mm_session cookie + redirects to frontend dashboard
 """
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from app.api.deps import _set_session_cookie
+from app.config.settings import settings
 from app.db.base import get_session
 from app.db.models import OAuthAccount
 from app.services.session_service import DBSessionBackend, SessionService
@@ -21,43 +20,36 @@ DEMO_ACCOUNT_EMAIL = "demo@mailmind.app"
 
 
 @router.get("/login", response_class=HTMLResponse)
-async def demo_login_html():
-    """Return HTML page with one-click demo login."""
-
-    return f"""
+async def demo_login_page():
+    """Landing page — clicking the button POSTs to /api/demo/login."""
+    return """
     <!DOCTYPE html>
     <html>
     <head>
-        <title>MailMind Demo Login</title>
+        <title>MailMind Demo</title>
         <style>
-            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-            body {{
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 min-height: 100vh;
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            }}
-            .container {{
+            }
+            .card {
                 background: white;
                 border-radius: 12px;
                 padding: 48px;
                 text-align: center;
                 box-shadow: 0 20px 60px rgba(0,0,0,0.3);
                 max-width: 400px;
-            }}
-            h1 {{
-                font-size: 32px;
-                margin-bottom: 16px;
-                color: #1a1a1a;
-            }}
-            p {{
-                color: #666;
-                margin-bottom: 32px;
-                line-height: 1.6;
-            }}
-            .button {{
+                width: 90%;
+            }
+            h1 { font-size: 28px; margin-bottom: 12px; color: #1a1a1a; }
+            p  { color: #666; margin-bottom: 28px; line-height: 1.6; }
+            form { margin: 0; }
+            button {
                 background: #667eea;
                 color: white;
                 border: none;
@@ -66,69 +58,40 @@ async def demo_login_html():
                 font-size: 16px;
                 font-weight: 600;
                 cursor: pointer;
-                transition: background 0.3s;
                 width: 100%;
-            }}
-            .button:hover {{
-                background: #5568d3;
-            }}
-            .details {{
-                background: #f5f5f5;
-                padding: 16px;
-                border-radius: 8px;
-                margin-top: 32px;
-                text-align: left;
-                font-size: 13px;
-                color: #666;
-            }}
-            .details p {{
-                margin: 8px 0;
-            }}
-            code {{
-                background: white;
-                padding: 2px 6px;
-                border-radius: 4px;
-                font-family: monospace;
-            }}
+                transition: background 0.2s;
+            }
+            button:hover { background: #5568d3; }
+            .chips {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: center;
+                margin-top: 24px;
+            }
+            .chip {
+                background: #f0f4ff;
+                color: #4f46e5;
+                font-size: 12px;
+                padding: 4px 10px;
+                border-radius: 99px;
+            }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>📧 MailMind Demo</h1>
-            <p>Click below to access the demo account with pre-loaded emails, triage scores, and all features ready to explore.</p>
-
-            <button class="button" onclick="loginDemo()">Enter Demo</button>
-
-            <div class="details">
-                <p><strong>Demo Account:</strong></p>
-                <p>Email: <code>{DEMO_ACCOUNT_EMAIL}</code></p>
-                <p>Pre-loaded with 10 realistic emails across all priority levels</p>
-                <p>✓ Five-axis triage scoring</p>
-                <p>✓ Draft generation with Tone DNA</p>
-                <p>✓ Commitment extraction</p>
-                <p>✓ Calendar conflict detection</p>
+        <div class="card">
+            <h1>&#128231; MailMind Demo</h1>
+            <p>Pre-loaded with 10 realistic emails, five-axis triage scores, Tone DNA, and draft generation ready to explore.</p>
+            <form method="POST" action="/api/demo/login">
+                <button type="submit">Enter Demo</button>
+            </form>
+            <div class="chips">
+                <span class="chip">&#10003; Triage scoring</span>
+                <span class="chip">&#10003; Tone DNA drafts</span>
+                <span class="chip">&#10003; Commitments</span>
+                <span class="chip">&#10003; Calendar detection</span>
             </div>
         </div>
-
-        <script>
-            async function loginDemo() {{
-                try {{
-                    const response = await fetch('/api/demo/login', {{ method: 'POST' }});
-                    const data = await response.json();
-
-                    if (data.session_token) {{
-                        // Set session cookie
-                        document.cookie = `mm_session=${{data.session_token}}; path=/; secure; samesite=strict`;
-                        // Redirect to dashboard
-                        window.location.href = '/dashboard';
-                    }} else {{
-                        alert('Login failed: ' + (data.detail || 'Unknown error'));
-                    }}
-                }} catch (e) {{
-                    alert('Error: ' + e.message);
-                }}
-            }}
-        </script>
     </body>
     </html>
     """
@@ -136,7 +99,9 @@ async def demo_login_html():
 
 @router.post("/login")
 async def demo_login():
-    """Create and return demo session token."""
+    """Create session, set HttpOnly cookie, redirect to frontend dashboard."""
+
+    frontend = settings.frontend_origin or "http://localhost:3000"
 
     with get_session() as session:
         if session is None:
@@ -150,20 +115,19 @@ async def demo_login():
             if not oauth:
                 raise HTTPException(
                     status_code=404,
-                    detail=f"Demo account '{DEMO_ACCOUNT_EMAIL}' not found. Run: python scripts/seed_demo_account.py --db <DATABASE_URL>"
+                    detail=f"Demo account '{DEMO_ACCOUNT_EMAIL}' not found. "
+                           "Run: python scripts/seed_demo_account.py --db <DATABASE_URL>",
                 )
 
             session_svc = SessionService(DBSessionBackend(session))
             token = session_svc.create_session(str(oauth.user_id))
-
-            return {
-                "session_token": token,
-                "user_id": str(oauth.user_id),
-                "email": DEMO_ACCOUNT_EMAIL,
-                "message": "Demo login successful. Redirecting to dashboard...",
-            }
+            session.commit()
 
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    response = RedirectResponse(url=f"{frontend}/dashboard", status_code=303)
+    _set_session_cookie(response, token, max_age=settings.session_ttl_seconds)
+    return response
