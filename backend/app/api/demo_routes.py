@@ -10,12 +10,10 @@ Enable only in non-production or with DEMO_MODE=true env var.
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select
 
-from app.config.settings import settings
 from app.db.base import SessionLocal
-from app.db.models import User
-from app.services.session_service import SessionService
+from app.db.models import OAuthAccount
+from app.services.session_service import DBSessionBackend, SessionService
 
 router = APIRouter(prefix="/api/demo", tags=["demo"])
 
@@ -141,12 +139,9 @@ async def demo_login():
     """Create and return demo session token."""
 
     session = SessionLocal()
-    session_svc = SessionService()
+    session_svc = SessionService(DBSessionBackend(session))
 
     try:
-        # Find demo account by email (query oauth_accounts)
-        from app.db.models import OAuthAccount
-
         oauth = session.query(OAuthAccount).filter(
             OAuthAccount.email == DEMO_ACCOUNT_EMAIL
         ).first()
