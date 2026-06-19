@@ -11,7 +11,7 @@ Enable only in non-production or with DEMO_MODE=true env var.
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
 
-from app.db.base import SessionLocal
+from app.db.base import get_session
 from app.db.models import OAuthAccount
 from app.services.session_service import DBSessionBackend, SessionService
 
@@ -138,35 +138,32 @@ async def demo_login_html():
 async def demo_login():
     """Create and return demo session token."""
 
-    session = SessionLocal()
-    session_svc = SessionService(DBSessionBackend(session))
+    with get_session() as session:
+        if session is None:
+            raise HTTPException(status_code=503, detail="Database not configured.")
 
-    try:
-        oauth = session.query(OAuthAccount).filter(
-            OAuthAccount.email == DEMO_ACCOUNT_EMAIL
-        ).first()
+        try:
+            oauth = session.query(OAuthAccount).filter(
+                OAuthAccount.email == DEMO_ACCOUNT_EMAIL
+            ).first()
 
-        if not oauth:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Demo account '{DEMO_ACCOUNT_EMAIL}' not found. Run: python scripts/seed_demo_account.py --db <DATABASE_URL>"
-            )
+            if not oauth:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Demo account '{DEMO_ACCOUNT_EMAIL}' not found. Run: python scripts/seed_demo_account.py --db <DATABASE_URL>"
+                )
 
-        user_id = oauth.user_id
+            session_svc = SessionService(DBSessionBackend(session))
+            token = session_svc.create_session(str(oauth.user_id))
 
-        # Create session token
-        token = session_svc.create_session(user_id)
+            return {
+                "session_token": token,
+                "user_id": str(oauth.user_id),
+                "email": DEMO_ACCOUNT_EMAIL,
+                "message": "Demo login successful. Redirecting to dashboard...",
+            }
 
-        return {
-            "session_token": token,
-            "user_id": str(user_id),
-            "email": DEMO_ACCOUNT_EMAIL,
-            "message": "Demo login successful. Redirecting to dashboard...",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
