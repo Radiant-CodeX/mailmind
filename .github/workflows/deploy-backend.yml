@@ -76,7 +76,7 @@ jobs:
               LANGSMITH_API_KEY="${{ secrets.LANGSMITH_API_KEY }}" \
               ADMIN_TOKEN="${{ secrets.ADMIN_TOKEN }}" \
               BOOTSTRAP_ALLOWED_EMAILS="radiantcodex@outlook.com" \
-              REDIS_URL="${{ secrets.REDIS_URL }}
+              REDIS_URL="${{ secrets.REDIS_URL }}"
 
       - name: Get container URL
         run: |
