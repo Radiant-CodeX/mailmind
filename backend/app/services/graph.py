@@ -1328,6 +1328,23 @@ class GraphClient:
             })
         return out
 
+    def complete_task(self, task_id: str) -> bool:
+        """Mark a Microsoft To Do task as completed. Returns True on success."""
+        if self.use_mock:
+            return True
+        try:
+            prefix = self._get_prefix()
+            lists = self._request("GET", f"{prefix}/todo/lists")
+            lists_val = (lists or {}).get("value", [])
+            if not lists_val:
+                return False
+            list_id = lists_val[0]["id"]
+            self._request("PATCH", f"{prefix}/todo/lists/{list_id}/tasks/{task_id}",
+                          json={"status": "completed"})
+            return True
+        except Exception:
+            return False
+
     def _todo_web_url(self) -> str:
         """Return the correct Microsoft To Do web app URL for the signed-in account.
 

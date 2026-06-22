@@ -1420,6 +1420,16 @@ def create_task(payload: dict[str, str], account=Depends(get_default_account)) -
         raise HTTPException(status_code=400, detail=f"Failed to create task: {str(e)}")
 
 
+@router.patch("/tasks/{task_id}/complete")
+def complete_task(task_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
+    """Mark a task as completed in the active provider (Microsoft To Do or Google Tasks)."""
+    try:
+        success = AccountService.get_adapter(account).complete_task(task_id)
+        return {"success": success}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to complete task: {str(e)}")
+
+
 @router.post("/rag/retrieve", response_model=list[PrecedentItem])
 def rag_retrieve(query: RAGQuery, current_user=Depends(get_current_user)) -> list[PrecedentItem]:
     """Retrieve precedent emails similar to the provided email text."""

@@ -1248,6 +1248,20 @@ class GmailClient:
             for t in (res or {}).get("items", [])
         ]
 
+    def complete_task(self, task_id: str) -> bool:
+        """Mark a Google Tasks item as completed. Returns True on success."""
+        if self.use_mock:
+            return True
+        try:
+            self._authed(
+                "PATCH",
+                f"https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/{task_id}",
+                json={"status": "completed"},
+            )
+            return True
+        except Exception:
+            return False
+
     def get_thread_messages(self, thread_id: str) -> List[dict[str, Any]]:
         # Thread context isn't required for confirmation; safe empty default.
         return []

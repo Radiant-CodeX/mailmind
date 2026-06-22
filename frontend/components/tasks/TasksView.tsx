@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { fetchTasks, createTask } from '../../lib/api';
+import { fetchTasks, createTask, completeTask } from '../../lib/api';
 
 interface TaskItem {
   id: string;
@@ -60,6 +60,15 @@ export function TasksView() {
   };
 
   const isDone = (s: string) => s === 'completed' || s === 'complete';
+
+  const handleComplete = async (taskId: string) => {
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: 'completed' } : t));
+    try {
+      await completeTask(taskId);
+    } catch {
+      await load();
+    }
+  };
 
   return (
     <div className="flex-1 h-full overflow-y-auto bg-base-300 p-6 custom-scrollbar" id="tasks-view">
@@ -122,10 +131,11 @@ export function TasksView() {
                 className="flex items-center gap-3 p-3.5 bg-base-100 border border-base-300 rounded-xl"
               >
                 <span
-                  className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                  onClick={() => !isDone(t.status) && handleComplete(t.id)}
+                  className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
                     isDone(t.status)
                       ? 'bg-emerald-500 border-emerald-500'
-                      : 'border-base-300'
+                      : 'border-base-300 hover:border-emerald-400 cursor-pointer'
                   }`}
                 >
                   {isDone(t.status) && (

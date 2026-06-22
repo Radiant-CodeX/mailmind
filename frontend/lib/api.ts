@@ -484,6 +484,14 @@ export async function createTask(title: string) {
   return res.json();
 }
 
+export async function completeTask(taskId: string) {
+  const res = await apiFetch(`${BASE}/api/tasks/${taskId}/complete`, {
+    method: "PATCH",
+  });
+  if (!res.ok) throw new Error("Failed to complete task");
+  return res.json();
+}
+
 export async function ingestEmail(payload: Record<string, unknown>) {
   const res = await apiFetch(`${BASE}/api/ingest`, {
     method: "POST",
