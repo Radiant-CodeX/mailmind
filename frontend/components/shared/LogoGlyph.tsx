@@ -1,0 +1,16 @@
+import React from 'react';
+
+/**
+ * The MailMind monogram — three slashes forming an "M".
+ * Geometry verbatim from public/mailmind-logo.svg. Uses `currentColor` so it
+ * inherits text color (e.g. `text-white` inside a gradient tile).
+ */
+export function LogoGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 500 500" className={className} fill="currentColor" aria-hidden="true">
+      <path d="M217.139 198.5L128.997 352.993L99.0771 301L158.289 198.5H217.139Z" />
+      <path d="M293.132 198.5L241.503 287.497L212.078 236.004L234.285 198.5H293.132Z" />
+      <path d="M399.139 150.5L310.994 304.999L280.578 252.999L340.287 150.5H399.139Z" />
+    </svg>
+  );
+}

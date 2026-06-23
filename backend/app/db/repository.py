@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 
 from app.config.settings import settings
 from app.db.base import get_session, is_persistence_enabled
-from app.db.models import AuditLog, EmailEnrichment, ProcessingMetric, ToneProfile, TriagePriorityOverride
+from app.db.models import AuditLog, EmailEnrichment, MailboxMessage, ProcessingMetric, ToneProfile, TriagePriorityOverride
 
 logger = logging.getLogger(__name__)
 
@@ -288,6 +288,12 @@ def record_priority_override(
             else:
                 enrichment.priority = override_priority
                 enrichment.approval_mode = "GATE" if override_priority == "CRITICAL" else "SUGGEST"
+
+        # Also mark the mailbox mirror row so list_page() excludes it immediately.
+        if override_priority == "DONE":
+            msg = session.get(MailboxMessage, email_id)
+            if msg is not None:
+                msg.state = "done"
 
         session.commit()
         result = {

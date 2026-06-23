@@ -176,6 +176,14 @@ def _run_migrations(engine: Engine) -> None:
             # v3 additions
             "ALTER TABLE audit_log ADD COLUMN account_id VARCHAR(36)",
             "ALTER TABLE processing_metric ADD COLUMN account_id VARCHAR(36)",
+            # ── Pagination hot-path index ──────────────────────────────────────
+            # The inbox page query filters (account_id, folder, state='active')
+            # and orders by received_at DESC. A partial index on exactly that
+            # shape lets Postgres satisfy the whole page as an index-only walk —
+            # no heap filter for state, no separate sort. This is the single
+            # biggest DB win for pagination latency.
+            "CREATE INDEX IF NOT EXISTS ix_msg_page ON mailbox_message "
+            "(account_id, folder, received_at DESC) WHERE state = 'active'",
         ]
         for sql in migrations:
             try:

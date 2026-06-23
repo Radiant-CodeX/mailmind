@@ -1,0 +1,19 @@
+<svg width="500" height="500" viewBox="0 0 500 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fav-bg" x1="0" y1="0" x2="500" y2="500" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0b0e1c"/>
+      <stop offset="100%" stop-color="#05060a"/>
+    </linearGradient>
+    <linearGradient id="fav-m" x1="80" y1="350" x2="400" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#38e0e0"/>
+      <stop offset="50%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="500" height="500" rx="110" fill="url(#fav-bg)"/>
+  <g fill="url(#fav-m)">
+    <path d="M217.139 198.5L128.997 352.993L99.0771 301L158.289 198.5H217.139Z"/>
+    <path d="M293.132 198.5L241.503 287.497L212.078 236.004L234.285 198.5H293.132Z"/>
+    <path d="M399.139 150.5L310.994 304.999L280.578 252.999L340.287 150.5H399.139Z"/>
+  </g>
+</svg>

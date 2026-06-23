@@ -380,12 +380,14 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
     from app.services.cache import triage_cache_store
 
     user_key = current_user.primary_email or current_user.id
+    # One bulk DB lookup for the whole page instead of one query per email.
+    enrich_map = repo.get_enrichments_bulk([r.email_id for r in requests], user_email=user_key)
     for i, req in enumerate(requests):
         cached = triage_cache_store.get(req.email_id, user_email=user_key)
         if cached and cached.get("priority"):
             results[i] = {**cached, "_cached": "redis"}
             continue
-        existing = repo.get_enrichment(req.email_id, user_email=user_key)
+        existing = enrich_map.get(req.email_id)
         cached_score = (existing.get("composite_score") or 0.0) if existing else 0.0
         if existing and existing.get("priority") and cached_score > 0.0:
             r = {
@@ -554,11 +556,23 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
 
         user_key = current_user.primary_email or current_user.id
 
+        # ── Batch the DB cache lookups ONCE for the whole page ──────────────
+        # Previously this loop issued up to two sequential Supabase round-trips
+        # PER email (sender-hint + enrichment). On a remote pooler (~150ms RTT)
+        # a 20-email page cost ~6-8s before a single LLM call even started.
+        # Two bulk queries collapse that to ~2 round-trips total.
+        hint_map = repo.get_sender_priority_hints_bulk(
+            [r.sender for r in requests], account_id=user_key
+        )
+        enrich_map = repo.get_enrichments_bulk(
+            [r.email_id for r in requests], user_email=user_key
+        )
+
         # ── Emit cache hits immediately ────────────────────────────────────
         for i, req in enumerate(requests):
             # Feedback loop: if the user has consistently overridden this
             # sender's priority, adopt it instantly and skip cache + LLM.
-            hint = repo.get_sender_priority_hint(req.sender, account_id=user_key)
+            hint = hint_map.get((req.sender or "").strip().lower())
             if hint and hint != "DONE":
                 r = {
                     "email_id": req.email_id,
@@ -597,7 +611,7 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                 yield f"data: {json.dumps(payload)}\n\n"
                 continue
 
-            existing = repo.get_enrichment(req.email_id, user_email=user_key)
+            existing = enrich_map.get(req.email_id)
             cached_score = (existing.get("composite_score") or 0.0) if existing else 0.0
             if existing and existing.get("priority") and cached_score > 0.0:
                 r = {

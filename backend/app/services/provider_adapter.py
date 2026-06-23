@@ -234,6 +234,9 @@ class GmailAdapter(ProviderAdapter):
     def create_todo(self, email_id, commitment) -> str:
         return self._get_client().create_todo(email_id, commitment)
 
+    def complete_task(self, task_id: str) -> bool:  # GmailAdapter
+        return self._get_client().complete_task(task_id)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Outlook Adapter
@@ -342,6 +345,9 @@ class OutlookAdapter(ProviderAdapter):
 
     def create_todo(self, email_id, commitment) -> str:
         return self._get_client().create_todo(email_id, commitment)
+
+    def complete_task(self, task_id: str) -> bool:
+        return self._get_client().complete_task(task_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

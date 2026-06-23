@@ -1,0 +1,82 @@
+================================================================================
+MAILMIND DEMO LOGIN - QUICK REFERENCE
+================================================================================
+
+NO ENVIRONMENT VARIABLES NEEDED. JUST RUN ONCE.
+
+Step 1: Seed Demo Account
+──────────────────────────────────────────────────────────────────────────────
+cd backend
+python scripts/seed_demo_account.py --db postgresql://user:pass@host/db
+
+(One-time setup. Creates demo user with 10 pre-loaded emails + full triage cache)
+
+Step 2: Start Backend
+──────────────────────────────────────────────────────────────────────────────
+docker compose up -d
+
+(Normal startup. No special flags or env vars needed.)
+
+Step 3: Go to Demo Login
+──────────────────────────────────────────────────────────────────────────────
+Browser: http://localhost:3000/api/demo/login
+
+Click "Enter Demo" → Instant session → Full dashboard with 10 emails
+
+================================================================================
+WHAT'S IN THE DEMO
+================================================================================
+
+Inbox:        10 realistic emails (CRITICAL, HIGH, MEDIUM, LOW)
+Triage:       All emails pre-scored with 5-axis breakdown
+Tone DNA:     55 sent emails, VP/Director persona
+Drafts:       Click "Generate Draft" → LLM generates reply
+Commitments:  Action items extracted, calendar conflicts shown
+Calendar:     5 events overlap with email deadlines (demo the conflict)
+
+================================================================================
+DEMO ACCOUNT
+================================================================================
+
+Email:     demo@mailmind.app
+Provider:  Google (OAuth mock)
+Session:   24 hours
+Access:    Always available (no gate)
+
+================================================================================
+PRODUCTION
+================================================================================
+
+Demo login works in production the same way.
+Access: https://your-domain.com/api/demo/login
+
+To remove later, just delete the account:
+  DELETE FROM users WHERE id = (
+    SELECT user_id FROM oauth_accounts
+    WHERE email = 'demo@mailmind.app'
+  );
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+"Demo account not found"
+  → Run seed script: python scripts/seed_demo_account.py --db <DATABASE_URL>
+
+"Page not loading"
+  → Check backend is running: curl http://localhost:8000/api/health
+  → Check frontend is running: curl http://localhost:3000
+
+Can't click "Enter Demo" button
+  → Check browser console for errors
+  → Verify database has demo account: psql ... -c "SELECT * FROM oauth_accounts WHERE email='demo@mailmind.app';"
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+Full setup guide: DEMO_LOGIN.md
+Implementation details: backend/scripts/seed_demo_account.py
+Demo routes: backend/app/api/demo_routes.py
+
+================================================================================

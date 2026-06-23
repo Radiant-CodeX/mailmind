@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.agent_routes import router as agent_router
 from app.api.compliance_routes import router as compliance_router
+from app.api.demo_routes import router as demo_router
 from app.api.feedback_routes import router as feedback_router
 from app.api.waitlist_routes import router as waitlist_router
 from app.api.pii_routes import router as pii_router
@@ -156,7 +157,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     # Explicit header list — the CORS spec forbids "*" when credentials are allowed.
-    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token", "X-MailMind-Session"],
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Approval-Token", "X-MailMind-Session", "X-Admin-Token"],
 )
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,7 @@ logger.info(
 
 app.include_router(router)
 app.include_router(agent_router)
+app.include_router(demo_router)  # Demo login (only when DEMO_MODE=true)
 app.include_router(monitoring_router, prefix="/api")
 app.include_router(feedback_router, prefix="/api")
 app.include_router(waitlist_router, prefix="/api")

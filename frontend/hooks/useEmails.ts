@@ -578,12 +578,19 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       setAllEmails(combined);
       setHasMoreOnServer(!!newToken);
       if (!newToken) setTotal(combined.length);
+
+      // Triage-ahead: score the prefetched page NOW, while the user is still
+      // reading the current one. By the time they click Next, scores are already
+      // in the cache + on the rows, so triageSlice() finds nothing to do and the
+      // page appears fully triaged instantly. The SSE/LLM cost is overlapped
+      // with read time instead of being paid on the click.
+      triageSlice(newEmails);
     } catch {
       /* prefetch is best-effort — a failure just means the click pays the cost */
     } finally {
       prefetchingRef.current = false;
     }
-  }, [mapRaw]);
+  }, [mapRaw, triageSlice]);
 
   // Non-destructive refresh: fetch the newest page, merge any genuinely new
   // emails onto the top, and KEEP every page the user has already loaded plus
@@ -918,6 +925,47 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     }
   }, [activeFolder, setEmails, persist, loadEmails, nextPage]);
 
+  const markDone = useCallback(async (
+    emailId: string,
+    sender: string,
+    originalPriority: string | undefined,
+  ) => {
+    // Snapshot for rollback
+    const snapshot = emailsRef.current.find((e) => e.id === emailId);
+
+    // Optimistic remove — same as archive/trash
+    let newListLength = 0;
+    setEmails((prev) => {
+      const next = prev.filter((e) => e.id !== emailId);
+      newListLength = next.length;
+      persist(next);
+      return next;
+    });
+    // Also remove from allEmails so pagination doesn't resurrect it
+    allEmailsRef.current = allEmailsRef.current.filter((e) => e.id !== emailId);
+    setAllEmails((prev) => prev.filter((e) => e.id !== emailId));
+    setSelectedEmailId((prev) => (prev === emailId ? null : prev));
+
+    try {
+      const { overrideEmailPriority } = await import('../lib/api');
+      await overrideEmailPriority({ email_id: emailId, sender, override_priority: 'DONE', original_priority: originalPriority });
+      // Clear the cache so next load fetches server-filtered list (done email excluded)
+      clearEmailCache(activeFolder);
+      if (newListLength < PAGE_SIZE / 2 && hasMoreOnServerRef.current) {
+        nextPage().catch(() => {});
+      }
+    } catch (err) {
+      console.error('Mark-done failed, rolling back', err);
+      // Restore the email in-place
+      if (snapshot) {
+        allEmailsRef.current = [snapshot, ...allEmailsRef.current];
+        setAllEmails((prev) => [snapshot, ...prev]);
+        setEmails((prev) => [snapshot, ...prev]);
+      }
+      clearEmailCache(activeFolder);
+    }
+  }, [activeFolder, setEmails, persist, loadEmails, nextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const reportSpam = useCallback(async (emailId: string) => {
     let newListLength = 0;
     setEmails((prev) => {
@@ -1044,5 +1092,6 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
     triageTotal,
     // Patch triage data on an email in the list
     patchEmailTriage,
+    markDone,
   };
 }
