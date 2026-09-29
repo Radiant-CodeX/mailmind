@@ -14,6 +14,6 @@ RUN python -m spacy download en_core_web_sm
 # Copy the rest of the backend files
 COPY . .
 
-# Start the server using the robust port binding format
-# CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
+# Bind to the platform's $PORT (Render/Railway inject it); 80 when unset.
+# --proxy-headers so X-Forwarded-Proto from the platform's TLS proxy is honoured.
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-80} --proxy-headers --forwarded-allow-ips='*'"]

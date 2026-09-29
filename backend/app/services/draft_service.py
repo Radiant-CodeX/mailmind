@@ -1,17 +1,23 @@
 """
 MailMind v2 — Tone DNA-enabled Draft Service (DNA-04)
-Generates email response drafts using OpenAI/Azure OpenAI with style presets and Tone DNA profiling.
+Generates email response drafts with the caller's configured model (any
+OpenAI-compatible provider), style presets, Tone DNA and campus etiquette.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from app.config.settings import settings
+from app.services import campus, llm_provider
 from app.services.rag import RAGIndexFactory, RetrievalService, mask_pii
 from app.services.tone_dna import ToneDNAService
 
 logger = logging.getLogger(__name__)
+
+_NO_MODEL_MESSAGE = (
+    "No AI model is configured. Add your own API key (OpenRouter, Groq, Gemini, …) "
+    "in AI settings, or ask the administrator to set LLM_API_KEY."
+)
 
 
 class DraftService:
@@ -19,12 +25,13 @@ class DraftService:
         pass  # ToneDNA is built on demand so it uses the correct user + provider
 
     def _get_llm_client(self):
-        """
-        Return the shared agent LLM so draft_service uses exactly the same
-        deployment, api_version, and caching as the rest of the pipeline.
-        """
-        from app.agents.nodes import _get_llm
-        return _get_llm(temperature=0.7)
+        """The caller's chat model (their own key or the server default)."""
+        return llm_provider.get_chat_model(temperature=0.7)
+
+    @staticmethod
+    def _profile() -> dict[str, Any]:
+        from app.services.user_settings import load_campus_profile
+        return load_campus_profile(llm_provider.current_ai_user_id())
 
     def _get_clean_name(self, sender: str | None) -> str:
         if not sender:
@@ -74,7 +81,7 @@ class DraftService:
 
         client = self._get_llm_client()
         if not client:
-            raise RuntimeError("Azure OpenAI credentials not configured. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT.")
+            raise RuntimeError(_NO_MODEL_MESSAGE)
 
         # Derive the sender's display name and the current user's display name.
         sender_name = self._get_clean_name(sender) if sender else "there"
@@ -123,7 +130,8 @@ class DraftService:
             f"{tone_prefix}"
             f"{identity_line}"
             f"Task: Generate a draft reply on behalf of yourself.\n"
-            f"Style: {style_map[style]}\n\n"
+            f"Style: {style_map[style]}\n"
+            f"Etiquette: {campus.draft_etiquette(self._profile(), sender)}\n\n"
             f"{rag_context}\n\n"
             f"IMPORTANT: Do NOT use placeholder names like 'John', 'Alice', '[Your Name]', or '[Name]'. "
             f"Use the actual sender name '{sender_name}' and sign off as '{user_name or 'MailMind User'}'. "
@@ -142,7 +150,7 @@ class DraftService:
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_content),
             ])
-            return (response.content or "").strip(), citations
+            return llm_provider.clean_text(response.content), citations
         except Exception as e:
             logger.error("Draft generation failed: %s", e)
             raise
@@ -179,7 +187,7 @@ class DraftService:
 
         client = self._get_llm_client()
         if not client:
-            raise RuntimeError("Azure OpenAI credentials not configured. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT.")
+            raise RuntimeError(_NO_MODEL_MESSAGE)
 
         recipient_name = self._get_clean_name(recipient) if recipient else "there"
         user_name = self._get_user_display_name(current_user_email)
@@ -210,7 +218,8 @@ class DraftService:
             f"{tone_prefix}"
             f"{identity_line}"
             f"Task: Compose a brand-new email (NOT a reply) based on the user's instruction below.\n"
-            f"Write in your own authentic voice. Address it to {recipient_name}.\n\n"
+            f"Write in your own authentic voice. Address it to {recipient_name}.\n"
+            f"Etiquette: {campus.draft_etiquette(self._profile(), recipient)}\n\n"
             f"{rag_context}\n\n"
             f"IMPORTANT: Do NOT use placeholder names like 'John', '[Your Name]', or '[Name]'. "
             f"Sign off as '{user_name or 'MailMind User'}'. "
@@ -228,7 +237,7 @@ class DraftService:
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_content),
             ])
-            return (response.content or "").strip(), citations
+            return llm_provider.clean_text(response.content), citations
         except Exception as e:
             logger.error("Compose generation failed: %s", e)
             raise

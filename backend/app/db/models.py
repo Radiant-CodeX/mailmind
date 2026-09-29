@@ -4,7 +4,7 @@ SQLAlchemy ORM models for MailMind v3.
 
 Identity layer (v3):
   users              — MailMind identity. Email is metadata, not identity.
-  oauth_accounts     — One per connected Gmail/Outlook account. Tokens stored
+  oauth_accounts     — One per connected Gmail account. Tokens stored
                        encrypted at rest. Multiple per user.
   user_sessions      — Short-lived authenticated sessions (24h). Validated on
                        every request via mm_session cookie.
@@ -17,6 +17,10 @@ Pipeline layer (unchanged from v2, scoped to account_id in v3):
   audit_log          — Append-only compliance trail (no raw PII).
   processing_metric  — Per-stage latency for SLA reporting.
   tone_profile       — Stylometric profile, now keyed by account_id.
+
+Settings layer:
+  user_preferences   — Per-user AI provider/model + encrypted API key (BYOK),
+                       and the campus profile (role, department, year).
 """
 
 from __future__ import annotations
@@ -88,8 +92,8 @@ class OAuthAccount(Base):
     """
     One connected email account. A user can have many.
 
-    Deduplication key: (provider, provider_account_id) — Google sub / MS
-    object_id. These are stable and immutable even if the email address changes.
+    Deduplication key: (provider, provider_account_id) — the Google account
+    ``sub``. Stable and immutable even if the email address changes.
 
     Tokens are Fernet-encrypted at rest via TokenEncryptionService.
     """
@@ -100,8 +104,8 @@ class OAuthAccount(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
 
     # Provider identity — dedup anchor, never changes
-    provider: Mapped[str] = mapped_column(String(32), nullable=False)           # "google" | "microsoft"
-    provider_account_id: Mapped[str] = mapped_column(String(255), nullable=False)  # Google sub / MS object_id
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)           # "google"
+    provider_account_id: Mapped[str] = mapped_column(String(255), nullable=False)  # Google sub
     account_email: Mapped[str] = mapped_column(String(320), nullable=False)
 
     # Encrypted OAuth tokens (v2 Supabase uses _enc suffix, v3 uses _encrypted)
@@ -323,7 +327,7 @@ class ToneProfile(Base):
     Stylometric profile built from a user's sent-mail history (Tone DNA).
 
     v3: keyed by account_id — each connected email account has its own
-    writing style profile. Personal Gmail vs SRM Outlook have different tones.
+    writing style profile. A personal Gmail and a college Gmail have different tones.
     """
 
     __tablename__ = "tone_profile"
@@ -469,7 +473,7 @@ class MailboxSyncState(Base):
     )
     folder: Mapped[str] = mapped_column(String(32), primary_key=True, default="inbox")
 
-    # Graph @odata.deltaLink (Gmail: last historyId). Absolute URL for Graph.
+    # Gmail: last historyId seen (the delta cursor).
     delta_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
     backfill_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -479,8 +483,12 @@ class MailboxSyncState(Base):
     message_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
-class GraphSubscription(Base):
-    """Microsoft Graph change-notification subscription (webhook) lifecycle."""
+class PushSubscription(Base):
+    """Push-notification registration lifecycle (Gmail Pub/Sub watch).
+
+    The table keeps its historical name so existing deployments need no
+    migration.
+    """
 
     __tablename__ = "graph_subscription"
 
@@ -528,3 +536,45 @@ class Waitlist(Base):
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="signup")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# USER SETTINGS (bring-your-own AI key + campus profile)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class UserPreferences(Base):
+    """
+    Per-user settings. One row per user, created on first save.
+
+    AI: any OpenAI-compatible provider. The API key is Fernet-encrypted at rest
+    and never returned to the client (only a masked hint). When no key is saved,
+    the server default model (LLM_* env vars) is used.
+
+    Campus profile: tunes prompts — a student's placement mail and a faculty
+    member's committee mail are urgent for different reasons.
+    """
+
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    # ── AI provider ─────────────────────────────────────────────────────────
+    ai_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    ai_base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    ai_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_chat_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ai_triage_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    ai_embedding_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # ── Campus profile ──────────────────────────────────────────────────────
+    campus_role: Mapped[str | None] = mapped_column(String(16), nullable=True)   # student | faculty | staff
+    department: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    year_of_study: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

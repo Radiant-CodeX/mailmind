@@ -75,7 +75,7 @@ class EmailAgentState(TypedDict):
     # ── RAG Precedent Retrieval + Draft outputs ───────────────────────────────
     precedents: list[PrecedentItem]           # Top-3 similar sent emails
     draft_prompt: Optional[str]               # Injected precedent prompt
-    draft_reply: Optional[str]                # GPT-4o generated draft reply
+    draft_reply: Optional[str]                # model-generated draft reply
 
     # ── Pipeline control ─────────────────────────────────────────────────────
     current_step: str                         # Tracks which node is active

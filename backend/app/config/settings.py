@@ -1,13 +1,10 @@
 import os
-from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
-from app.config.keyvault import load_keyvault_into_env
-
-# Load .env for local dev, then let Key Vault (if configured) take precedence.
+# Load .env for local dev. In production, inject the same variables through the
+# host's secret manager / environment (Railway, Render, Docker, etc.).
 load_dotenv()
-load_keyvault_into_env()
 
 # Wire LangSmith tracing for LangChain.
 # LangChain SDK expects LANGCHAIN_TRACING_V2 and LANGCHAIN_API_KEY.
@@ -44,14 +41,16 @@ class Settings:
 
     webhook_validation_token: str = os.getenv("WEBHOOK_VALIDATION_TOKEN", "")
     webhook_secret: str = os.getenv("WEBHOOK_SECRET", "")
-    # Public HTTPS base URL of THIS backend, used as the Graph webhook
-    # notificationUrl. When unset, webhook subscriptions are skipped and the
-    # mirror stays fresh via on-mount + scheduled delta sync instead.
+    # Public HTTPS base URL of THIS backend (used for push-notification
+    # callbacks). When unset, the mirror stays fresh via on-mount + scheduled
+    # delta sync instead.
     backend_public_url: str = os.getenv("BACKEND_PUBLIC_URL", "")
     rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "100"))
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
     use_chroma: bool = _bool_env("USE_CHROMA", True)
     rag_similarity_threshold: float = float(os.getenv("RAG_SIMILARITY_THRESHOLD", "0.78"))
+    # Cut-off used with the free local (hashed bag-of-words) embeddings.
+    rag_local_similarity_threshold: float = float(os.getenv("RAG_LOCAL_SIMILARITY_THRESHOLD", "0.25"))
     commitment_confidence_threshold: float = float(os.getenv("COMMITMENT_CONFIDENCE_THRESHOLD", "0.80"))
     approval_token: str = os.getenv("APPROVAL_TOKEN", "secret-approval-token")
     # Private-beta access control. ADMIN_TOKEN gates the /api/admin/* endpoints
@@ -60,7 +59,7 @@ class Settings:
     # locked out by their own gate.
     admin_token: str = os.getenv("ADMIN_TOKEN", "change-me-admin-token")
     bootstrap_allowed_emails: str = os.getenv(
-        "BOOTSTRAP_ALLOWED_EMAILS", "radiantcodex@outlook.com"
+        "BOOTSTRAP_ALLOWED_EMAILS", ""
     )
 
     @property
@@ -73,19 +72,9 @@ class Settings:
         }
     chroma_storage_path: str = os.getenv("CHROMA_DATA_PATH", "./data/chroma")
     index_max_size: int = int(os.getenv("RAG_INDEX_MAX_SIZE", "1000"))
-    # Azure / Graph configuration
-    azure_tenant_id: str = os.getenv("AZURE_TENANT_ID", "")
-    azure_client_id: str = os.getenv("AZURE_CLIENT_ID", "")
-    azure_client_secret: str = os.getenv("AZURE_CLIENT_SECRET", "")
-    azure_user_upn: str = os.getenv("AZURE_USER_UPN", "")
-    # Azure only permits https or http://localhost redirect URIs (not 127.0.0.1).
-    azure_redirect_uri: str = os.getenv(
-        "AZURE_REDIRECT_URI", "https://api.radiantsofficial.com/api/auth/microsoft/callback"
-    )
-    # Space-separated scopes used when acquiring Graph tokens
-    graph_scopes: str = os.getenv("GRAPH_SCOPES", "Mail.ReadWrite Mail.Send Calendars.ReadWrite Tasks.ReadWrite")
-    # Allow switching between the mock Graph client and a real Azure integration
-    use_mock_graph: bool = _bool_env("USE_MOCK_GRAPH", True)
+    # Mock mail mode: serve deterministic sample (campus) emails instead of a
+    # live Gmail account. USE_MOCK_GRAPH is still honoured for older .env files.
+    use_mock_mail: bool = _bool_env("USE_MOCK_MAIL", _bool_env("USE_MOCK_GRAPH", True))
 
     # Google / Gmail OAuth Configuration
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -103,17 +92,41 @@ class Settings:
     gmail_pubsub_topic: str = os.getenv("GMAIL_PUBSUB_TOPIC", "")
     gmail_pubsub_token: str = os.getenv("GMAIL_PUBSUB_TOKEN", "")
 
-    # OpenAI / Azure OpenAI Configuration
-    # Store the raw env value; use azure_openai_base_endpoint for SDK calls.
-    azure_openai_endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT", "")
-    azure_openai_api_key: str = os.getenv("AZURE_OPENAI_API_KEY", "")
-    azure_openai_api_version: str = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
-    azure_openai_chat_deployment: str = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4o-mini")
-    # Triage uses gpt-4o-mini by default (faster, cheaper); heavier nodes (commitments, RAG) use gpt-4o
-    azure_openai_triage_deployment: str = os.getenv("AZURE_OPENAI_TRIAGE_DEPLOYMENT", "gpt-4o-mini")
-    azure_openai_embedding_deployment: str = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT", "text-embedding-ada-002")
-    # Groq is the fallback LLM when Azure OpenAI is not configured.
+    # ── AI model (server default) ──────────────────────────────────────────
+    # Any OpenAI-compatible endpoint. Users can override this with their own
+    # key from the AI settings page; this is the fallback for everyone else.
+    #   LLM_PROVIDER  openrouter | groq | gemini | openai | ollama | custom
+    #   LLM_API_KEY   key for that provider (or set OPENROUTER_API_KEY / GROQ_API_KEY)
+    #   LLM_BASE_URL  only needed for "custom" (presets fill it in)
+    #   LLM_CHAT_MODEL / LLM_TRIAGE_MODEL  override the preset's default models
+    #   LLM_EMBEDDING_MODEL  optional; empty → free local embeddings
+    llm_provider: str = os.getenv("LLM_PROVIDER", "openrouter").strip().lower()
+    llm_provider_explicit: bool = bool(os.getenv("LLM_PROVIDER", "").strip())
+    llm_api_key: str = os.getenv("LLM_API_KEY", "")
+    llm_base_url: str = os.getenv("LLM_BASE_URL", "")
+    llm_chat_model: str = os.getenv("LLM_CHAT_MODEL", "")
+    llm_triage_model: str = os.getenv("LLM_TRIAGE_MODEL", "")
+    llm_embedding_model: str = os.getenv("LLM_EMBEDDING_MODEL", "")
+    llm_timeout_seconds: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "30"))
+    # Let users point MailMind at localhost / private-network model servers
+    # (Ollama). Off by default: the server makes these calls, so allowing them on
+    # a shared deployment would expose internal services (SSRF).
+    allow_local_llm_endpoints: bool = _bool_env("ALLOW_LOCAL_LLM_ENDPOINTS", False)
+    # Provider-named keys, picked up automatically when LLM_API_KEY is unset.
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     groq_api_key: str = os.getenv("GROQ_API_KEY", "")
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+
+    # ── Campus context ─────────────────────────────────────────────────────
+    # Institution the deployment serves. Domains mark official senders (used by
+    # the authority axis); the name is injected into AI prompts.
+    campus_name: str = os.getenv("CAMPUS_NAME", "SRM Institute of Science and Technology, Kattankulathur")
+    campus_short_name: str = os.getenv("CAMPUS_SHORT_NAME", "SRMIST")
+    campus_domains: str = os.getenv("CAMPUS_DOMAINS", "srmist.edu.in,srmuniv.ac.in,srmist.in")
+
+    @property
+    def campus_domain_set(self) -> set[str]:
+        return {d.strip().lower() for d in self.campus_domains.split(",") if d.strip()}
 
     # ── Runtime environment ────────────────────────────────────────────────
     app_env: str = os.getenv("APP_ENV", "development")          # development | staging | production
@@ -153,9 +166,8 @@ class Settings:
     db_pool_recycle: int = int(os.getenv("DB_POOL_RECYCLE", "1800"))
 
     # ── Triage concurrency ─────────────────────────────────────────────────
-    # How many emails to triage in parallel per inbox page. gpt-4o-mini has
-    # generous TPM headroom, so a higher fan-out drains a cold inbox faster;
-    # lower it if Azure starts returning 429s.
+    # How many emails to triage in parallel per inbox page. Free-tier keys
+    # (OpenRouter/Groq) rate-limit aggressively — lower this if you see 429s.
     triage_max_workers: int = int(os.getenv("TRIAGE_MAX_WORKERS", "8"))
 
     # ── Worker configuration ───────────────────────────────────────────────
@@ -182,22 +194,6 @@ class Settings:
     @property
     def persistence_enabled(self) -> bool:
         return bool(self.database_url)
-
-    @property
-    def azure_openai_base_endpoint(self) -> str:
-        """Return only scheme+host from the endpoint, stripping any deployment path or query params.
-
-        The Azure OpenAI SDK requires a base URL like
-          https://<resource>.openai.azure.com/
-        but users sometimes paste the full chat-completions path instead.
-        """
-        url = self.azure_openai_endpoint
-        if not url:
-            return ""
-        parsed = urlparse(url)
-        if not parsed.scheme or not parsed.netloc:
-            return url  # not parseable, return as-is
-        return f"{parsed.scheme}://{parsed.netloc}/"
 
 
 settings = Settings()

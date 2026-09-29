@@ -112,24 +112,25 @@ class DeadlineScorer:
 
 @dataclass
 class SenderAuthorityScorer:
-    """Score sender authority using Graph metadata and local caching."""
+    """Score sender authority from the campus role directory, with local caching."""
 
-    graph_client: Any
     cache: dict[str, tuple[float, dict[str, Any]]] | None = None
 
     def __post_init__(self) -> None:
         if self.cache is None:
             self.cache = {}
 
-    def score(self, sender_email: str) -> AxisScore:
-        cached = self.cache.get(sender_email)
+    def score(self, sender_email: str, subject: str = "", body: str = "") -> AxisScore:
+        from app.services.campus import score_authority
+
+        cache_key = f"{sender_email}|{subject}"
+        cached = self.cache.get(cache_key)
         if cached and cached[0] > datetime.now(tz=timezone.utc).timestamp():
             return AxisScore(axis="authority", raw_score=cached[1]["score"], explanation=cached[1]["explanation"])
-        metadata = self.graph_client.get_sender_authority(sender_email)
-        role = metadata.get("role", "external")
-        score = metadata.get("score", 0.1)
-        explanation = f"Sender role {role}"
-        self.cache[sender_email] = (datetime.now(tz=timezone.utc).timestamp() + 7 * 24 * 3600, {"score": score, "explanation": explanation})
+        result = score_authority(sender_email, subject, body)
+        score, explanation = result["raw_score"], result["explanation"]
+        self.cache[cache_key] = (datetime.now(tz=timezone.utc).timestamp() + 24 * 3600,
+                                 {"score": score, "explanation": explanation})
         return AxisScore(axis="authority", raw_score=score, explanation=explanation)
 
 
@@ -157,7 +158,16 @@ _BULK_MARKERS = (
 
 
 def _bulk_factor(body: str) -> float:
-    """Return a multiplier (<=1.0) that dampens bulk/promotional mail."""
+    """Return a multiplier (<=1.0) that dampens bulk/promotional mail.
+
+    Mail carrying a campus-critical signal (registration, exam, fee, deadline…)
+    is never dampened — placement and exam-cell notices often arrive through
+    bulk-mail tools with unsubscribe footers.
+    """
+    from app.services.campus import has_campus_critical_signal
+
+    if has_campus_critical_signal("", body):
+        return 1.0
     lower = body.lower()
     hits = sum(1 for m in _BULK_MARKERS if m in lower)
     if hits >= 2:
@@ -173,9 +183,11 @@ class ActionTypeScorer:
 
     # (weight, regex) tiers — higher weight = stronger call to action.
     tiers: tuple[tuple[float, str], ...] = (
-        (1.0, r"\b(action required|please respond|respond by|reply by|sign off|approve by|due by)\b"),
-        (0.85, r"\b(approve|sign|authorize|confirm by|submit|complete|deliver|escalate)\b"),
-        (0.6, r"\b(review|confirm|provide|send|schedule|prepare|update me|follow up|fill out)\b"),
+        (1.0, r"\b(action required|please respond|respond by|reply by|sign off|approve by|due by|"
+              r"register (by|before)|must register|last date to|report to|reporting time)\b"),
+        (0.85, r"\b(approve|sign|authorize|confirm by|submit|complete|deliver|escalate|register|"
+               r"pay|download|attend|upload|apply)\b"),
+        (0.6, r"\b(review|confirm|provide|send|schedule|prepare|update me|follow up|fill out|fill the)\b"),
         (0.35, r"\b(let me know|thoughts|feedback|please check|take a look)\b"),
         (0.1, r"\b(if interested|optional|when convenient|when you have time|no action|fyi)\b"),
     )
@@ -201,7 +213,10 @@ class SentimentScorer:
 
     tiers: tuple[tuple[float, str], ...] = (
         (1.0, r"\b(urgent|critical|emergency|immediately|asap|crisis|escalat\w*|blocker|outage|p0|sev1|down)\b"),
-        (0.75, r"\b(important|priority|overdue|deadline|time.?sensitive|attention needed|right away|today)\b"),
+        (0.9, r"\b(debarr?ed|detained|attendance shortage|shortage of attendance|disciplinary|"
+              r"suspension|not (be )?(eligible|permitted|allowed)|final reminder|last date)\b"),
+        (0.75, r"\b(important|priority|overdue|deadline|time.?sensitive|attention needed|right away|today|"
+               r"mandatory|compulsory|penalty|fine)\b"),
         (0.55, r"\b(frustrated|disappointed|unacceptable|failure|broken|not working|complaint|angry|concern)\b"),
         (0.35, r"\b(problem|issue|error|delay|reminder|waiting|pending|follow.?up)\b"),
     )

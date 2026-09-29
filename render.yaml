@@ -1,0 +1,54 @@
+# Render Blueprint — MailMind backend (FastAPI, Docker, free plan).
+# The frontend is deployed on Vercel and proxies /api/* to this service.
+# Secrets marked `sync: false` are entered in the Render dashboard on first deploy.
+services:
+  - type: web
+    name: mailmind-api
+    runtime: docker
+    plan: free
+    region: singapore          # closest Render region to India / Supabase ap-south-1
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    branch: vision2web
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: HSTS_ENABLED
+        value: "true"
+      - key: USE_MOCK_MAIL
+        value: "false"
+      - key: QUEUE_BACKEND
+        value: memory
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+      - key: LLM_PROVIDER
+        value: openrouter
+      # ── Secrets / per-environment values (set in the dashboard) ──
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: SESSION_SECRET_KEY
+        sync: false
+      - key: APPROVAL_TOKEN
+        sync: false
+      - key: ADMIN_TOKEN
+        sync: false
+      - key: BOOTSTRAP_ALLOWED_EMAILS
+        sync: false
+      - key: LLM_API_KEY
+        sync: false

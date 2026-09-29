@@ -1,171 +1,130 @@
 from __future__ import annotations
 
-import json
 import logging
-
-from openai import AzureOpenAI
 
 from app.config.settings import settings
 from app.models.schemas import ClassificationResult
+from app.services import campus, llm_provider
 
 logger = logging.getLogger(__name__)
 
-# Groq fallback for when Azure OpenAI is not configured.
-try:
-    from langchain_groq import ChatGroq as _ChatGroq
-    _GROQ_AVAILABLE = True
-except ImportError:
-    _ChatGroq = None
-    _GROQ_AVAILABLE = False
-
 
 class ClassificationService:
-    """Classifier for email priority and category using GPT-4o with deterministic rule fallback."""
+    """Campus email classifier (priority + category) with a deterministic rule fallback."""
 
     def __init__(self) -> None:
         self.examples = [
             {
-                "text": "URGENT: Database outage in production. Clients are seeing 500 errors. Please investigate ASAP.",
-                "category": "support",
+                "text": "Subject: Hall ticket download — End Semester Exams. Hall tickets are available on "
+                        "the student portal. Students with attendance below 75% will not be permitted to write "
+                        "the exam. Download before 20/11.",
+                "category": "exams",
                 "priority": "CRITICAL",
-                "confidence": 0.99
+                "confidence": 0.97,
             },
             {
-                "text": "Hi team, attached is the revised sales contract for Acme Corp. Please review by Friday.",
-                "category": "sales",
+                "text": "Subject: Zoho campus drive — registration closes tomorrow 5 PM. Eligible final-year "
+                        "CSE/IT students must register on the placement portal. Late registrations will not be "
+                        "entertained.",
+                "category": "placement",
+                "priority": "CRITICAL",
+                "confidence": 0.95,
+            },
+            {
+                "text": "Subject: Assignment 3 submission. Please submit your DBMS assignment on the LMS by "
+                        "Friday. — Dr. Priya, Assistant Professor",
+                "category": "academics",
                 "priority": "HIGH",
-                "confidence": 0.90
+                "confidence": 0.9,
             },
             {
-                "text": "Hi, just a reminder that our weekly sync is tomorrow at 10 AM. Let me know if you can't make it.",
-                "category": "internal",
-                "priority": "MEDIUM",
-                "confidence": 0.80
+                "text": "Subject: Semester fee reminder. The last date to pay the odd-semester tuition fee "
+                        "without fine is 30th of this month.",
+                "category": "fees",
+                "priority": "HIGH",
+                "confidence": 0.9,
             },
             {
-                "text": "FYI: Here is the monthly newsletter with details of the upcoming team picnic.",
-                "category": "internal",
+                "text": "Subject: Coding Club — weekend hackathon! Join us this Saturday, snacks provided. "
+                        "Register if interested.",
+                "category": "events",
                 "priority": "LOW",
-                "confidence": 0.95
+                "confidence": 0.85,
             },
             {
-                "text": "Customer ticket #10243: Login page keeps spinning on Chrome browser. Needs support assistance.",
-                "category": "support",
-                "priority": "HIGH",
-                "confidence": 0.85
-            }
+                "text": "Subject: 40% off all courses this week only! Unsubscribe from these emails.",
+                "category": "promotions",
+                "priority": "LOW",
+                "confidence": 0.97,
+            },
         ]
 
-    def _get_llm_client(self) -> tuple[AzureOpenAI | _ChatGroq | None, str]:
-        """Return the appropriate LLM client: Azure OpenAI → Groq → None.
+    # ── Deterministic fallback ────────────────────────────────────────────────
 
-        Returns a tuple of (client, model_name). Groq returns the model name
-        directly (e.g. "llama-3.3-70b-versatile"); Azure returns the deployment name.
-        """
-        if settings.use_mock_graph:
-            return None, ""
-        if settings.azure_openai_api_key and settings.azure_openai_endpoint:
-            return AzureOpenAI(
-                api_key=settings.azure_openai_api_key,
-                api_version=settings.azure_openai_api_version,
-                azure_endpoint=settings.azure_openai_endpoint
-            ), settings.azure_openai_chat_deployment
-        elif settings.groq_api_key and _GROQ_AVAILABLE and _ChatGroq is not None:
-            return _ChatGroq(api_key=settings.groq_api_key, model="llama-3.3-70b-versatile"), "llama-3.3-70b-versatile"
-        # No LLM credentials in live mode — return None so callers fall back to
-        # the rule-based classifier instead of raising a 500.
-        return None, ""
-
-    def _fallback_classify(self, masked_text: str) -> ClassificationResult:
-        """Deterministic rule-based fallback classification."""
+    def _fallback_classify(self, masked_text: str, sender: str = "") -> ClassificationResult:
+        """Rule-based classification using the shared campus vocabulary."""
         lower = masked_text.lower()
+        category = campus.categorize(sender, "", masked_text)
+        consequences = campus.consequence_hits(masked_text)
 
-        if "urgent" in lower or "asap" in lower or "important" in lower or "outage" in lower:
+        if any(k in lower for k in ("urgent", "asap", "immediately", "outage")) or (
+            len(consequences) >= 2 and category in campus.HIGH_STAKES_CATEGORIES
+        ):
             priority = "CRITICAL"
-        elif "please review" in lower or "action required" in lower or "approve" in lower or "contract" in lower:
+        elif consequences or category in ("placement", "exams", "fees") or any(
+            k in lower for k in ("please review", "action required", "approve", "submit", "register")
+        ):
             priority = "HIGH"
-        elif "update" in lower or "report" in lower or "follow up" in lower or "meeting" in lower:
+        elif category in ("academics", "administrative") or any(
+            k in lower for k in ("update", "report", "follow up", "meeting", "reminder")
+        ):
             priority = "MEDIUM"
         else:
             priority = "LOW"
 
-        if "sales" in lower or "deal" in lower or "proposal" in lower or "contract" in lower:
-            category = "sales"
-        elif "support" in lower or "customer" in lower or "ticket" in lower or "help" in lower:
-            category = "support"
-        else:
-            category = "internal"
+        if category == "promotions":
+            priority = "LOW"
 
-        confidence = 0.9 if priority in ("CRITICAL", "HIGH") else 0.75 if priority == "MEDIUM" else 0.4
-        confidence = max(0.0, min(1.0, confidence))
-
+        confidence = 0.9 if priority in ("CRITICAL", "HIGH") else 0.75 if priority == "MEDIUM" else 0.6
         return ClassificationResult(priority=priority, category=category, confidence=confidence)
 
-    def classify(self, masked_text: str) -> ClassificationResult:
-        """Classify the masked email text using an LLM (Azure/Groq) with rule-based fallback."""
-        if settings.use_mock_graph:
-            logger.info("Mock mode active. Bypassing LLM and using rule-based fallback.")
-            return self._fallback_classify(masked_text)
+    # ── LLM path ──────────────────────────────────────────────────────────────
 
-        client, model = self._get_llm_client()
-        if not client:
-            logger.info("LLM not configured. Using rule-based fallback.")
-            return self._fallback_classify(masked_text)
+    def classify(self, masked_text: str, sender: str = "") -> ClassificationResult:
+        """Classify masked email text with the caller's model, falling back to rules."""
+        if settings.use_mock_mail or not llm_provider.llm_available():
+            return self._fallback_classify(masked_text, sender)
 
-        # Build few-shot prompt
-        few_shot_str = "\n\n".join([
-            f"Email: {ex['text']}\nResult: {{\"priority\": \"{ex['priority']}\", \"category\": \"{ex['category']}\", \"confidence\": {ex['confidence']}}}"
+        few_shot = "\n\n".join(
+            f"Email: {ex['text']}\nResult: {{\"priority\": \"{ex['priority']}\", "
+            f"\"category\": \"{ex['category']}\", \"confidence\": {ex['confidence']}}}"
             for ex in self.examples
-        ])
-
-        system_prompt = (
-            "You are an AI assistant designed to classify incoming emails for an enterprise.\n"
-            "You must classify the email text into one of the following priority levels:\n"
-            "- CRITICAL\n- HIGH\n- MEDIUM\n- LOW\n\n"
-            "And one of the following categories:\n"
-            "- sales\n- support\n- internal\n\n"
-            "Provide a confidence score between 0.0 and 1.0 representing your classification certainty.\n"
-            "You MUST return the output as a valid JSON object with the exact keys: 'priority', 'category', 'confidence'.\n"
-            "Do not include any Markdown blocks, backticks, or extra text. Only return the JSON object."
         )
+        from app.services.user_settings import load_campus_profile
 
-        user_prompt = f"Here are some examples:\n{few_shot_str}\n\nNow, classify the following email:\nEmail: {masked_text}\nResult:"
+        profile = load_campus_profile(llm_provider.current_ai_user_id())
+        system_prompt = (
+            "You classify emails in a university inbox.\n"
+            f"{campus.role_context(profile)}\n\n"
+            "Priority is one of CRITICAL, HIGH, MEDIUM, LOW — CRITICAL means missing it has a hard "
+            "cost (placement eligibility, exam eligibility, a fine) and action is due soon.\n"
+            "Category is exactly one of these ids:\n"
+            f"{campus.categories_prompt_list()}\n\n"
+            "Return ONLY a JSON object with the keys 'priority', 'category', 'confidence' (0.0-1.0)."
+        )
+        user_prompt = f"Examples:\n{few_shot}\n\nNow classify this email:\nEmail: {masked_text[:3000]}\nResult:"
 
         try:
-            # Azure OpenAI supports JSON mode; Groq does not — both are handled the same way
-            # for OpenAI, response_format ensures valid JSON; for Groq, the prompt alone drives it.
-            is_azure = isinstance(client, AzureOpenAI)
-            kwargs = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "timeout": 10.0
-            }
-            if is_azure:
-                kwargs["response_format"] = {"type": "json_object"}
-
-            response = client.chat.completions.create(**kwargs)
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("Empty response from LLM")
-            data = json.loads(content)
+            data = llm_provider.invoke_json(system_prompt, user_prompt, purpose="triage", max_tokens=120)
+            if not isinstance(data, dict):
+                raise ValueError("classification reply was not a JSON object")
 
             priority = str(data.get("priority", "MEDIUM")).upper()
             if priority not in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
                 priority = "MEDIUM"
-
-            category = str(data.get("category", "internal")).lower()
-            if category not in ("sales", "support", "internal"):
-                category = "internal"
-
-            confidence = float(data.get("confidence", 0.5))
-            confidence = max(0.0, min(1.0, confidence))
-
+            category = campus.normalise_category(data.get("category"))
+            confidence = max(0.0, min(1.0, float(data.get("confidence", 0.5))))
             return ClassificationResult(priority=priority, category=category, confidence=confidence)
-
         except Exception as e:
-            logger.warning("LLM classification failed: %s. Falling back to rule-based.", e)
-            return self._fallback_classify(masked_text)
-
+            logger.warning("LLM classification failed: %s. Falling back to rules.", e)
+            return self._fallback_classify(masked_text, sender)

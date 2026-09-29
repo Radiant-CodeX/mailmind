@@ -35,6 +35,7 @@ from app.config.settings import settings
 from app.db import repository as repo
 from app.monitoring.metrics import set_queue_depth, track_stage
 from app.queue.backends import get_queue_backend
+from app.services.llm_provider import use_ai_user
 from app.services.pii import pii_sanitizer
 
 logger = logging.getLogger(__name__)
@@ -93,7 +94,9 @@ class EnrichmentWorker:
         state = job["state"]
         user_email: str = state.get("user_email") or ""
 
-        with track_stage("enrichment"):
+        # No request here — bind the job's owner so the nodes use their own
+        # AI settings (falls back to the server default when unset).
+        with use_ai_user(state.get("user_id")), track_stage("enrichment"):
             state.update(commitment_node(state))
             state.update(calendar_node(state))
             state.update(rag_node(state, index_documents=self.index_documents))

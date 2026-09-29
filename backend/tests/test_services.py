@@ -1,14 +1,14 @@
 from app.config.settings import settings
 
-settings.use_mock_graph = True
+settings.use_mock_mail = True
 
 from app.models.schemas import AxisScore
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
-from app.services.graph import GraphClient
+from app.services.gmail import GmailClient
 from app.services.scorers import CompositeAggregator, DeadlineScorer, SentimentScorer
 
-settings.use_mock_graph = True
+settings.use_mock_mail = True
 
 
 def test_classification_fallback_critical():
@@ -25,7 +25,7 @@ def test_classification_fallback_low():
 
 
 def test_commitment_fallback_extracts():
-    svc = CommitmentService(GraphClient())
+    svc = CommitmentService(GmailClient())
     results = svc._fallback_extract("Please review the document by Friday and approve it.")
     assert len(results) > 0
     assert any("review" in c.commitment.lower() for c in results)
@@ -79,7 +79,7 @@ def test_draft_service_styles(monkeypatch):
     """
     from app.services.draft_service import DraftService
 
-    # Mock the LLM call to avoid needing Azure OpenAI credentials
+    # Mock the LLM call so no provider key is needed
     def mock_generate(*args, **kwargs):
         return "Hi there, thanks for reaching out. I'd be happy to help you with this. Best regards, Assistant", []
 
@@ -109,17 +109,9 @@ def test_draft_service_styles(monkeypatch):
     assert isinstance(draft_indepth, str) and len(draft_indepth) > 50
 
 
-def test_graph_client_instantiates():
-    """GraphClient can be instantiated without crashing (no live auth needed)."""
-    from app.services.graph import GraphClient
-    # In live mode without credentials, constructing the client raises RuntimeError (no msal).
-    # We just confirm it either constructs or raises a known error — not an unexpected crash.
-    try:
-        client = GraphClient()
-        assert client is not None
-    except RuntimeError as e:
-        # Expected when msal is not configured / creds missing
-        assert "msal" in str(e).lower() or "token" in str(e).lower() or "credential" in str(e).lower()
-
-
-
+def test_gmail_client_mock_mode_serves_campus_inbox():
+    """Mock mode needs no Google config and serves the demo campus inbox."""
+    client = GmailClient()
+    inbox = client.get_inbox_emails(limit=50)
+    assert inbox and all("srmist" in m["sender"] or "@" in m["sender"] for m in inbox)
+    assert any("placement" in m["sender"] for m in inbox)

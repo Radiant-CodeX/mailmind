@@ -11,7 +11,6 @@ from collections import defaultdict, deque
 from typing import Callable
 
 from starlette.types import ASGIApp, Receive, Scope, Send
-from app.services.request_context import set_current_session, reset_current_session
 
 
 class SecurityHeadersMiddleware:
@@ -111,7 +110,14 @@ class RateLimitMiddleware:
 
 
 class SessionContextMiddleware:
-    """Bind the current request's session to a ContextVar for downstream use."""
+    """Bind the request's raw ``mm_session`` cookie to a ContextVar.
+
+    The AI layer (llm_provider) uses it to find the signed-in user's own model
+    settings. Binding is free — the cookie is only resolved to a user (one DB
+    lookup, then cached) the first time an AI call actually needs it.
+    ContextVars set here are inherited by the route handler, sync handlers run
+    in the threadpool, and streaming response bodies.
+    """
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -121,7 +127,21 @@ class SessionContextMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Session is typically set by the get_current_user() dependency in route handlers.
-        # For now, just pass through — the session context will be set per-request
-        # by individual routes that need it.
-        await self.app(scope, receive, send)
+        from app.services.llm_provider import reset_session_token, set_session_token
+
+        token = set_session_token(_read_cookie(scope, "mm_session"))
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            reset_session_token(token)
+
+
+def _read_cookie(scope: Scope, name: str) -> str | None:
+    """Extract one cookie value from the raw ASGI headers."""
+    for key, value in scope.get("headers", []):
+        if key == b"cookie":
+            for part in value.decode("latin-1").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == name and v:
+                    return v
+    return None

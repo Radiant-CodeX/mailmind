@@ -60,15 +60,8 @@ class SyncService:
             )
             logger.info("[sync] backfill %s/%s: +%d new, %d updated, %d removed, total=%d",
                         account_id, folder, new_count, updated, tombs, total)
-            # Provision a webhook so future changes arrive in near-real-time.
-            # Microsoft → Graph subscription (no-op without BACKEND_PUBLIC_URL).
-            # Google → Gmail Pub/Sub watch (no-op without GMAIL_PUBSUB_TOPIC).
-            # Each ensure call self-gates on provider, so calling both is safe.
-            try:
-                from app.services.subscription_service import SubscriptionService
-                SubscriptionService.ensure_subscription(account)
-            except Exception as _e:
-                logger.debug("[sync] subscription ensure skipped: %s", _e)
+            # Provision push notifications so future changes arrive in near-real-
+            # time (Gmail Pub/Sub watch; no-op without GMAIL_PUBSUB_TOPIC).
             try:
                 from app.services.gmail_watch_service import GmailWatchService
                 GmailWatchService.ensure_watch(account)

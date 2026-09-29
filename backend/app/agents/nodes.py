@@ -11,10 +11,10 @@ Node execution order (defined in graph.py):
   ingest_node → triage_node → commitment_node → calendar_node → rag_node → gate_node
 
 Each node that involves LLM reasoning uses:
-  - AzureChatOpenAI (GPT-4o) as the model
-  - bind_tools() to give the LLM access to relevant tool functions
-  - A structured system prompt for its specific task
-  - Manual tool dispatch (call_tool_by_name) to execute the LLM's chosen tool calls
+  - The caller's configured model (their own key, or the server default) via
+    app.services.llm_provider — any OpenAI-compatible provider
+  - A structured, campus-aware system prompt for its specific task
+  - A deterministic rule-based fallback when no model is configured or it fails
 """
 
 from __future__ import annotations
@@ -25,22 +25,14 @@ import re
 import uuid
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_openai import AzureChatOpenAI
-
-try:
-    from langchain_groq import ChatGroq as _ChatGroq
-    _GROQ_AVAILABLE = True
-except ImportError:
-    _ChatGroq = None
-    _GROQ_AVAILABLE = False
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.graph.state import EmailAgentState
 from app.monitoring.metrics import observe_node, record_llm_call, record_pii_masked
+from app.services import campus, llm_provider
 from app.services.tracing import trace_config
 from app.tools.email_tools import (
     ALL_TOOLS,
-    TRIAGE_TOOLS,
     build_draft_prompt,
     check_calendar_conflict,
     compute_composite_score,
@@ -59,85 +51,25 @@ logger = logging.getLogger(__name__)
 # LLM FACTORY
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Module-level LLM cache — one instance per (temperature, deployment), reused across all requests.
-# Creating AzureChatOpenAI is not free: it validates credentials and sets up the
-# HTTP client. Caching saves ~200-400ms per request.
-_llm_cache: dict[tuple[float, str], AzureChatOpenAI] = {}
-_groq_cache: dict[tuple[float, str], Any] = {}
 
-# Groq model used as fallback when Azure OpenAI is not configured.
-_GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile"
-
-
-def _get_llm(temperature: float = 0.1, deployment: str | None = None):
+def _get_llm(temperature: float = 0.1, purpose: str = "chat", max_tokens: int | None = None):
     """
-    Return a cached LLM instance. Priority order:
-      1. AzureChatOpenAI — when AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT are set
-      2. ChatGroq — when GROQ_API_KEY is set (free, fast fallback)
-      3. None — triggers deterministic rule-based fallbacks
+    Return the chat model for the current caller, or None.
 
-    Args:
-        temperature: Model temperature (0.0 for deterministic, 0.3+ for creative)
-        deployment: Azure deployment name (Azure only). Ignored for Groq.
+    Resolution (see llm_provider): the signed-in user's own API key/model →
+    the server default (LLM_* env) → None, which triggers the deterministic
+    rule-based fallbacks in every node.
     """
-    from app.config import settings as _settings
-
-    # ── 1. Azure OpenAI ───────────────────────────────────────────────────────
-    api_key = _settings.azure_openai_api_key
-    endpoint = _settings.azure_openai_base_endpoint
-
-    if api_key and endpoint:
-        global _llm_cache
-        resolved_deployment = deployment or _settings.azure_openai_chat_deployment
-        cache_key = (temperature, resolved_deployment)
-        if cache_key not in _llm_cache:
-            _llm_cache[cache_key] = AzureChatOpenAI(
-                azure_endpoint=endpoint,
-                azure_deployment=resolved_deployment,
-                api_key=api_key,
-                api_version=_settings.azure_openai_api_version,
-                temperature=temperature,
-            )
-            logger.info("AzureChatOpenAI cached (temperature=%.1f, deployment=%s)", temperature, resolved_deployment)
-        return _llm_cache[cache_key]
-
-    # ── 2. Groq fallback ──────────────────────────────────────────────────────
-    groq_key = _settings.groq_api_key
-    if groq_key and _GROQ_AVAILABLE and _ChatGroq is not None:
-        global _groq_cache
-        model = _GROQ_DEFAULT_MODEL
-        cache_key = (temperature, model)
-        if cache_key not in _groq_cache:
-            _groq_cache[cache_key] = _ChatGroq(
-                api_key=groq_key,
-                model=model,
-                temperature=temperature,
-            )
-            logger.info("ChatGroq cached as LLM fallback (model=%s, temperature=%.1f)", model, temperature)
-        return _groq_cache[cache_key]
-
-    # ── 3. No LLM available ───────────────────────────────────────────────────
-    logger.warning("No LLM credentials set (Azure or Groq) — using deterministic fallbacks")
-    return None
-
-
-def _with_max_tokens(llm, max_tokens: int):
-    """Apply a max_tokens cap in a provider-agnostic way.
-
-    AzureChatOpenAI: supports `bind(max_tokens=...)`.
-    ChatGroq: `max_tokens` must be passed via the constructor; `bind()` raises
-    a ValidationError. For Groq we recreate with the cap baked in, or simply
-    return the llm unchanged if it was already constructed with a cap.
-    """
+    llm = llm_provider.get_chat_model(temperature, purpose=purpose, max_tokens=max_tokens)
     if llm is None:
-        return None
-    if _ChatGroq is not None and isinstance(llm, _ChatGroq):
-        # ChatGroq exposes max_tokens as a constructor field; bind() doesn't accept it.
-        return llm.bind(stop=None) if hasattr(llm, "max_tokens") else llm
-    try:
-        return llm.bind(max_tokens=max_tokens)
-    except Exception:
-        return llm
+        logger.info("No AI model configured for this user — using deterministic fallbacks")
+    return llm
+
+
+def _current_profile() -> dict[str, Any]:
+    """Campus profile (student/faculty/staff) of the user this pipeline serves."""
+    from app.services.user_settings import load_campus_profile
+    return load_campus_profile(llm_provider.current_ai_user_id())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,13 +226,19 @@ def _is_automated_sender(sender: str, body: str) -> bool:
     ))
 
 
-def _dampen_automated_action(axes: list[dict], sender: str, body: str) -> list[dict]:
+def _dampen_automated_action(axes: list[dict], sender: str, body: str, subject: str = "") -> list[dict]:
     """
-    No-reply / automated senders can't be replied to, so the 'action' axis must
-    not claim "a direct response is required". Cap it low so these emails aren't
-    mis-ranked as needing a reply (e.g. a CI-failure notice from noreply@github).
+    Automated / no-reply bulk mail rarely needs the reader to act, so cap the
+    'action' axis for it (e.g. a newsletter or a social notification).
+
+    Campus exception: placement portals, the exam cell and ERP systems also
+    send from no-reply addresses, and those often demand action (register on
+    the portal, download the hall ticket). Official campus mail and mail with a
+    campus-critical signal are never dampened.
     """
     if not _is_automated_sender(sender, body):
+        return axes
+    if campus.is_campus_sender(sender) or campus.has_campus_critical_signal(subject, body):
         return axes
     for a in axes:
         if a.get("axis") == "action" and float(a.get("raw_score", 0.0)) > 0.2:
@@ -321,14 +259,6 @@ def _recompute_composite(axes: list[dict], weights: dict[str, float]) -> float:
         for axis, weight in weights.items()
     )
     return round(max(0.0, min(100.0, weighted_sum * 100.0)), 2)
-
-
-def _parse_triage_json(raw: str) -> dict[str, Any]:
-    """Strip markdown fences and parse the LLM triage JSON payload."""
-    content = raw.strip()
-    content = re.sub(r"^```(?:json)?\s*", "", content)
-    content = re.sub(r"\s*```$", "", content)
-    return json.loads(content)
 
 
 def _validate_axes(raw_axes: Any) -> list[dict]:
@@ -372,45 +302,79 @@ def _validate_axes(raw_axes: Any) -> list[dict]:
     return cleaned
 
 
-# Pre-built triage system prompt — built once at module load, not per request.
-# Saves ~0.5ms of string construction per triage call.
-# OPTIMIZED: removed evidence, dynamic_weights, composite_score, overall_reasoning
-# — all are either not used in inbox view or recomputed in Python.
-_TRIAGE_SYSTEM_PROMPT = (
-    "You are MailMind's Triage for an enterprise inbox. "
-    "Assess the BUSINESS urgency of one email and respond with JSON ONLY.\n\n"
-    "Score these FIVE axes from 0.0 (none) to 1.0 (maximum):\n"
-    "  deadline: time pressure from any explicit/implied due date\n"
-    "  authority: stakeholder power of sender/referenced people\n"
-    "  sentiment: emotional urgency, frustration, or escalation\n"
-    "  thread_risk: business/relationship risk if ignored or delayed\n"
-    "  action: how strongly a direct response or action is required\n\n"
-    "Anchor relative dates to the email's received timestamp. "
-    "Use the full 0.0–1.0 range — reflect actual urgency, not a template.\n\n"
-    'Output format (no markdown, replace scores with real values):\n'
-    '{"email_type":"<category>",'
+_TRIAGE_OUTPUT_FORMAT = (
+    'Output format (JSON only, no markdown, replace the example scores with real values):\n'
+    '{"email_type":"<one category id>",'
     '"axes":['
-    '{"axis":"deadline","score":0.6,"explanation":"<1 sentence>"},'
-    '{"axis":"authority","score":0.5,"explanation":"<1 sentence>"},'
-    '{"axis":"sentiment","score":0.4,"explanation":"<1 sentence>"},'
-    '{"axis":"thread_risk","score":0.3,"explanation":"<1 sentence>"},'
-    '{"axis":"action","score":0.7,"explanation":"<1 sentence>"}'
-    ']}'
+    '{"axis":"deadline","score":0.6,"explanation":"<1 short sentence>"},'
+    '{"axis":"authority","score":0.5,"explanation":"<1 short sentence>"},'
+    '{"axis":"sentiment","score":0.4,"explanation":"<1 short sentence>"},'
+    '{"axis":"thread_risk","score":0.3,"explanation":"<1 short sentence>"},'
+    '{"axis":"action","score":0.7,"explanation":"<1 short sentence>"}'
+    '],'
+    '"overall_reasoning":"<1 sentence: why this priority, naming the concrete stake>"}'
 )
 
-# Pre-built commitment system prompt — built once at module load.
-_COMMITMENT_SYSTEM_PROMPT = (
-    "You are MailMind's Commitment Extraction.\n\n"
-    "Extract ALL action items, commitments, and deadlines from the email.\n"
-    "For each: commitment (str), deadline (ISO 8601 or null), confidence (0.0–1.0).\n"
-    'Return ONLY valid JSON: {"commitments":[{"commitment":...,"deadline":...,"confidence":...}]}\n'
-    "No markdown, no extra text."
-)
+_triage_prompt_cache: dict[tuple, str] = {}
+
+
+def _triage_system_prompt(profile: dict[str, Any]) -> str:
+    """Campus triage prompt, specialised to the reader's role (cached per role)."""
+    key = (profile.get("role"), profile.get("department"), profile.get("year_of_study"))
+    cached = _triage_prompt_cache.get(key)
+    if cached:
+        return cached
+    prompt = (
+        "You are MailMind's Triage for a university inbox. Judge how urgently the reader must "
+        "act on ONE email and respond with JSON ONLY.\n\n"
+        f"{campus.role_context(profile)}\n\n"
+        "Score these FIVE axes from 0.0 (none) to 1.0 (maximum):\n"
+        "  deadline: time pressure from any explicit/implied cut-off (registration closes, hall "
+        "ticket download window, fee due date, submission date, interview/report time)\n"
+        "  authority: institutional weight of the sender or referenced office\n"
+        "  sentiment: warning or escalation tone (attendance shortage, debarment, penalty, "
+        "final reminder, a frustrated faculty member)\n"
+        "  thread_risk: what the reader LOSES if they ignore or delay it (placement eligibility, "
+        "exam eligibility, a fine, a grade, a relationship with faculty)\n"
+        "  action: how strongly the reader must personally do something (register, submit, pay, "
+        "attend, reply, download)\n\n"
+        f"{campus.authority_prompt_guide()}\n\n"
+        "Rules:\n"
+        "- Anchor relative dates ('tomorrow', 'this Friday') to the Received timestamp.\n"
+        "- Mail from a no-reply address can still demand action (portal registration, hall "
+        "tickets) — score action on what the reader must DO, not on whether they can reply.\n"
+        "- Club promotions, newsletters and 'FYI' announcements score low unless they carry a "
+        "deadline the reader clearly cares about.\n"
+        "- Use the full 0.0–1.0 range; do not return template values.\n\n"
+        "email_type must be exactly one of these category ids:\n"
+        f"{campus.categories_prompt_list()}\n\n"
+        f"{_TRIAGE_OUTPUT_FORMAT}"
+    )
+    _triage_prompt_cache[key] = prompt
+    return prompt
+
+
+def _commitment_system_prompt(profile: dict[str, Any], received_at: str) -> str:
+    return (
+        "You are MailMind's Commitment Extraction for a university inbox.\n"
+        f"{campus.role_context(profile)}\n\n"
+        "Extract every concrete thing the READER must do, with its deadline. On campus this "
+        "includes: registering for a placement drive or event, submitting an assignment/record/"
+        "project, paying a fee, downloading a hall ticket, attending an exam, interview, viva, "
+        "class or meeting (use the start time as the deadline), replying to faculty, and "
+        "uploading documents. Skip vague marketing asks.\n"
+        "For each item give: commitment (short imperative, include the venue if one is given), "
+        "deadline (ISO 8601 with time when known, e.g. 2026-10-05T17:00:00+05:30; null if none), "
+        "confidence (0.0–1.0).\n"
+        "Dates are Indian format (DD/MM/YYYY) unless clearly otherwise. Resolve relative dates "
+        f"against the received time: {received_at or 'unknown'}. Times are IST (+05:30) unless stated.\n"
+        'Return ONLY valid JSON: {"commitments":[{"commitment":"...","deadline":"...","confidence":0.9}]}'
+    )
 
 
 def triage_node(state: EmailAgentState) -> dict[str, Any]:
     """
-    Triage — scores email urgency across five axes using gpt-4o-mini (or gpt-4o fallback).
+    Triage — scores email urgency across five axes with the caller's triage model.
 
     Optimizations:
     - Slimmed output schema: removed evidence, dynamic_weights, composite_score, overall_reasoning
@@ -420,14 +384,14 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
     - Composite score + weights recomputed in Python (never trust LLM values)
     - Deterministic fallback unchanged
 
-    Expected inference time: ~0.8-1.5s (down from ~8s with gpt-4o-mini + slimmed output)
+    Latency depends on the configured provider (Groq / OpenRouter free models
+    typically answer in ~0.5-3s).
 
     State updates: axes, dynamic_weights, email_type, composite_score, priority,
                    approval_mode, triage_reasoning
     """
     logger.info(f"[TRIAGE] Scoring email_id={state['email_id']}")
-    from app.config import settings as _settings
-    llm = _get_llm(temperature=0.0, deployment=_settings.azure_openai_triage_deployment)
+    llm = _get_llm(temperature=0.0, purpose="triage", max_tokens=450)
     masked_body = state.get("masked_body", state["body"])
 
     # Truncate body — triage only needs enough context to score urgency (~1500 chars)
@@ -445,12 +409,11 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
                 f"Body:\n{body_for_triage}"
             )
 
-            # max_tokens cap: 5-axis JSON with explanations averages ~150-200 tokens;
-            # 400 is a safe ceiling that still keeps inference fast.
-            triage_llm = _with_max_tokens(llm, 400)
-            response: AIMessage = triage_llm.invoke(
+            # max_tokens cap (set on the model): 5-axis JSON with explanations
+            # averages ~150-200 tokens; 450 leaves headroom and stays fast.
+            response: AIMessage = llm.invoke(
                 [
-                    SystemMessage(content=_TRIAGE_SYSTEM_PROMPT),
+                    SystemMessage(content=_triage_system_prompt(_current_profile())),
                     HumanMessage(content=user_prompt),
                 ],
                 config=trace_config("triage", email_id=state.get("email_id"),
@@ -458,18 +421,20 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
             )
 
             logger.debug("[TRIAGE] raw LLM response: %s", response.content[:300])
-            data = _parse_triage_json(response.content)
+            data = llm_provider.parse_json(response.content)
 
             axes = _validate_axes(data.get("axes"))
             # No-reply/automated senders shouldn't score high on "action" (you
             # can't reply to them) — cap it before the composite is computed.
-            axes = _dampen_automated_action(axes, state["sender"], body_for_triage or state["body"])
+            axes = _dampen_automated_action(
+                axes, state["sender"], body_for_triage or state["body"], subject_for_triage or ""
+            )
             weights = _normalise_weights(data.get("dynamic_weights", {}))
             # Authoritative composite — recomputed in code, LLM value discarded.
             composite = _recompute_composite(axes, weights)
             priority, approval_mode = _priority_from_score(composite)
 
-            email_type = str(data.get("email_type", "")).strip() or "uncategorised"
+            email_type = campus.normalise_category(data.get("email_type"))
             reasoning = str(data.get("overall_reasoning", "")).strip()
 
             logger.info(
@@ -523,7 +488,7 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
             "deadline": 0.30, "authority": 0.25, "sentiment": 0.20,
             "decay": 0.15, "action": 0.10,
         },
-        "email_type": "uncategorised",
+        "email_type": campus.categorize(state["sender"], state["subject"], masked_body or ""),
         "composite_score": composite["composite_score"],
         "priority": composite["priority"],
         "approval_mode": composite["approval_mode"],
@@ -538,7 +503,7 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
 
 def commitment_node(state: EmailAgentState) -> dict[str, Any]:
     """
-    Agentic commitment extraction node. Uses GPT-4o structured output to:
+    Agentic commitment extraction node. Uses the caller's model to:
       1. Identify all action items, tasks, and promises in the email
       2. Extract deadlines in ISO 8601 format
       3. Assign a confidence score (0.0–1.0) to each commitment
@@ -550,7 +515,7 @@ def commitment_node(state: EmailAgentState) -> dict[str, Any]:
     State updates: commitments, commitment_reasoning
     """
     logger.info(f"[COMMITMENT] Extracting for email_id={state['email_id']}")
-    llm = _get_llm(temperature=0.0)
+    llm = _get_llm(temperature=0.0, max_tokens=500)
     masked_body = state.get("masked_body", state["body"])
 
     if llm:
@@ -558,28 +523,25 @@ def commitment_node(state: EmailAgentState) -> dict[str, Any]:
             # Truncate to 3000 chars — commitments need more context than triage,
             # but full bodies (10k+ chars) waste tokens on signatures/footers.
             body_for_commit = masked_body[:3000] if masked_body and len(masked_body) > 3000 else masked_body
+            subject = state.get("masked_subject") or state.get("subject") or ""
             messages = [
-                SystemMessage(content=_COMMITMENT_SYSTEM_PROMPT),
-                HumanMessage(content=f"Email body:\n{body_for_commit}"),
+                SystemMessage(content=_commitment_system_prompt(
+                    _current_profile(), state.get("received_at", ""))),
+                HumanMessage(content=f"Subject: {subject}\nEmail body:\n{body_for_commit}"),
             ]
 
-            # max_tokens cap: commitment JSON averages ~200 tokens per item.
-            commit_llm = _with_max_tokens(llm, 400)
-            response = commit_llm.invoke(
+            response = llm.invoke(
                 messages,
                 config=trace_config("commitment", email_id=state.get("email_id"),
                                     user=state.get("user_email")),
             )
-            content = response.content.strip()
-            # Strip markdown fences if present
-            content = re.sub(r"^```(?:json)?\s*", "", content)
-            content = re.sub(r"\s*```$", "", content)
-
-            data = json.loads(content)
-            raw_items = data.get("commitments", [])
+            data = llm_provider.parse_json(response.content)
+            raw_items = (data.get("commitments", []) if isinstance(data, dict) else data) or []
 
             commitments = []
             for item in raw_items:
+                if not isinstance(item, dict) or not item.get("commitment"):
+                    continue
                 confidence = float(item.get("confidence", 0.5))
                 if confidence >= 0.80:  # Confidence gate
                     commitments.append({
@@ -594,7 +556,10 @@ def commitment_node(state: EmailAgentState) -> dict[str, Any]:
 
             return {
                 "commitments": commitments,
-                "commitment_reasoning": f"GPT-4o extracted {len(raw_items)} commitments; {len(commitments)} passed the 0.80 confidence gate.",
+                "commitment_reasoning": (
+                    f"{llm_provider.active_model_label()} extracted {len(raw_items)} items; "
+                    f"{len(commitments)} passed the 0.80 confidence gate."
+                ),
                 "current_step": "commitment",
             }
 
@@ -624,9 +589,8 @@ def calendar_node(state: EmailAgentState) -> dict[str, Any]:
     This node enriches the commitment items in state with conflict_badge and
     conflict_detail fields, surfaced in the frontend as visual warning badges.
 
-    In mock mode (USE_MOCK_GRAPH=true): uses empty calendar (no conflicts).
-    In live mode: calendar_events are populated by the Graph API caller before
-    this node runs.
+    calendar_events are supplied by the caller (fetched from Google Calendar)
+    before this node runs; with none supplied, no conflicts are reported.
 
     State updates: commitments (enriched with conflict data), conflict_summary
     """
@@ -678,7 +642,7 @@ def rag_node(state: EmailAgentState, index_documents: list[dict] | None = None) 
     Steps:
       1. Retrieve top-3 semantically similar sent emails from the vector index
       2. Build a few-shot draft prompt injecting precedent context (Tone DNA alignment)
-      3. Generate a draft reply using GPT-4o with the precedent-injected prompt
+      3. Generate a draft reply with the caller's model and the precedent-injected prompt
 
     The draft incorporates the user's historical communication style — this is
     MailMind's Tone DNA feature: responses that sound like the user wrote them.
@@ -701,7 +665,7 @@ def rag_node(state: EmailAgentState, index_documents: list[dict] | None = None) 
         "masked_email_text": masked_body,
         "index_documents": documents,
         "top_k": 3,
-        "threshold": 0.75,
+        "threshold": llm_provider.similarity_threshold(),
     })
 
     # Step 2: Build draft prompt
@@ -718,9 +682,10 @@ def rag_node(state: EmailAgentState, index_documents: list[dict] | None = None) 
         try:
             messages = [
                 SystemMessage(content=(
-                    "You are MailMind's Draft Reply. "
-                    "Write a professional, concise reply that matches the user's established communication style. "
-                    "Keep the reply focused, action-oriented, and under 150 words."
+                    "You are MailMind's Draft Reply for a university inbox. "
+                    f"{campus.draft_etiquette(_current_profile(), state.get('sender'))} "
+                    "Match the user's established communication style, keep it focused and "
+                    "action-oriented, and under 150 words. Output only the reply text."
                 )),
                 HumanMessage(content=draft_prompt),
             ]
@@ -729,7 +694,7 @@ def rag_node(state: EmailAgentState, index_documents: list[dict] | None = None) 
                 config=trace_config("rag_draft", email_id=state.get("email_id"),
                                     user=state.get("user_email")),
             )
-            draft_reply = response.content.strip()
+            draft_reply = llm_provider.clean_text(response.content)
         except Exception as e:
             logger.warning(f"[RAG] Draft generation failed: {e}")
             draft_reply = f"[Draft unavailable — LLM error: {str(e)}]"

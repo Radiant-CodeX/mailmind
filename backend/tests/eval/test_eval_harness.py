@@ -239,7 +239,7 @@ def generate_report() -> dict:
 
 def test_priority_accuracy():
     from app.config.settings import settings
-    if settings.use_mock_graph:
+    if settings.use_mock_mail:
         pytest.skip("Skipping model accuracy evaluation in Mock Mode")
     dataset = load_dataset()
     result = run_classification(dataset)
@@ -250,7 +250,7 @@ def test_priority_accuracy():
 
 def test_category_accuracy():
     from app.config.settings import settings
-    if settings.use_mock_graph:
+    if settings.use_mock_mail:
         pytest.skip("Skipping model category evaluation in Mock Mode")
     dataset = load_dataset()
     result = run_classification(dataset)
@@ -273,7 +273,7 @@ def test_user_control():
 
 def test_context_use():
     from app.config.settings import settings
-    if settings.use_mock_graph:
+    if settings.use_mock_mail:
         pytest.skip("Skipping model context use evaluation in Mock Mode")
     dataset = load_dataset()
     result = run_context_use(dataset)

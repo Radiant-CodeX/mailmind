@@ -2,18 +2,16 @@
 GmailWatchService — Gmail push-notification lifecycle for inbox sync.
 ====================================================================
 
-The Gmail analogue of SubscriptionService. Gmail doesn't push directly to an
-arbitrary URL like Microsoft Graph; instead it publishes change notifications to
-a Cloud Pub/Sub *topic*, and a Pub/Sub push subscription forwards them to our
-``/webhooks/gmail`` endpoint.
+Gmail doesn't push directly to an arbitrary URL; it publishes change
+notifications to a Cloud Pub/Sub *topic*, and a Pub/Sub push subscription
+forwards them to our ``/webhooks/gmail`` endpoint.
 
 Per-account, we call ``users.watch`` to start notifications (max ~7 days, so it
-is renewed like a Graph subscription). Watch records are stored in the shared
-``graph_subscription`` table with ``resource="gmail:watch:inbox"``.
+must be renewed). Watch records are stored in the ``graph_subscription`` table
+(historical name) with ``resource="gmail:watch:inbox"``.
 
 Degrades gracefully: if no Pub/Sub topic is configured (``GMAIL_PUBSUB_TOPIC``),
-watch is skipped and freshness comes from on-mount + scheduled delta sync — the
-exact same fallback Graph uses without ``BACKEND_PUBLIC_URL``.
+watch is skipped and freshness comes from on-mount + scheduled delta sync.
 
 One-time Google Cloud setup the operator must do (out of band):
   1. Create a Pub/Sub topic, e.g. projects/PROJECT/topics/gmail-push
@@ -30,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.config.settings import settings
 from app.db.base import get_session, is_persistence_enabled
-from app.db.models import GraphSubscription
+from app.db.models import PushSubscription
 from app.services.account_service import AccountService
 
 logger = logging.getLogger(__name__)
@@ -59,7 +57,7 @@ class GmailWatchService:
             if session is None:
                 return None
             existing = (
-                session.query(GraphSubscription)
+                session.query(PushSubscription)
                 .filter_by(account_id=account.id, resource=_RESOURCE)
                 .first()
             )
@@ -80,7 +78,7 @@ class GmailWatchService:
             if session is None:
                 return None
             existing = (
-                session.query(GraphSubscription)
+                session.query(PushSubscription)
                 .filter_by(account_id=account.id, resource=_RESOURCE)
                 .first()
             )
@@ -89,7 +87,7 @@ class GmailWatchService:
                 existing.client_state = settings.gmail_pubsub_token or "none"
                 existing.expires_at = expires
             else:
-                session.add(GraphSubscription(
+                session.add(PushSubscription(
                     account_id=account.id,
                     provider_sub_id=topic,
                     resource=_RESOURCE,
@@ -117,9 +115,9 @@ class GmailWatchService:
             if session is None:
                 return 0
             due = (
-                session.query(GraphSubscription)
-                .filter(GraphSubscription.resource == _RESOURCE,
-                        GraphSubscription.expires_at < cutoff)
+                session.query(PushSubscription)
+                .filter(PushSubscription.resource == _RESOURCE,
+                        PushSubscription.expires_at < cutoff)
                 .all()
             )
             accounts = [session.get(OAuthAccount, s.account_id) for s in due]

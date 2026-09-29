@@ -1,27 +1,29 @@
-# Production override — live Microsoft Graph + Azure OpenAI.
+# Production override — live Gmail + any OpenAI-compatible model.
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # Secrets are read from the host environment / a root .env file (NEVER commit it).
-# Required vars: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET,
-#   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_CHAT_DEPLOYMENT,
-#   APPROVAL_TOKEN, FRONTEND_ORIGIN, NEXT_PUBLIC_API_URL
+# Required vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI,
+#   TOKEN_ENCRYPTION_KEY, SESSION_SECRET_KEY, APPROVAL_TOKEN, FRONTEND_ORIGIN,
+#   NEXT_PUBLIC_API_URL.
+# Optional server-default model (users can also bring their own key):
+#   LLM_PROVIDER, LLM_API_KEY, LLM_CHAT_MODEL, LLM_TRIAGE_MODEL
 
 services:
   backend:
     restart: unless-stopped
     environment:
-      - USE_MOCK_GRAPH=false
+      - USE_MOCK_MAIL=false
       - APP_ENV=production
-      - AZURE_TENANT_ID=${AZURE_TENANT_ID}
-      - AZURE_CLIENT_ID=${AZURE_CLIENT_ID}
-      - AZURE_CLIENT_SECRET=${AZURE_CLIENT_SECRET}
-      - AZURE_USER_UPN=${AZURE_USER_UPN:-}
-      - GRAPH_SCOPES=https://graph.microsoft.com/.default
-      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
-      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
-      - AZURE_OPENAI_CHAT_DEPLOYMENT=${AZURE_OPENAI_CHAT_DEPLOYMENT}
-      - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2024-12-01-preview}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openrouter}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_TRIAGE_MODEL=${LLM_TRIAGE_MODEL:-}
       - APPROVAL_TOKEN=${APPROVAL_TOKEN}
       - FRONTEND_ORIGIN=${FRONTEND_ORIGIN}
       - SENTRY_DSN=${SENTRY_DSN:-}

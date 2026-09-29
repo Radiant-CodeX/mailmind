@@ -1,13 +1,13 @@
 """Live integration verifier for MailMind.
 
-Run this against your REAL Azure tenant to confirm production wiring before
-go-live. It does NOT mutate your mailbox (read-only checks + an optional
-draft-only OpenAI ping).
+Run this against your REAL Gmail + model configuration to confirm production
+wiring before go-live. It does NOT mutate your mailbox (read-only checks + one
+tiny chat-completion ping to the server-default model).
 
 Usage (from backend/):
     python scripts/verify_live.py
 
-It reads configuration from your .env (USE_MOCK_GRAPH must be false). Each
+It reads configuration from your .env (USE_MOCK_MAIL must be false). Each
 check prints PASS / FAIL with a reason; the process exits non-zero if any
 required check fails, so it can gate a deploy pipeline.
 """
@@ -62,16 +62,16 @@ def main() -> int:
 
     # ── 1. Configuration ──────────────────────────────────────────────────────
     rep.section("Configuration")
-    if settings.use_mock_graph:
-        rep.fail("USE_MOCK_GRAPH is false", "currently TRUE — set USE_MOCK_GRAPH=false in .env to run live checks")
+    if settings.use_mock_mail:
+        rep.fail("USE_MOCK_MAIL is false", "currently TRUE — set USE_MOCK_MAIL=false in .env to run live checks")
         print("\nAborting: cannot verify live integration while in mock mode.")
         return 1
-    rep.ok("USE_MOCK_GRAPH is false")
+    rep.ok("USE_MOCK_MAIL is false")
 
     required_env = {
-        "AZURE_TENANT_ID": settings.azure_tenant_id,
-        "AZURE_CLIENT_ID": settings.azure_client_id,
-        "AZURE_CLIENT_SECRET": settings.azure_client_secret,
+        "GOOGLE_CLIENT_ID": settings.google_client_id,
+        "GOOGLE_CLIENT_SECRET": settings.google_client_secret,
+        "TOKEN_ENCRYPTION_KEY": settings.token_encryption_key,
     }
     for key, val in required_env.items():
         check(rep, f"{key} present", lambda v=val: "set" if v else (_ for _ in ()).throw(ValueError("missing")))
@@ -81,52 +81,35 @@ def main() -> int:
     else:
         rep.ok("APPROVAL_TOKEN is non-default")
 
-    # ── 2. Microsoft Graph ────────────────────────────────────────────────────
-    rep.section("Microsoft Graph")
-    from app.services.graph import GraphClient
+    # ── 2. Gmail ──────────────────────────────────────────────────────────────
+    rep.section("Gmail (process-level session from the last Google sign-in)")
+    from app.services.gmail import GmailClient, has_google_session
 
-    client = GraphClient()
+    if not has_google_session():
+        rep.warn("Gmail session", "no cached Google session — sign in once through the app, then re-run")
+    else:
+        client = GmailClient()
+        check(rep, "Read Inbox", lambda: f"{len(client.get_inbox_emails(limit=1))} message(s) readable")
+        check(rep, "Read Sent", lambda: f"{len(client.fetch_sent_emails(days=30))} message(s)")
+        check(rep, "Read Calendar", lambda: f"{len(client.fetch_calendar())} upcoming event(s)", required=False)
+        check(rep, "Read Tasks", lambda: f"{len(client.list_tasks(limit=1))} task(s)", required=False)
 
-    def _token() -> str:
-        tok = client._get_token()
-        if not tok:
-            raise RuntimeError("no token returned")
-        return f"acquired ({len(tok)} chars)"
+    # ── 3. AI model (server default) ──────────────────────────────────────────
+    rep.section("AI model (server default)")
+    from app.services.llm_provider import server_default_config, test_config
 
-    check(rep, "Acquire Graph token", _token)
+    cfg = server_default_config()
+    if cfg is None:
+        rep.warn("Server default model", "LLM_API_KEY not set — users must add their own key "
+                 "(or triage runs on rule-based scoring)")
+    else:
+        def _llm() -> str:
+            result = test_config(cfg)
+            if not result.get("ok"):
+                raise RuntimeError(result.get("error"))
+            return f"{cfg.provider}:{cfg.chat_model} responded in {result['latency_ms']} ms"
 
-    def _inbox() -> str:
-        msgs = client.get_inbox_emails(limit=1)
-        return f"{len(msgs)} message(s) readable"
-
-    check(rep, "Read Inbox", _inbox)
-    check(rep, "Read Sent Items", lambda: f"{len(client.fetch_sent_emails(days=30))} message(s)")
-    check(rep, "Read Drafts", lambda: f"{len(client.get_draft_emails(limit=1))} message(s)", required=False)
-    check(rep, "Read Junk/Spam", lambda: f"{len(client.get_spam_emails(limit=1))} message(s)", required=False)
-    check(rep, "Read Deleted Items", lambda: f"{len(client.get_trash_emails(limit=1))} message(s)", required=False)
-
-    # ── 3. Azure OpenAI ───────────────────────────────────────────────────────
-    rep.section("Azure OpenAI")
-
-    def _openai() -> str:
-        if not settings.azure_openai_api_key or not settings.azure_openai_base_endpoint:
-            raise RuntimeError("Azure OpenAI not configured (key/endpoint missing)")
-        from openai import AzureOpenAI
-
-        oai = AzureOpenAI(
-            api_key=settings.azure_openai_api_key,
-            api_version=settings.azure_openai_api_version,
-            azure_endpoint=settings.azure_openai_base_endpoint,
-        )
-        resp = oai.chat.completions.create(
-            model=settings.azure_openai_chat_deployment,
-            messages=[{"role": "user", "content": "Reply with the single word: OK"}],
-            max_tokens=5,
-            temperature=0,
-        )
-        return f"deployment '{settings.azure_openai_chat_deployment}' responded: {resp.choices[0].message.content!r}"
-
-    check(rep, "Azure OpenAI chat completion", _openai)
+        check(rep, "Chat completion", _llm)
 
     # ── Summary ───────────────────────────────────────────────────────────────
     rep.section("Summary")

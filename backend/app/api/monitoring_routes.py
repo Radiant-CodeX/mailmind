@@ -74,7 +74,9 @@ def health_deep() -> dict:
     queue = get_queue_backend()
     queue_ok = queue.healthy()
     db_ok = is_persistence_enabled()
-    llm_ok = bool(settings.azure_openai_api_key and settings.azure_openai_base_endpoint)
+    from app.services.llm_provider import server_default_config
+
+    llm_ok = server_default_config() is not None
 
     checks = {
         "queue": {"backend": queue.name, "healthy": queue_ok, "depth": _safe_depth(queue)},

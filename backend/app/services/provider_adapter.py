@@ -5,10 +5,10 @@ ProviderAdapter is a stateless ABC: each instance wraps a set of decrypted
 OAuth tokens (access + refresh) rather than reading from any global cache.
 AccountService is responsible for decrypting tokens and constructing adapters.
 
-GmailAdapter  → wraps GmailClient, passes tokens at construction
-OutlookAdapter → wraps GraphClient, passes tokens at construction
+GmailAdapter → wraps GmailClient, passes tokens at construction.
 
-Both adapters expose the same interface so all route handlers are provider-agnostic.
+Gmail is the only supported provider; the ABC keeps route handlers
+provider-agnostic should another provider be added later.
 """
 
 from __future__ import annotations
@@ -239,118 +239,6 @@ class GmailAdapter(ProviderAdapter):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Outlook Adapter
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class OutlookAdapter(ProviderAdapter):
-    """
-    Wraps GraphClient with token injection.
-    """
-
-    def __init__(self, access_token: str, refresh_token: str | None = None) -> None:
-        super().__init__(access_token, refresh_token)
-        self._client = None
-
-    def _get_client(self):
-        if self._client is None:
-            from app.services.graph import GraphClient
-            self._client = GraphClient(
-                access_token=self.access_token,
-                refresh_token=self.refresh_token,
-            )
-        return self._client
-
-    def get_user_profile(self) -> dict[str, str | None]:
-        return self._get_client().get_user_profile()
-
-    def list_emails(self, folder="inbox", limit=50, page_token=None, query=None) -> dict[str, Any]:
-        return self._get_client().list_emails(folder=folder, limit=limit, page_token=page_token, query=query)
-
-    def list_inbox_delta(self, delta_link=None, folder="inbox") -> dict[str, Any]:
-        return self._get_client().list_inbox_delta(delta_link, folder=folder)
-
-    def create_subscription(self, notification_url, client_state, resource=None, minutes=4230) -> dict[str, Any]:
-        client = self._get_client()
-        kwargs = {"minutes": minutes}
-        if resource:
-            kwargs["resource"] = resource
-        return client.create_subscription(notification_url, client_state, **kwargs)
-
-    def renew_subscription(self, subscription_id, minutes=4230) -> dict[str, Any]:
-        return self._get_client().renew_subscription(subscription_id, minutes=minutes)
-
-    def delete_subscription(self, subscription_id) -> None:
-        self._get_client().delete_subscription(subscription_id)
-
-    def get_inbox_emails(self, limit=10) -> list[dict[str, Any]]:
-        return self._get_client().get_inbox_emails(limit=limit)
-
-    def get_message(self, email_id) -> dict[str, Any] | None:
-        return self._get_client().get_message(email_id)
-
-    def get_attachment(self, message_id, attachment_id) -> dict[str, Any] | None:
-        return self._get_client().get_attachment(message_id, attachment_id)
-
-    def mark_read(self, email_id, read=True) -> None:
-        self._get_client().mark_read(email_id, read)
-
-    def archive(self, email_id) -> None:
-        self._get_client().archive(email_id)
-
-    def move_to_trash(self, email_id) -> None:
-        self._get_client().move_to_trash(email_id)
-
-    def restore_from_trash(self, email_id) -> None:
-        self._get_client().restore_from_trash(email_id)
-
-    def report_spam(self, email_id) -> None:
-        self._get_client().report_spam(email_id)
-
-    def send_reply(self, email_id, comment) -> None:
-        self._get_client().send_reply(email_id, comment)
-
-    def reply_all(self, email_id, comment) -> None:
-        self._get_client().reply_all(email_id, comment)
-
-    def forward_email(self, email_id, to, comment="") -> None:
-        self._get_client().forward_email(email_id, to, comment)
-
-    def send_new_email(self, to, subject, body, cc=None, bcc=None) -> None:
-        self._get_client().send_new_email(to=to, subject=subject, body=body, cc=cc, bcc=bcc)
-
-    def fetch_sent_emails(self, days=30) -> list[dict[str, Any]]:
-        return self._get_client().fetch_sent_emails(days=days)
-
-    def get_draft_emails(self, limit=10) -> list[dict[str, Any]]:
-        return self._get_client().get_draft_emails(limit=limit)
-
-    def get_spam_emails(self, limit=10) -> list[dict[str, Any]]:
-        return self._get_client().get_spam_emails(limit=limit)
-
-    def get_trash_emails(self, limit=10) -> list[dict[str, Any]]:
-        return self._get_client().get_trash_emails(limit=limit)
-
-    def fetch_calendar(self) -> list[dict[str, Any]]:
-        return self._get_client().fetch_calendar()
-
-    def get_calendar_events(self, start_time, end_time) -> list[dict[str, Any]]:
-        return self._get_client().get_calendar_events(start_time, end_time)
-
-    def create_calendar_event(self, email_id, commitment, deadline=None) -> str:
-        return self._get_client().create_calendar_event(email_id, commitment, deadline)
-
-    def list_tasks(self, limit=20) -> list[dict[str, Any]]:
-        return self._get_client().list_tasks(limit=limit)
-
-    def create_todo(self, email_id, commitment) -> str:
-        return self._get_client().create_todo(email_id, commitment)
-
-    def complete_task(self, task_id: str) -> bool:
-        return self._get_client().complete_task(task_id)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Factory
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -363,6 +251,4 @@ def build_adapter(
     """Return the correct ProviderAdapter subclass for a given provider string."""
     if provider == "google":
         return GmailAdapter(access_token=access_token, refresh_token=refresh_token)
-    if provider == "microsoft":
-        return OutlookAdapter(access_token=access_token, refresh_token=refresh_token)
-    raise ValueError(f"Unknown provider: {provider!r}. Expected 'google' or 'microsoft'.")
+    raise ValueError(f"Unsupported provider: {provider!r}. Only Gmail ('google') is supported.")

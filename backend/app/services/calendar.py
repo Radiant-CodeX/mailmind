@@ -5,14 +5,13 @@ from datetime import datetime, timedelta
 from typing import Any, List, Optional
 
 from app.models.schemas import CalendarEvent
-from app.services.graph import GraphClient
 
 
 class CalendarConflictService:
     """Utility service for parsing dates and checking calendar conflicts."""
 
-    def __init__(self, graph_client: GraphClient) -> None:
-        self.graph_client = graph_client
+    def __init__(self, mail_client: Any) -> None:
+        self.mail_client = mail_client
 
     def _parse_date_string(self, raw: str, reference: datetime) -> Optional[datetime]:
         """Parse raw date text into a datetime object."""
@@ -122,9 +121,9 @@ class CalendarConflictService:
         return None
 
     def fetch_events(self, days: int = 3) -> List[CalendarEvent]:
-        """Fetch and normalize graph calendar events to the CalendarEvent schema."""
+        """Fetch and normalize calendar events to the CalendarEvent schema."""
         now = datetime.utcnow()
-        raw = self.graph_client.get_calendar_events(now, now + timedelta(days=days))
+        raw = self.mail_client.get_calendar_events(now, now + timedelta(days=days))
         events: list[CalendarEvent] = []
         for item in raw:
             try:
@@ -142,7 +141,7 @@ class CalendarConflictService:
 
     def check_conflict(self, deadline: datetime, window_hours: int = 2) -> dict[str, Any]:
         """Detect whether a proposed deadline collides with existing calendar events."""
-        events = self.graph_client.get_calendar_events(datetime.utcnow(), datetime.utcnow() + timedelta(days=3))
+        events = self.mail_client.get_calendar_events(datetime.utcnow(), datetime.utcnow() + timedelta(days=3))
         for event in events:
             start = event.get("start_time")
             end = event.get("end_time")

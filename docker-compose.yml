@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - USE_MOCK_GRAPH=true
+      - USE_MOCK_MAIL=true
       - APPROVAL_TOKEN=secret-approval-token
       - FRONTEND_ORIGIN=http://localhost:3000
       - OTEL_EXPORTER_JAEGER_ENDPOINT=http://jaeger:14268/api/traces

@@ -4,14 +4,15 @@ MailMind — Integration Tests
 Tests exercise the full FastAPI request path (routing, middleware,
 serialisation, validation, service layer) using TestClient.
 
-External APIs (Microsoft Graph, Gmail, Azure OpenAI) are patched at the
-provider boundary with unittest.mock so no real credentials are needed.
+External APIs (Gmail and the AI model provider) are patched at the provider
+boundary with unittest.mock so no real credentials are needed.
 The live app code — handlers, schemas, queue, DB, metrics — runs as-is.
 """
 from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -20,7 +21,7 @@ from fastapi.testclient import TestClient
 
 # ── Env must be set before app is imported ────────────────────────────────────
 os.environ.setdefault("APPROVAL_TOKEN", "test-approval-token")
-os.environ.setdefault("USE_MOCK_GRAPH", "false")   # run live code paths
+os.environ.setdefault("USE_MOCK_MAIL", "false")    # run live code paths
 os.environ["DATABASE_URL"] = ""                    # disable DB → no Supabase connection in tests
 
 from app.config.settings import settings  # noqa: E402
@@ -76,7 +77,7 @@ FAKE_TASKS = [
 
 
 def _make_client_mock() -> MagicMock:
-    """Return a MagicMock that mimics the GraphClient / GmailClient interface."""
+    """Return a MagicMock that mimics the Gmail adapter interface."""
     m = MagicMock()
     m.use_mock = False
     m.list_emails.return_value = FAKE_PAGE
@@ -113,25 +114,32 @@ def client():
     mock_client = _make_client_mock()
     # Ensure live code paths run regardless of other test files' module-level settings
     from app.config.settings import settings as _settings
-    _orig_mock_graph = _settings.use_mock_graph
-    _settings.use_mock_graph = False
+    _orig_mock_graph = _settings.use_mock_mail
+    _settings.use_mock_mail = False
 
-    # Bypass authentication: every request runs as a fixed test user.
-    from app.api.deps import get_current_session, get_current_user
-    _fake_session = {"user_id": "test-user", "provider": "microsoft", "email": "tester@example.com"}
-    app.dependency_overrides[get_current_user] = lambda: _fake_session["email"]
+    # Bypass authentication: every request runs as a fixed test user with one
+    # connected Gmail account, and the adapter returns the mock client.
+    from app.api.deps import get_current_session, get_current_user, get_default_account
+    fake_user = SimpleNamespace(id="test-user", primary_email="tester@example.com",
+                                email="tester@example.com", display_name="Tester", accounts=[])
+    fake_account = SimpleNamespace(id="acct-test", provider="google", account_email="tester@example.com",
+                                   is_default=True, picture_url=None)
+    _fake_session = {"user_id": fake_user.id, "provider": "google", "email": fake_user.email}
+    app.dependency_overrides[get_current_user] = lambda: fake_user
     app.dependency_overrides[get_current_session] = lambda: _fake_session
+    app.dependency_overrides[get_default_account] = lambda: fake_account
 
-    # Patch get_mail_client everywhere it's imported
-    with patch("app.api.routes.get_mail_client", return_value=mock_client), \
+    # No LLM in integration tests: every node takes its deterministic path.
+    with patch("app.services.account_service.AccountService.get_adapter", return_value=mock_client), \
          patch("app.services.mail_provider.get_mail_client", return_value=mock_client), \
-         patch("app.services.tools.GraphClient", return_value=mock_client):
+         patch("app.services.llm_provider.resolve_config", return_value=None):
         with TestClient(app) as c:
             yield c
 
     app.dependency_overrides.pop(get_current_user, None)
     app.dependency_overrides.pop(get_current_session, None)
-    _settings.use_mock_graph = _orig_mock_graph
+    app.dependency_overrides.pop(get_default_account, None)
+    _settings.use_mock_mail = _orig_mock_graph
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -291,9 +299,10 @@ class TestEmailActions:
 class TestTriageAndClassification:
     URGENT_PAYLOAD = {
         "email_id": "msg-001",
-        "sender": "ceo@bigcorp.com",
-        "subject": "URGENT: sign the contract by today",
-        "body": "We need your signature today or the deal falls through.",
+        "sender": "coe@srmist.edu.in",
+        "subject": "URGENT: download your hall ticket by today",
+        "body": "Students with attendance below 75% will not be permitted to write the exam. "
+                "Download your hall ticket today.",
         "received_at": "2026-06-09T10:00:00Z",
     }
     LOW_PAYLOAD = {
@@ -554,43 +563,6 @@ class TestAgentPipeline:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestAuthEndpoints:
-    def test_auth_status_unauthenticated_by_default(self, client):
-        """App starts unauthenticated — status endpoint must return 200."""
-        r = client.get("/api/auth/status")
-        assert r.status_code == 200
-        body = r.json()
-        assert "authenticated" in body
-        assert isinstance(body["authenticated"], bool)
-
-    def test_auth_status_has_provider_field(self, client):
-        r = client.get("/api/auth/status")
-        assert "provider" in r.json()
-
-    def test_microsoft_login_initiate_returns_auth_url(self, client):
-        """When Azure credentials are configured, initiate returns a consent URL."""
-        with patch("app.services.graph.build_ms_auth_url",
-                   return_value=("https://login.microsoftonline.com/authorize?...", "state-abc")):
-            settings.azure_client_id = "fake-client-id"
-            try:
-                r = client.post("/api/auth/microsoft/login-initiate")
-            finally:
-                settings.azure_client_id = ""
-        assert r.status_code == 200
-        body = r.json()
-        assert body["status"] == "pending"
-        assert "auth_url" in body
-        assert "state" in body
-
-    def test_microsoft_login_initiate_fails_without_config(self, client):
-        """Missing AZURE_CLIENT_ID returns 500."""
-        original = settings.azure_client_id
-        settings.azure_client_id = ""
-        try:
-            r = client.post("/api/auth/microsoft/login-initiate")
-            assert r.status_code == 500
-        finally:
-            settings.azure_client_id = original
-
     def test_google_login_initiate_returns_auth_url(self, client):
         """When Google credentials are configured, initiate returns a consent URL."""
         with patch("app.services.gmail.build_auth_url",
@@ -616,13 +588,10 @@ class TestAuthEndpoints:
         finally:
             settings.google_client_id = original
 
-    def test_logout_returns_ok(self, client):
-        r = client.post("/api/auth/logout")
-        assert r.status_code == 200
-
-    def test_microsoft_poll_missing_device_code_returns_400(self, client):
-        r = client.post("/api/auth/microsoft/poll", json={})
-        assert r.status_code == 400
+    def test_microsoft_login_routes_removed(self, client):
+        """Outlook support was removed — the Microsoft sign-in endpoints are gone."""
+        assert client.post("/api/auth/microsoft/login-initiate").status_code == 404
+        assert client.post("/api/auth/microsoft/poll", json={}).status_code == 404
 
     def test_google_poll_missing_state_returns_400(self, client):
         r = client.post("/api/auth/google/poll", json={})
@@ -634,21 +603,23 @@ class TestAuthEndpoints:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestWebhook:
-    def test_validation_token_echoed(self, client):
-        """Graph subscription validation: GET with validationToken returns plain text."""
+    def test_graph_webhook_removed(self, client):
         r = client.get("/api/webhook?validationToken=ping12345")
-        assert r.status_code == 200
-        assert r.text == "ping12345"
+        assert r.status_code in (404, 405)
 
-    def test_notification_payload_accepted(self, client):
-        """POST notification is accepted and enqueued without error."""
-        r = client.post("/api/webhook",
-                        json={"value": [{"resourceData": {"id": "msg-webhook-01"}}]})
-        assert r.status_code == 200
+    def test_gmail_webhook_rejects_bad_token_quietly(self, client):
+        """Pub/Sub push with a wrong token is acked (204) but does no work."""
+        original = settings.gmail_pubsub_token
+        settings.gmail_pubsub_token = "expected-token"
+        try:
+            r = client.post("/webhooks/gmail?token=wrong", json={"message": {"data": "e30="}})
+        finally:
+            settings.gmail_pubsub_token = original
+        assert r.status_code == 204
 
-    def test_empty_notification_payload(self, client):
-        r = client.post("/api/webhook", json={})
-        assert r.status_code == 200
+    def test_gmail_webhook_empty_envelope(self, client):
+        r = client.post("/webhooks/gmail", json={})
+        assert r.status_code == 204
 
 
 # ─────────────────────────────────────────────────────────────────────────────

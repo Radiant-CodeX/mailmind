@@ -8,83 +8,47 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from openai import AzureOpenAI
-
 from app.config.settings import settings
 from app.models.schemas import CommitmentItem
+from app.services import campus, llm_provider
 from app.services.calendar import CalendarConflictService
-from app.services.graph import GraphClient
 from app.services.rag import EmbeddingProvider, RAGIndexFactory, mask_pii
 
-# Groq fallback for when Azure OpenAI is not configured.
-try:
-    from langchain_groq import ChatGroq as _ChatGroq
-    _GROQ_AVAILABLE = True
-except ImportError:
-    _ChatGroq = None
-    _GROQ_AVAILABLE = False
+logger = logging.getLogger(__name__)
 
 
 class CommitmentService:
     """Service for extracting, confirming, and indexing email commitments."""
 
-    def __init__(self, graph_client: GraphClient) -> None:
-        self.graph_client = graph_client
-        self.conflict_service = CalendarConflictService(graph_client)
+    def __init__(self, mail_client: Any) -> None:
+        # Gmail adapter/client: creates Google Tasks + Calendar events on confirm.
+        self.mail_client = mail_client
+        self.conflict_service = CalendarConflictService(mail_client)
         self.examples = [
             {
-                "text": "Hi Jane, please review the budget proposal by Monday next week.",
+                "text": "Infosys campus drive: eligible students must register on the placement portal "
+                        "by 03/10/2026 5 PM. The online assessment is on 06/10/2026 at 9:30 AM in the "
+                        "Tech Park lab.",
                 "commitments": [
-                    {
-                        "commitment": "Review the budget proposal",
-                        "deadline": "2026-06-08T09:00:00Z",
-                        "confidence": 0.95
-                    }
-                ]
+                    {"commitment": "Register for the Infosys drive on the placement portal",
+                     "deadline": "2026-10-03T17:00:00+05:30", "confidence": 0.97},
+                    {"commitment": "Attend the Infosys online assessment at the Tech Park lab",
+                     "deadline": "2026-10-06T09:30:00+05:30", "confidence": 0.95},
+                ],
             },
             {
-                "text": "Can you make sure to approve the timesheet before 5 PM today? Also, please upload the slide deck.",
+                "text": "Please submit your DBMS record notebook by Friday and pay the lab fee at the "
+                        "accounts section.",
                 "commitments": [
-                    {
-                        "commitment": "Approve the timesheet",
-                        "deadline": "2026-06-04T17:00:00Z",
-                        "confidence": 0.99
-                    },
-                    {
-                        "commitment": "Upload the slide deck",
-                        "deadline": None,
-                        "confidence": 0.90
-                    }
-                ]
+                    {"commitment": "Submit the DBMS record notebook", "deadline": None, "confidence": 0.93},
+                    {"commitment": "Pay the lab fee at the accounts section", "deadline": None, "confidence": 0.88},
+                ],
             },
             {
-                "text": "FYI: the client liked the prototype. No actions needed for now.",
-                "commitments": []
-            }
+                "text": "FYI: the results of the coding contest are now on the club website. No action needed.",
+                "commitments": [],
+            },
         ]
-
-    def _get_llm_client(self) -> tuple[AzureOpenAI | _ChatGroq | None, str]:
-        """Return the appropriate LLM client: Azure OpenAI → Groq → None.
-
-        Returns a tuple of (client, model_name). Groq returns the model name
-        directly; Azure returns the deployment name.
-        """
-        if settings.use_mock_graph:
-            return None, ""
-        if settings.azure_openai_api_key and settings.azure_openai_endpoint:
-            return AzureOpenAI(
-                api_key=settings.azure_openai_api_key,
-                api_version=settings.azure_openai_api_version,
-                azure_endpoint=settings.azure_openai_endpoint
-            ), settings.azure_openai_chat_deployment
-        elif settings.groq_api_key and _GROQ_AVAILABLE and _ChatGroq is not None:
-            return _ChatGroq(api_key=settings.groq_api_key, model="llama-3.3-70b-versatile"), "llama-3.3-70b-versatile"
-        # No LLM credentials configured — degrade gracefully to regex fallback.
-        logging.warning(
-            "No Azure OpenAI or Groq credentials configured; using regex fallback "
-            "for commitment extraction."
-        )
-        return None, ""
 
     def _fallback_extract(self, masked_email_text: str) -> list[CommitmentItem]:
         """Extract candidate commitments using a local rule-based regex fallback."""
@@ -94,9 +58,11 @@ class CommitmentService:
             text = line.strip()
             if not text:
                 continue
-            if re.search(r"\b(please|need to|must|review|approve|schedule|confirm)\b", text, re.I):
+            if re.search(r"\b(please|need to|must|review|approve|schedule|confirm|register|submit|"
+                         r"pay|download|attend|report|upload|apply)\b", text, re.I):
                 deadline = self._find_deadline(text)
-                confidence = 0.85 if re.search(r"\b(please|need to|must|review|approve|schedule)\b", text, re.I) else 0.5
+                confidence = 0.85 if re.search(r"\b(please|need to|must|review|approve|schedule|"
+                                               r"register|submit|pay|attend)\b", text, re.I) else 0.5
                 commitments.append(
                     CommitmentItem(
                         id=str(uuid.uuid4()),
@@ -108,7 +74,7 @@ class CommitmentService:
         return commitments
 
     def extract(self, masked_email_text: str, thread_summary: str, email_id: str | None = None) -> list[CommitmentItem]:
-        """Extract candidate commitments from masked email text using GPT-4o with fallback."""
+        """Extract candidate commitments from masked email text with the caller's model, with fallback."""
         import hashlib
 
         from app.services.cache import commitments_cache
@@ -129,46 +95,36 @@ class CommitmentService:
         return result
 
     def _extract_uncached(self, masked_email_text: str, thread_summary: str) -> list[CommitmentItem]:
-        if settings.use_mock_graph:
+        if settings.use_mock_mail or not llm_provider.llm_available():
             return self._fallback_extract(masked_email_text)
 
-        client, model = self._get_llm_client()
-        if not client:
-            return self._fallback_extract(masked_email_text)
+        few_shot_str = "".join(
+            f"Email: {ex['text']}\nCommitments: {json.dumps(ex['commitments'])}\n\n"
+            for ex in self.examples
+        )
+        from app.services.user_settings import load_campus_profile
 
-        # Format few-shot examples
-        few_shot_str = ""
-        for idx, ex in enumerate(self.examples):
-            few_shot_str += f"Email: {ex['text']}\nCommitments: {json.dumps(ex['commitments'])}\n\n"
-
+        profile = load_campus_profile(llm_provider.current_ai_user_id())
         system_prompt = (
-            "You are an AI assistant designed to extract commitments, action items, and deadlines from email texts.\n"
-            "Identify what the sender is requesting the recipient to do, or what the sender is committing to do.\n"
-            "For each commitment, extract:\n"
-            "- 'commitment': A concise description of the task or action item.\n"
-            "- 'deadline': The deadline for the task, normalized to ISO 8601 format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ) if mentioned, or null if not specified.\n"
-            "- 'confidence': A confidence score between 0.0 and 1.0 representing your certainty of the extraction.\n\n"
-            "You MUST return the output as a valid JSON array of objects or an object containing a list under a key like 'commitments'.\n"
-            "Do not include any Markdown blocks, backticks, or extra text. Only return the JSON content."
+            "You extract action items and deadlines from university emails.\n"
+            f"{campus.role_context(profile)}\n\n"
+            "List everything the READER must do: register, submit, pay, download, upload, attend "
+            "(an exam, interview, viva, class, meeting — use its start time as the deadline), or reply.\n"
+            "For each item return:\n"
+            "- 'commitment': short imperative, including the venue if one is given.\n"
+            "- 'deadline': ISO 8601 (YYYY-MM-DDTHH:MM:SS+05:30 when a time is known, else YYYY-MM-DD), "
+            "or null. Numeric dates are Indian format DD/MM/YYYY; times are IST unless stated.\n"
+            "- 'confidence': 0.0-1.0.\n\n"
+            "Return ONLY JSON: an object with a 'commitments' list."
         )
 
-        user_prompt = f"Here are some examples:\n{few_shot_str}Now, extract commitments from this email:\nEmail: {masked_email_text}\nThread Summary: {thread_summary}\nCommitments:"
+        user_prompt = (
+            f"Examples:\n{few_shot_str}Now extract commitments from this email:\n"
+            f"Email: {masked_email_text[:3000]}\nThread summary: {thread_summary}\nCommitments:"
+        )
 
         try:
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
-                timeout=10.0
-            )
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("Empty response from LLM")
-            
-            data = json.loads(content)
+            data = llm_provider.invoke_json(system_prompt, user_prompt, max_tokens=500)
             items = []
             if isinstance(data, list):
                 items = data
@@ -248,8 +204,8 @@ class CommitmentService:
                         already_done = True
 
                 if not already_done:
-                    t_url = self.graph_client.create_todo(email_id, commitment.commitment)
-                    e_url = self.graph_client.create_calendar_event(email_id, commitment.commitment, commitment.deadline)
+                    t_url = self.mail_client.create_todo(email_id, commitment.commitment)
+                    e_url = self.mail_client.create_calendar_event(email_id, commitment.commitment, commitment.deadline)
                     task_urls.append(t_url)
                     event_urls.append(e_url)
 
@@ -300,7 +256,7 @@ class CommitmentService:
 
     def _incremental_reindex(self, email_id: str) -> None:
         """Fetch sent email content and upsert a new RAG index entry."""
-        email = self.graph_client.fetch_sent_email(email_id)
+        email = self.mail_client.fetch_sent_email(email_id)
         if not email:
             return
         masked_body = mask_pii(str(email.get("body", "")))

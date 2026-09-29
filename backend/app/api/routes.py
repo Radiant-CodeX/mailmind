@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 audit = logging.getLogger("mailmind.audit")
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse
 
 from app.config.settings import settings
 from app.models.schemas import (
@@ -35,7 +35,6 @@ from app.services.alert_scheduler import alert_queue
 from app.services.classification import ClassificationService
 from app.services.commitments import CommitmentService
 from app.services.draft_service import DraftService
-from app.services.graph import GraphClient
 from app.services.account_service import AccountService
 from app.services.rag import PrecedentInjector, RAGIndexFactory, RetrievalService, mask_pii
 from app.services.scorers import (
@@ -84,7 +83,7 @@ def _validate_approval_token(token: str | None) -> None:
     authorised, so requiring a matching token only blocks the demo flow
     (e.g. confirming a commitment to the calendar). Live mode still enforces it.
     """
-    if settings.use_mock_graph:
+    if settings.use_mock_mail:
         return
 
     if settings.approval_token == "secret-approval-token":
@@ -125,7 +124,7 @@ def _finish_oauth_connect(
     from app.services.token_encryption import encrypt_token
 
     # ── Private-beta access gate ──────────────────────────────────────────────
-    # Enforced HERE (the single chokepoint both providers pass through) rather
+    # Enforced HERE (the single chokepoint every sign-in passes through) rather
     # than on the login page, so no one can bypass it by calling the OAuth
     # endpoints directly. Un-approved emails are auto-added to the waitlist as
     # pending and rejected with a clear, frontend-detectable message.
@@ -151,7 +150,7 @@ def _finish_oauth_connect(
         else:
             # New account — reuse an existing User with this email if one exists
             # (e.g. an orphaned row from a previous partial sign-in, or adding a
-            # second provider for the same person) before creating a new one.
+            # second Gmail account for the same person) before creating a new one.
             user = (
                 db.query(User)
                 .filter((User.email == email) | (User.primary_email == email))
@@ -164,7 +163,7 @@ def _finish_oauth_connect(
                 db.add(user)
                 db.flush()
             # Only make this the default account if the user has none yet
-            # (a reused User may already have a default from another provider).
+            # (a reused User may already have a default from another account).
             has_default = bool(
                 db.query(OAuthAccount).filter_by(user_id=user.id, is_default=True).first()
             )
@@ -218,7 +217,7 @@ def _finish_oauth_connect(
         db.close()
 
     dashboard = f"{settings.frontend_origin.rstrip('/')}/dashboard"
-    html_content = _connected_screen(email, dashboard, provider=provider)
+    html_content = _connected_screen(email, dashboard)
     # Build a real HTMLResponse and set cookies directly on it — this is the
     # only reliable way to return both a body AND Set-Cookie headers in FastAPI.
     resp = HTMLResponse(content=html_content, status_code=200)
@@ -284,7 +283,7 @@ def health(request: Request) -> dict[str, Any]:
         "status": "ok",
         "version": "2.0.0",
         "queue_size": queue.size(),
-        "mode": "mock" if settings.use_mock_graph else "live",
+        "mode": "mock" if settings.use_mock_mail else "live",
     }
 
 
@@ -292,21 +291,21 @@ def health(request: Request) -> dict[str, Any]:
 def ready() -> dict[str, Any]:
     """Readiness probe — reports whether external dependencies are configured.
 
-    Returns 200 with per-dependency booleans. In live mode, missing Graph or
-    OpenAI configuration is surfaced so orchestrators can gate traffic.
+    Returns 200 with per-dependency booleans. Gmail OAuth is required in live
+    mode; an AI model is optional (users can bring their own key, and every
+    feature has a rule-based fallback), so it is reported but not gating.
     """
-    graph_ready = settings.use_mock_graph or bool(
-        settings.azure_client_id and settings.azure_tenant_id
-    )
-    llm_ready = bool(settings.azure_openai_api_key and settings.azure_openai_base_endpoint) or bool(
-        settings.groq_api_key
+    from app.services.llm_provider import server_default_config
+
+    gmail_ready = settings.use_mock_mail or bool(
+        settings.google_client_id and settings.google_client_secret
     )
     checks = {
-        "graph": graph_ready,
-        "llm": llm_ready,
+        "gmail": gmail_ready,
+        "llm_server_default": server_default_config() is not None,
     }
-    overall = all(checks.values()) if not settings.use_mock_graph else True
-    return {"ready": overall, "checks": checks, "mode": "mock" if settings.use_mock_graph else "live"}
+    overall = gmail_ready
+    return {"ready": overall, "checks": checks, "mode": "mock" if settings.use_mock_mail else "live"}
 
 
 def _mirror_flags(email_id: str, *, is_read: bool | None = None,
@@ -390,13 +389,13 @@ def mailbox_sync_status(folder: str = "inbox", account=Depends(get_default_accou
 @router.get("/inbox/poll")
 def poll_new_email(account=Depends(get_default_account)) -> dict[str, Any]:
     """
-    Lightweight new-email check for both Microsoft and Google accounts.
+    Lightweight new-email check for the connected Gmail account.
 
     Fetches only the single most recent email and returns its id + received_at.
     The frontend compares this id against what it currently shows — if different,
     a new email has arrived and the inbox should refresh.
 
-    Cost: 1 Graph/Gmail API call, no LLM, no DB write.
+    Cost: 1 Gmail API call, no LLM, no DB write.
     """
     try:
         client = AccountService.get_adapter(account)
@@ -438,9 +437,9 @@ def get_mailbox_message(email_id: str, account=Depends(get_default_account)) -> 
 
 
 @router.get("/emails/{email_id}/attachments")
-def list_attachments(email_id: str, _user: str = Depends(get_current_user)) -> list[dict]:
+def list_attachments(email_id: str, account=Depends(get_default_account)) -> list[dict]:
     """Return attachment metadata (id, filename, mime_type, size) for an email."""
-    client = get_mail_client()
+    client = AccountService.get_adapter(account)._get_client()
     if not hasattr(client, "list_attachments"):
         return []
     try:
@@ -453,7 +452,7 @@ def list_attachments(email_id: str, _user: str = Depends(get_current_user)) -> l
 @router.get("/emails/{email_id}/attachments/{attachment_id}")
 def download_attachment(email_id: str, attachment_id: str, filename: str = "attachment",
                         account=Depends(get_default_account)):
-    """Stream an email attachment for download (Gmail or Microsoft Graph)."""
+    """Stream an email attachment for download."""
     import base64
     from fastapi.responses import Response
 
@@ -482,14 +481,14 @@ def download_attachment(email_id: str, attachment_id: str, filename: str = "atta
 
 @router.get("/emails", response_model=list[EmailPayload])
 def get_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
-    """Fetch recent inbox messages from the active provider (Outlook or Gmail)."""
+    """Fetch recent inbox messages from Gmail."""
     client = AccountService.get_adapter(account)
     return client.get_inbox_emails(limit=limit)
 
 
 @router.get("/emails/sent", response_model=list[EmailPayload])
 def get_sent_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
-    """Fetch recent sent messages from the active provider (Outlook or Gmail)."""
+    """Fetch recent sent messages from Gmail."""
     client = AccountService.get_adapter(account)
     raw_emails = client.fetch_sent_emails(days=30)
 
@@ -502,8 +501,7 @@ def get_sent_emails(limit: int = 10, account=Depends(get_default_account)) -> li
         elif isinstance(from_obj, str) and from_obj:
             sender_addr = from_obj
 
-        # Body may be a Graph dict ({"content": ...}) in live mode or a plain
-        # string in mock mode — handle both.
+        # Body may be a dict ({"content": ...}) or a plain string — handle both.
         body_obj = msg.get("body")
         if isinstance(body_obj, dict):
             body_content = body_obj.get("content", "")
@@ -531,14 +529,14 @@ def get_draft_emails(limit: int = 10, account=Depends(get_default_account)) -> l
 
 @router.get("/emails/spam", response_model=list[EmailPayload])
 def get_spam_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
-    """Fetch emails from the Junk/Spam folder."""
+    """Fetch emails from the Spam folder."""
     client = AccountService.get_adapter(account)
     return client.get_spam_emails(limit=limit)
 
 
 @router.get("/emails/trash", response_model=list[EmailPayload])
 def get_trash_emails(limit: int = 10, account=Depends(get_default_account)) -> list[dict[str, Any]]:
-    """Fetch emails from the Deleted Items folder."""
+    """Fetch emails from the Trash folder."""
     client = AccountService.get_adapter(account)
     return client.get_trash_emails(limit=limit)
 
@@ -635,7 +633,7 @@ def restore_email_from_trash(email_id: str, account=Depends(get_default_account)
 
 @router.post("/emails/{email_id}/trash")
 def move_email_to_trash(email_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
-    """Move the specified email to the Deleted Items (Trash) folder."""
+    """Move the specified email to the Trash."""
     client = AccountService.get_adapter(account)
     try:
         client.move_to_trash(email_id)
@@ -666,155 +664,22 @@ def compose_email(payload: ComposeRequest, account=Depends(get_default_account))
 
 
 
-# ── Microsoft Teams ───────────────────────────────────────────────────────────
-
-
-@router.get("/teams")
-def list_teams(current_user=Depends(get_current_user)) -> list[dict[str, Any]]:
-    """List the Teams the signed-in user belongs to."""
-    return GraphClient().list_teams()
-
-
-@router.post("/teams/message")
-def post_teams_message(payload: dict[str, str], current_user=Depends(get_current_user)) -> dict[str, Any]:
-    """Post a message to a Teams channel."""
-    team_id = payload.get("team_id")
-    channel_id = payload.get("channel_id")
-    message = payload.get("message", "")
-    if not team_id or not channel_id:
-        raise HTTPException(status_code=400, detail="team_id and channel_id are required")
-    try:
-        result = GraphClient().post_teams_message(team_id, channel_id, message)
-        return {"success": True, "result": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to post Teams message: {str(e)}")
-
-
-@router.post("/teams/meeting")
-def create_teams_meeting(payload: dict[str, str], current_user=Depends(get_current_user)) -> dict[str, Any]:
-    """Create a Teams online meeting and return its join URL."""
-    subject = payload.get("subject", "MailMind Meeting")
-    try:
-        result = GraphClient().create_online_meeting(subject, payload.get("start"), payload.get("end"))
-        return {"success": True, "join_url": result.get("joinUrl"), "meeting": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to create meeting: {str(e)}")
-
-
-@router.post("/auth/login-initiate")
-def login_initiate() -> dict[str, Any]:
-    """Initiate MSAL device code login flow.
-
-    The blocking token acquisition is completed in a background thread (see
-    `GraphClient.initiate_user_login`); polling only reads its status.
-    """
-    client = GraphClient()
-    if client.use_mock:
-        return {
-            "status": "mock",
-            "message": "App is running in MOCK mode. Login not required."
-        }
-    try:
-        flow = client.initiate_user_login()
-        if not flow or "device_code" not in flow:
-            raise HTTPException(status_code=500, detail="Failed to initiate device flow")
-
-        return {
-            "status": "pending",
-            "device_code": flow["device_code"],
-            "user_code": flow["user_code"],
-            "verification_uri": flow["verification_uri"],
-            "message": flow["message"]
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/auth/login-poll")
-def login_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
-    """Read the status of an in-progress device-code login.
-
-    The actual token acquisition happens once in a background thread started by
-    `/auth/login-initiate`. This endpoint never calls Microsoft directly, so it
-    can be polled freely without reusing the device_code (AADSTS70000).
-    """
-    device_code = payload.get("device_code")
-    if not device_code:
-        raise HTTPException(status_code=400, detail="Missing device_code")
-
-    from app.services.graph import _device_flow_status
-
-    state = _device_flow_status.get(device_code)
-    if not state:
-        return {"status": "pending", "authenticated": False}
-
-    status_val = state.get("status")
-    if status_val == "success":
-        _device_flow_status.pop(device_code, None)
-        # Never return tokens in the body — session is delivered via the
-        # HttpOnly mm_session cookie set during the OAuth callback.
-        return {
-            "status": "success",
-            "authenticated": True,
-            "user_principal_name": state.get("email"),
-        }
-    if status_val == "error":
-        _device_flow_status.pop(device_code, None)
-        audit.warning("AUTH_LOGIN_FAILED provider=microsoft flow=device_code error=%s", state.get("error"))
-        raise HTTPException(status_code=400, detail=state.get("error", "Authentication failed"))
-
-    return {"status": "pending", "authenticated": False}
-
-
-# ── Microsoft OAuth (authorization-code popup flow) ───────────────────────────
-
-
-@router.post("/auth/microsoft/login-initiate")
-def microsoft_login_initiate() -> dict[str, Any]:
-    """Begin Microsoft sign-in via the auth-code popup flow.
-
-    Returns the Microsoft consent URL; the frontend opens it in a popup and polls /auth/microsoft/poll.
-    """
-    if not settings.azure_client_id:
-        raise HTTPException(status_code=500, detail="Microsoft OAuth not configured (AZURE_CLIENT_ID).")
-    from app.services.graph import build_ms_auth_url
-    auth_url, state = build_ms_auth_url()
-    return {"status": "pending", "auth_url": auth_url, "state": state}
-
-
-def _connected_screen(email: str, dashboard_url: str, provider: str = "microsoft") -> str:
-    """Branded 'account connected' screen shown after a successful OAuth redirect."""
+def _connected_screen(email: str, dashboard_url: str) -> str:
+    """Branded 'account connected' screen shown after a successful Google sign-in."""
     safe_email = (email or "").replace("<", "&lt;").replace(">", "&gt;")
     who = f"<p class='email'>{safe_email}</p>" if safe_email else ""
 
-    if provider == "google":
-        gradient = "linear-gradient(135deg, #1a73e8 0%, #0d9488 100%)"
-        shadow_color = "rgba(26, 115, 232, .30)"
-        email_color = "#1a73e8"
-        spin_color = "#1a73e8"
-        provider_label = "Google"
-        provider_logo = """<div class="provider-logo">
+    gradient = "linear-gradient(135deg, #1a73e8 0%, #0d9488 100%)"
+    shadow_color = "rgba(26, 115, 232, .30)"
+    email_color = "#1a73e8"
+    spin_color = "#1a73e8"
+    provider_label = "Google"
+    provider_logo = """<div class="provider-logo">
       <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
         <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
         <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/>
         <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-      </svg>
-    </div>"""
-    else:
-        gradient = "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)"
-        shadow_color = "rgba(49, 46, 129, .35)"
-        email_color = "#6366F1"
-        spin_color = "#6366F1"
-        provider_label = "Microsoft"
-        provider_logo = """<div class="provider-logo">
-      <svg viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
-        <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
-        <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
-        <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
-        <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
       </svg>
     </div>"""
 
@@ -877,78 +742,6 @@ def _connected_screen(email: str, dashboard_url: str, provider: str = "microsoft
   </script>
 </body>
 </html>"""
-
-
-@router.get("/auth/microsoft/callback")
-def microsoft_callback(request: Request) -> Response:
-    """OAuth redirect target — exchanges the code, upserts User/OAuthAccount, issues session cookies."""
-    from app.services.graph import exchange_ms_code, ms_auth_status
-
-    params = dict(request.query_params)
-    state = params.get("state", "")
-    if params.get("error"):
-        if state:
-            ms_auth_status[state] = {"status": "error", "error": params.get("error_description", params["error"])}
-        return HTMLResponse(
-            content=f"<html><body><h3>Sign-in failed: {params.get('error')}</h3>You can close this window.</body></html>",
-            status_code=400,
-        )
-
-    try:
-        info = exchange_ms_code(state, params)
-        email = info.get("email") or ""
-        provider_account_id = info.get("provider_account_id") or info.get("object_id") or email
-
-        resp = _finish_oauth_connect(
-            request=request,
-            provider="microsoft",
-            email=email,
-            provider_account_id=provider_account_id,
-            access_token=info.get("access_token", ""),
-            refresh_token=info.get("refresh_token", ""),
-            token_expires_at=info.get("token_expires_at"),
-            display_name=info.get("display_name"),
-            picture_url=info.get("picture_url") or info.get("picture"),
-        )
-
-        ms_auth_status[state] = {"status": "success", "email": email}
-        return resp
-    except Exception as e:
-        if state:
-            ms_auth_status[state] = {"status": "error", "error": str(e)}
-        logger.exception("[ms_callback] failed: %s", e)
-        return HTMLResponse(
-            content=f"<html><body><h3>Sign-in failed: {str(e)}</h3>You can close this window.</body></html>",
-            status_code=400,
-        )
-
-
-@router.post("/auth/microsoft/poll")
-def microsoft_poll(payload: dict[str, str], response: Response) -> dict[str, Any]:
-    """Poll the status of an in-progress Microsoft sign-in."""
-    from app.services.graph import ms_auth_status
-    state = payload.get("state")
-    if not state:
-        raise HTTPException(status_code=400, detail="Missing state")
-    info = ms_auth_status.get(state)
-    if not info:
-        return {"status": "pending", "authenticated": False}
-    if info.get("status") == "success":
-        ms_auth_status.pop(state, None)
-        email = info.get("email")
-        if not email:
-            raise HTTPException(status_code=500, detail="Sign-in succeeded but no account email was returned. Please try again.")
-        audit.info("AUTH_LOGIN_SUCCESS provider=microsoft flow=popup email=%s", email)
-        return {
-            "status": "success",
-            "authenticated": True,
-            "user_principal_name": email,
-        }
-    if info.get("status") == "error":
-        ms_auth_status.pop(state, None)
-        audit.warning("AUTH_LOGIN_FAILED provider=microsoft flow=popup error=%s", info.get("error"))
-        raise HTTPException(status_code=400, detail=info.get("error", "Microsoft sign-in failed"))
-    return {"status": "pending", "authenticated": False}
 
 
 # ── Google / Gmail OAuth ──────────────────────────────────────────────────────
@@ -1178,7 +971,7 @@ def auth_logout(
     """
     Full sign-out — disables Quick Login.
     Invalidates session + quick-login token in DB, deletes both cookies.
-    User must authenticate via Google/Microsoft OAuth next time.
+    User must authenticate via Google OAuth next time.
     """
     from app.api.deps import _clear_auth_cookies
     from app.db.database import get_db as _get_db
@@ -1270,42 +1063,6 @@ def get_db():
     yield from _get_db()
 
 
-@router.get("/webhook", response_class=PlainTextResponse)
-def graph_webhook_validation(validationToken: str | None = None):
-    """Validate Microsoft Graph webhook subscriptions."""
-    if not validationToken:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing validationToken")
-    return PlainTextResponse(validationToken)
-
-
-@router.post("/webhook")
-async def graph_webhook_receive(request: Request) -> dict[str, Any]:
-    """Receive Graph webhook notifications and enqueue email preview payloads."""
-    body = await request.json()
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payload")
-
-    queue = request.app.state.email_queue
-    notifications = body.get("value", [])
-    if not isinstance(notifications, list):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid notification format")
-
-    for notification in notifications:
-        data = notification.get("resourceData", {})
-        if not data:
-            continue
-        message = QueueMessage(
-            email_id=str(data.get("id", "")),
-            sender=str(data.get("sender", "unknown@example.com")),
-            subject=str(data.get("subject", "Webhook notification")),
-            body=str(data.get("bodyPreview", "")),
-            received_at=data.get("receivedDateTime", datetime.now(tz=timezone.utc)),
-        )
-        queue.enqueue(message)
-
-    return {"status": "received", "count": len(notifications)}
-
-
 @router.post("/ingest", response_model=IngestResponse)
 def ingest_email(payload: EmailPayload, request: Request, _: None = Depends(_rate_limit), current_user=Depends(get_current_user)) -> IngestResponse:
     """Ingest a validated email payload and place it onto the processing queue."""
@@ -1358,7 +1115,7 @@ def fetch_thread(thread_id: str, account=Depends(get_default_account)) -> list[d
 
 @router.get("/calendar", response_model=list[CalendarEvent])
 def fetch_calendar(days: int = 7, account=Depends(get_default_account)) -> list[CalendarEvent]:
-    """Fetch upcoming calendar events from the active provider (Outlook or Google)."""
+    """Fetch upcoming Google Calendar events."""
     try:
         fetcher = CalendarFetcher(AccountService.get_adapter(account))
         return fetcher.fetch_next_events(days=days)
@@ -1369,7 +1126,7 @@ def fetch_calendar(days: int = 7, account=Depends(get_default_account)) -> list[
 
 @router.post("/calendar/event")
 def create_calendar_event(payload: dict[str, Any], account=Depends(get_default_account)) -> dict[str, Any]:
-    """Create a calendar event in the user's Outlook or Google calendar."""
+    """Create an event in the user's Google Calendar."""
     title = (payload.get("title") or "").strip()
     start = (payload.get("start_time") or "").strip()
     end = (payload.get("end_time") or "").strip()
@@ -1403,13 +1160,13 @@ def create_calendar_event(payload: dict[str, Any], account=Depends(get_default_a
 
 @router.get("/tasks")
 def list_tasks(limit: int = 20, account=Depends(get_default_account)) -> list[dict[str, Any]]:
-    """List the user's tasks from the active provider (Microsoft To Do or Google Tasks)."""
+    """List the user's Google Tasks."""
     return AccountService.get_adapter(account).list_tasks(limit=limit)
 
 
 @router.post("/tasks")
 def create_task(payload: dict[str, str], account=Depends(get_default_account)) -> dict[str, Any]:
-    """Create a task in the active provider's task list."""
+    """Create a Google Task."""
     title = (payload or {}).get("title", "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
@@ -1422,7 +1179,7 @@ def create_task(payload: dict[str, str], account=Depends(get_default_account)) -
 
 @router.patch("/tasks/{task_id}/complete")
 def complete_task(task_id: str, account=Depends(get_default_account)) -> dict[str, Any]:
-    """Mark a task as completed in the active provider (Microsoft To Do or Google Tasks)."""
+    """Mark a Google Task as completed."""
     try:
         success = AccountService.get_adapter(account).complete_task(task_id)
         return {"success": success}
@@ -1654,7 +1411,7 @@ def evaluate_model(current_user=Depends(get_current_user)):
         email_text = f"Subject: {item['subject']}\nSender: {item['sender']}\nBody: {item['body']}"
         predicted = _eval_prediction_cache.get(email_text)
         if predicted is None:
-            pred_priority = classifier.classify(email_text).priority
+            pred_priority = classifier.classify(email_text, item.get("sender", "")).priority
             predicted = {"CRITICAL": "Critical", "HIGH": "High"}.get(pred_priority, "Normal")
             _eval_prediction_cache[email_text] = predicted
         expected = item["expected_priority"]
@@ -1669,9 +1426,12 @@ def evaluate_model(current_user=Depends(get_current_user)):
     # instead of (rows × per-call latency). Order is preserved via the index map.
     from concurrent.futures import ThreadPoolExecutor
 
-    workers = 1 if settings.use_mock_graph else min(8, max(2, len(dataset)))
+    from app.services.request_context import run_in_context
+
+    workers = 1 if settings.use_mock_mail else min(4, max(2, len(dataset)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(_evaluate_one, dataset))
+        futures = [pool.submit(run_in_context(lambda item=item: _evaluate_one(item))) for item in dataset]
+        results = [f.result() for f in futures]
 
     correct = sum(1 for r in results if r["is_correct"])
     accuracy = round((correct / len(dataset)) * 100, 2) if dataset else 0.0
@@ -1687,7 +1447,7 @@ def _make_scorers() -> dict[str, Any]:
     """Build a reusable set of scorers (shared across a batch to reuse caches)."""
     return {
         "deadline": DeadlineScorer(),
-        "authority": SenderAuthorityScorer(GraphClient()),
+        "authority": SenderAuthorityScorer(),
         "sentiment": SentimentScorer(),
         "decay": ThreadAgeDecayScorer(),
         "action": ActionTypeScorer(),
@@ -1704,7 +1464,7 @@ def _compute_triage(payload: EmailPayload, scorers: dict[str, Any], user_id: str
     body = payload.body
     axes = [
         scorers["deadline"].score(body, payload.received_at),
-        scorers["authority"].score(str(payload.sender)),
+        scorers["authority"].score(str(payload.sender), payload.subject, body),
         scorers["sentiment"].score(body),
         scorers["decay"].score(payload.received_at),
         scorers["action"].score(body),

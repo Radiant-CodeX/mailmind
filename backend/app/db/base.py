@@ -139,20 +139,25 @@ def _run_migrations(engine: Engine) -> None:
     - tone_profile: migrate from user_email PK to account_id FK
     - audit_log, processing_metric: add account_id column
     """
+    from sqlalchemy import inspect
+
+    tone_cols = {c["name"] for c in inspect(engine).get_columns("tone_profile")} \
+        if inspect(engine).has_table("tone_profile") else set()
+
     with engine.connect() as conn:
-        try:
-            # ── Tone Profile v2→v3 Migration ──────────────────────────────────
-            # v2: tone_profile(user_email VARCHAR PRIMARY KEY, profile JSON, sample_size INT)
-            # v3: tone_profile(account_id VARCHAR FK PRIMARY KEY, profile JSON, sample_size INT)
-            #
-            # Strategy: rename old table, create new v3 schema, migrate data if possible
-            conn.execute(text("""
-                ALTER TABLE IF EXISTS tone_profile
-                RENAME TO tone_profile_v2
-            """))
-            conn.commit()
-        except Exception:
-            pass  # tone_profile_v2 might already exist or not need migration
+        # ── Tone Profile v2→v3 Migration ──────────────────────────────────
+        # v2: tone_profile(user_email VARCHAR PRIMARY KEY, profile JSON, sample_size INT)
+        # v3: tone_profile(account_id VARCHAR FK PRIMARY KEY, profile JSON, sample_size INT)
+        #
+        # Only rename when the table really is the v2 shape. Renaming
+        # unconditionally would move aside the correct v3 table that
+        # create_all() just built on a fresh database.
+        if "user_email" in tone_cols and "account_id" not in tone_cols:
+            try:
+                conn.execute(text("ALTER TABLE tone_profile RENAME TO tone_profile_v2"))
+                conn.commit()
+            except Exception:
+                conn.rollback()  # tone_profile_v2 already exists
 
         try:
             # Create v3 tone_profile if it doesn't exist
@@ -167,7 +172,7 @@ def _run_migrations(engine: Engine) -> None:
             """))
             conn.commit()
         except Exception:
-            pass  # Already exists
+            conn.rollback()  # Already exists
 
         migrations = [
             # v2 legacy columns — safe to skip if already present
@@ -190,7 +195,10 @@ def _run_migrations(engine: Engine) -> None:
                 conn.execute(text(sql))
                 conn.commit()
             except Exception:
-                pass  # Column / index already exists — safe to ignore
+                # Column / index already exists. Roll back so Postgres doesn't
+                # leave the connection in an aborted transaction, which would
+                # silently fail every migration after this one.
+                conn.rollback()
 
         # Note: Migrating tone_profile data from v2→v3 requires joining with oauth_accounts
         # to resolve user_email → account_id. This is deferred to a manual migration script

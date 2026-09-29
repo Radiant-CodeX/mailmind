@@ -1,12 +1,10 @@
 """
 MailMind v2 — LangChain Tool Definitions
 ------------------------------------------
-Each function here is decorated with @tool, making it callable by the
-AzureChatOpenAI model via its tool-calling API (function calling).
-
-The LLM decides WHICH tools to invoke and with WHAT arguments based on
-the email context and its system prompt — this is what makes the pipeline
-agentic rather than a hardcoded sequence of API calls.
+Each function here is decorated with @tool so it can be exposed to a
+tool-calling model. They double as the deterministic (no-AI) scoring path: when
+no model is configured, or a model call fails, the pipeline runs these directly.
+The scorers are campus-aware (see app.services.campus).
 
 Tools are grouped by concern:
   - Security / PII masking
@@ -38,7 +36,7 @@ def mask_pii(text: str) -> str:
     any LLM processing or vector indexing.
 
     Replaces email addresses, phone numbers, and names with
-    safe placeholder tokens using Microsoft Presidio (and Regex fallback).
+    safe placeholder tokens using Presidio + spaCy (and a regex fallback).
 
     Args:
         text: Raw email body text.
@@ -97,6 +95,9 @@ def score_deadline_axis(body: str, subject: str = "", received_at: str = "") -> 
     # ── 1. Overdue / already-passed signals ─────────────────────────────────
     if re.search(r"\b(overdue|past due|missed deadline|already late)\b", full_text):
         return {"axis": "deadline", "raw_score": 1.0, "explanation": "Email signals an overdue/missed deadline"}
+    if re.search(r"\b(closes today|closing today|last date is today|today is the last date|"
+                 r"final call|registration closes in)\b", full_text):
+        return {"axis": "deadline", "raw_score": 1.0, "explanation": "Window closes today"}
 
     # ── 2. Absolute time-relative expressions ───────────────────────────────
     within_match = re.search(r"within\s+(\d+)\s*(hour|hr|day)", full_text)
@@ -229,10 +230,12 @@ def score_deadline_axis(body: str, subject: str = "", received_at: str = "") -> 
                 except ValueError:
                     pass
 
-    # ── 7. ISO / numeric dates: 2026-06-15, 06/15/2026, 15-06-2026 ──────────
+    # ── 7. ISO / numeric dates: 2026-06-15, 15/06/2026, 15-06-2026, 15.06.26 ─
+    # Numeric day-first dates follow the Indian convention (DD/MM/YYYY); a
+    # value that can't be a valid day-first date falls back to month-first.
     if not deadline:
         iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", full_text)
-        us = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", full_text)
+        dmy = re.search(r"\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2}|\d{4})\b", full_text)
         if iso:
             try:
                 deadline = datetime(int(iso.group(1)), int(iso.group(2)), int(iso.group(3)),
@@ -240,13 +243,17 @@ def score_deadline_axis(body: str, subject: str = "", received_at: str = "") -> 
                 explanation_hint = iso.group(0)
             except ValueError:
                 pass
-        elif us:
-            try:
-                deadline = datetime(int(us.group(3)), int(us.group(1)), int(us.group(2)),
-                                    17, 0, 0, tzinfo=timezone.utc)
-                explanation_hint = us.group(0)
-            except ValueError:
-                pass
+        elif dmy:
+            a, b, year = int(dmy.group(1)), int(dmy.group(2)), int(dmy.group(3))
+            if year < 100:
+                year += 2000
+            for day, month in ((a, b), (b, a)):
+                try:
+                    deadline = datetime(year, month, day, 17, 0, 0, tzinfo=timezone.utc)
+                    explanation_hint = dmy.group(0)
+                    break
+                except ValueError:
+                    continue
 
     # ── No deadline found ────────────────────────────────────────────────────
     if not deadline:
@@ -275,69 +282,23 @@ def score_authority_axis(sender_email: str, subject: str = "", body: str = "") -
     """
     Score the email on the SENDER AUTHORITY axis (weight: 25%).
 
-    Checks three signal sources in descending priority:
-      1. Sender email address (domain + local-part keywords)
-      2. Subject line (e.g. "RE: CEO request", "From the Board")
-      3. Body text (e.g. "As your manager", "escalating to the CTO")
-
-    Returns the highest authority level found across all three sources.
+    Campus-aware: ranks university leadership and the Controller of
+    Examinations, then HODs and the placement office, faculty, institutional
+    offices, recruiters, fellow students and finally unknown senders. Titles
+    only count when they come from an official campus address.
 
     Args:
-        sender_email: The sender's email address.
+        sender_email: The sender's email address (optionally with display name).
         subject: Email subject line.
-        body: PII-masked email body text.
+        body: PII-masked email body text (signature is inspected).
 
     Returns:
         dict with keys: axis, raw_score (0-1), explanation.
     """
-    email_lower = sender_email.lower()
-    subject_lower = subject.lower()
-    # Limit body scan to first 500 chars — authority signals appear early
-    body_lower = body[:500].lower()
-    combined = f"{email_lower} {subject_lower} {body_lower}"
+    from app.services.campus import score_authority
 
-    # C-suite / board / executive
-    c_suite = ["ceo", "cto", "cfo", "coo", "president", "chairm", "board of director",
-               "executive director", "chief executive", "chief technology", "chief financial",
-               "chief operating", "evp", "svp", " vp ", "vice president"]
-    if any(kw in combined for kw in c_suite):
-        # Distinguish: is it the *sender* or a *mention* in the body?
-        if any(kw in email_lower or kw in subject_lower for kw in c_suite):
-            return {"axis": "authority", "raw_score": 1.0, "explanation": "C-suite / executive sender"}
-        return {"axis": "authority", "raw_score": 0.95, "explanation": "C-suite executive referenced in email"}
-
-    # Director / senior leadership
-    director_kws = ["director", "head of", "global head", "senior director", "principal"]
-    if any(kw in combined for kw in director_kws):
-        return {"axis": "authority", "raw_score": 0.88, "explanation": "Director / senior leadership signal"}
-
-    # Manager / team lead
-    manager_kws = ["manager", " lead ", "team lead", "supervisor", "your manager",
-                   "as your manager", "line manager", "reporting to"]
-    if any(kw in combined for kw in manager_kws):
-        return {"axis": "authority", "raw_score": 0.75, "explanation": "Manager / lead signal"}
-
-    # Client / partner / legal
-    external_high = ["client", "partner", "vendor", "customer", "legal", "compliance",
-                     "audit", "regulator", "investor", "board member"]
-    if any(kw in combined for kw in external_high):
-        return {"axis": "authority", "raw_score": 0.70, "explanation": "Client / partner / legal sender"}
-
-    # Escalation language in body/subject (regardless of sender title)
-    escalation_kws = ["escalat", "escalating", "raising this", "looping in", "cc'd my manager",
-                      "cc'ing", "forwarding to", "bringing in"]
-    if any(kw in subject_lower or kw in body_lower for kw in escalation_kws):
-        return {"axis": "authority", "raw_score": 0.65, "explanation": "Escalation language detected"}
-
-    # Internal peer (non-consumer domain)
-    consumer_domains = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
-                        "icloud.com", "aol.com", "protonmail.com"}
-    if "@" in email_lower:
-        domain = email_lower.split("@")[-1].strip()
-        if domain and domain not in consumer_domains:
-            return {"axis": "authority", "raw_score": 0.45, "explanation": f"Internal / corporate sender ({domain})"}
-
-    return {"axis": "authority", "raw_score": 0.20, "explanation": "External or unknown sender"}
+    result = score_authority(sender_email, subject, body)
+    return {"axis": "authority", "raw_score": result["raw_score"], "explanation": result["explanation"]}
 
 
 @tool
@@ -355,7 +316,19 @@ def score_sentiment_axis(body: str) -> dict[str, Any]:
     Returns:
         dict with keys: axis, raw_score (0-1), explanation.
     """
+    from app.services.campus import consequence_hits
+
     lower = body.lower()
+
+    # Campus consequence language (debarment, attendance shortage, penalties,
+    # final reminders) is the strongest urgency signal in a student inbox.
+    campus_hits = consequence_hits(body)
+    if len(campus_hits) >= 2:
+        return {"axis": "sentiment", "raw_score": 1.0,
+                "explanation": f"Academic consequence warning ({', '.join(campus_hits[:3])})"}
+    if campus_hits:
+        return {"axis": "sentiment", "raw_score": 0.8,
+                "explanation": f"Warning language: '{campus_hits[0]}'"}
 
     critical_signals = ["furious", "escalate", "lawsuit", "unacceptable", "demand",
                         "immediately", "emergency", "critical", "outage", "down"]
@@ -431,7 +404,12 @@ def score_action_axis(body: str) -> dict[str, Any]:
     """
     lower = body.lower()
     required = ["review", "approve", "sign", "action required", "please respond",
-                "respond by", "need your input", "waiting for", "please confirm"]
+                "respond by", "need your input", "waiting for", "please confirm",
+                # campus actions
+                "register", "registration", "apply before", "apply by", "submit", "pay the",
+                "fee payment", "download your hall ticket", "download the hall ticket",
+                "report to", "reporting time", "must attend", "mandatory", "fill the form",
+                "fill out the form", "upload", "complete the assessment"]
     optional = ["if interested", "optional", "when convenient", "when you have time",
                 "no rush", "fyi", "just letting you know"]
 
@@ -507,8 +485,8 @@ def extract_commitments_from_text(masked_text: str) -> list[dict[str, Any]]:
     please, must, need to) and extracts them as commitment candidates with
     an estimated confidence score.
 
-    For production use, the Commitment Agent calls this as a fallback tool
-    while GPT-4o provides the primary extraction via structured output.
+    The Commitment Agent calls this as a fallback while the configured model
+    provides the primary extraction.
 
     Args:
         masked_text: PII-masked email body text.
@@ -519,7 +497,8 @@ def extract_commitments_from_text(masked_text: str) -> list[dict[str, Any]]:
     commitments = []
     sentences = re.split(r"[.\n!?]", masked_text)
     action_pattern = re.compile(
-        r"\b(please|need to|must|review|approve|schedule|confirm|send|complete|finish|submit)\b",
+        r"\b(please|need to|must|review|approve|schedule|confirm|send|complete|finish|submit|"
+        r"register|apply|pay|download|attend|report|upload|fill)\b",
         re.IGNORECASE,
     )
     deadline_pattern = re.compile(
@@ -564,7 +543,7 @@ def check_calendar_conflict(
     Check whether a commitment deadline collides with an existing calendar event.
 
     Compares the proposed deadline against the user's upcoming calendar events
-    (fetched from Microsoft Graph) within a configurable time window (default ±2h).
+    (fetched from Google Calendar) within a configurable time window (default ±2h).
 
     Args:
         deadline_str: ISO 8601 deadline string from the commitment extractor, or None.
@@ -622,15 +601,6 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 
-def _fallback_embed(text: str) -> list[float]:
-    """Deterministic character-frequency embedding (64-dim) used when OpenAI is unavailable."""
-    normalized = text.lower().strip()
-    vector = [0.0] * 64
-    for idx, char in enumerate(normalized[:64]):
-        vector[idx] = (ord(char) % 32) / 31.0
-    return vector
-
-
 @tool
 def retrieve_rag_precedents(
     masked_email_text: str,
@@ -641,9 +611,9 @@ def retrieve_rag_precedents(
     """
     Retrieve the top-K most semantically similar sent emails from the RAG index.
 
-    Embeds the query text using the fallback character-frequency embedder
-    (or OpenAI text-embedding-ada-002 when configured) and performs cosine
-    similarity search against the indexed sent email corpus.
+    Embeds the query with the same embedder used to build the index (the
+    caller's embedding model when configured, otherwise free local hashed
+    embeddings) and performs cosine similarity search over the sent-mail corpus.
 
     Args:
         masked_email_text: PII-masked incoming email text to query against.
@@ -655,7 +625,9 @@ def retrieve_rag_precedents(
     Returns:
         List of precedent dicts: email_id, subject, snippet, similarity_score.
     """
-    query_vector = _fallback_embed(masked_email_text)
+    from app.services.llm_provider import embed_text
+
+    query_vector = embed_text(masked_email_text)
     candidates = []
 
     for doc in index_documents:
@@ -684,9 +656,9 @@ def build_draft_prompt(
     Construct a few-shot draft prompt by injecting the top precedent emails
     as context for tone and style matching.
 
-    The generated prompt is passed to the Draft Agent which uses GPT-4o to
-    produce a reply that matches the user's historical communication style
-    (Tone DNA alignment via RAG).
+    The generated prompt is passed to the Draft Agent, which produces a reply
+    that matches the user's historical communication style (Tone DNA alignment
+    via RAG).
 
     Args:
         email_text: The incoming email text to respond to.

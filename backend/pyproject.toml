@@ -10,7 +10,6 @@ dependencies = [
     "email-validator>=1.5.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.28.0",
-    "msal>=1.37.0",
     "pytest>=8.0.0"
 ]
 

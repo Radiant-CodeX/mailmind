@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import re
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,69 +26,20 @@ def mask_pii(text: str) -> str:
 
 
 class EmbeddingProvider:
-    """Embedder using Azure/OpenAI embeddings, with deterministic fallback.
+    """Embeds text with the caller's configured embedding model, if any.
 
-    After the first permanent failure (404 DeploymentNotFound, bad credentials,
-    etc.) the class-level flag ``_api_unavailable`` is set so all subsequent
-    calls skip the network round-trip entirely.
+    Most free chat providers (OpenRouter, Groq) don't serve embeddings, so the
+    default is a free, offline hashed bag-of-words embedding — see
+    ``llm_provider.local_embed``. A user who sets an embedding model (e.g.
+    Gemini ``text-embedding-004``) gets dense model embeddings instead.
     """
 
-    _api_unavailable: bool = False  # shared across all instances in the process
-
-    def _get_llm_client(self) -> tuple[Any, str]:
-        """Return Azure embedding client, or None to fall back to deterministic embeddings.
-
-        Note: Groq has no embeddings API; we only support Azure OpenAI for embeddings.
-        When Azure is unavailable, _deterministic() provides a fast fallback.
-        """
-        if settings.use_mock_graph:
-            return None, ""
-        try:
-            from openai import AzureOpenAI
-            if settings.azure_openai_api_key and settings.azure_openai_endpoint:
-                return AzureOpenAI(
-                    api_key=settings.azure_openai_api_key,
-                    api_version=settings.azure_openai_api_version,
-                    azure_endpoint=settings.azure_openai_endpoint,
-                    max_retries=0,  # 404s are permanent — don't retry
-                ), settings.azure_openai_embedding_deployment
-        except Exception:
-            pass
-        # No embeddings service configured — fall back to deterministic embeddings.
-        return None, ""
-
-    @staticmethod
-    def _deterministic(text: str) -> list[float]:
-        normalized = text.lower().strip()
-        vector = [0.0] * 64
-        for idx, char in enumerate(normalized[:64]):
-            vector[idx] = (ord(char) % 32) / 31.0
-        return vector
-
     def embed(self, text: str) -> list[float]:
-        if settings.use_mock_graph or EmbeddingProvider._api_unavailable:
-            return self._deterministic(text)
+        from app.services.llm_provider import embed_text, local_embed
 
-        client, model = self._get_llm_client()
-        if client:
-            try:
-                response = client.embeddings.create(
-                    input=[text.replace("\n", " ")],
-                    model=model,
-                    timeout=5.0,
-                )
-                return response.data[0].embedding
-            except Exception as exc:
-                err = str(exc)
-                # Permanent failures — no point hitting the API again this session.
-                if any(k in err for k in ("DeploymentNotFound", "404", "AuthenticationError", "invalid_api_key")):
-                    EmbeddingProvider._api_unavailable = True
-                    logger.warning(
-                        "[RAG] Embedding API unavailable (%s) — switching to deterministic fallback for this session.",
-                        err[:120],
-                    )
-
-        return self._deterministic(text)
+        if settings.use_mock_mail:
+            return local_embed(text)
+        return embed_text(text)
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -137,13 +89,23 @@ class ChromaDBIndex(VectorIndex):
     def _load(self) -> None:
         path = os.path.join(self.storage_path, "index.json")
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as handle:
-                self.documents = json.load(handle)
+            try:
+                with open(path, "r", encoding="utf-8") as handle:
+                    self.documents = json.load(handle)
+            except json.JSONDecodeError as exc:
+                # A corrupt index must not take retrieval (and drafting) down;
+                # it is a cache of sent mail and rebuilds as mail is re-indexed.
+                logger.warning("[RAG] index at %s is corrupt (%s) — starting empty", path, exc)
+                self.documents = []
 
     def _save(self) -> None:
+        # Write-then-rename so a crash or a concurrent reader never sees a
+        # half-written file (the cause of corrupt index.json files).
         path = os.path.join(self.storage_path, "index.json")
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(self.documents, handle, ensure_ascii=False, indent=2)
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(self.documents, handle, ensure_ascii=False)
+        os.replace(tmp, path)
 
     def index(self, documents: list[dict[str, Any]]) -> None:
         """Index or update multiple documents in the local storage."""
@@ -187,33 +149,11 @@ class ChromaDBIndex(VectorIndex):
         self._save()
 
 
-@dataclass
-class AzureAISearchIndex(VectorIndex):
-    """Proxy index that currently delegates to the local ChromaDB fallback."""
-
-    storage_path: str = settings.chroma_storage_path
-    local_index: ChromaDBIndex = field(default_factory=ChromaDBIndex)
-
-    def index(self, documents: list[dict[str, Any]]) -> None:
-        self.local_index.index(documents)
-
-    def search(self, vector: list[float], top_k: int = 3, threshold: float = 0.0) -> list[PrecedentItem]:
-        return self.local_index.search(vector, top_k=top_k, threshold=threshold)
-
-    def upsert(self, document: dict[str, Any]) -> None:
-        self.local_index.upsert(document)
-
-    def trim(self, max_size: int) -> None:
-        self.local_index.trim(max_size)
-
-
 class RAGIndexFactory:
-    """Factory for choosing which embedding index implementation to use."""
+    """Factory for the vector index implementation (local on-disk index)."""
 
     def __call__(self) -> VectorIndex:
-        if settings.use_chroma:
-            return ChromaDBIndex()
-        return AzureAISearchIndex()
+        return ChromaDBIndex()
 
 
 class RetrievalService:
@@ -224,13 +164,17 @@ class RetrievalService:
         self.embedder = embedder or EmbeddingProvider()
 
     def retrieve(self, email_text: str) -> list[Any]:
-        vector = self.embedder.embed(mask_pii(email_text))
-        results = self.index.search(vector, top_k=3, threshold=settings.rag_similarity_threshold)
+        from app.services.llm_provider import similarity_threshold
 
-        # RAG-06: Flag if any precedent matches known escalation patterns
+        vector = self.embedder.embed(mask_pii(email_text))
+        results = self.index.search(vector, top_k=3, threshold=similarity_threshold())
+
+        # RAG-06: Flag precedents that dealt with a serious academic situation
+        # (so the UI can say "similar to the attendance warning on 12 Aug").
         ESCALATION_KEYWORDS = [
-            "escalat", "outage", "breach", "critical", "incident",
-            "down", "failure", "emergency", "lawsuit",
+            "escalat", "debar", "detain", "attendance shortage", "disciplinary",
+            "penalty", "fine", "suspension", "malpractice", "not eligible", "arrear",
+            "emergency", "complaint",
         ]
         for item in results:
             snippet = (item.snippet if hasattr(item, "snippet") else "").lower()
@@ -249,9 +193,9 @@ class RetrievalService:
                     item.__dict__["incident_date"] = date_match.group(0) if date_match else None
         return results
 
-    def index_sent_emails(self, graph_client: Any, days: int = 180) -> int:
-        """Fetch sent emails from Graph, mask PII, generate embeddings in batches of 50, and index them."""
-        emails = graph_client.fetch_sent_emails(days=days)
+    def index_sent_emails(self, mail_client: Any, days: int = 180) -> int:
+        """Fetch sent emails from the mail provider, mask PII, embed in batches of 50, and index them."""
+        emails = mail_client.fetch_sent_emails(days=days)
         indexed_count = 0
         batch_size = 50
         

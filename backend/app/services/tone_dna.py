@@ -4,7 +4,7 @@ MailMind v2 — Tone DNA Service (DNA-01 to DNA-05)
 How it works
 ------------
 1. **Ingest**: fetch up to 180 days of the user's *sent* mail via the active
-   mail provider (Microsoft Graph or Gmail).
+   mail provider (Gmail).
 2. **Analyse**: run 8 pure-Python stylometric measures over the combined body
    text — no ML model required (see `build_profile` for the feature list).
 3. **Persist**: write the resulting dict to the DB (`tone_profile` table keyed
@@ -258,12 +258,11 @@ class ToneDNAService:
     Parameters
     ----------
     mail_client:
-        An active GraphClient or GmailClient instance for the current user.
-        Used to fetch sent mail.  Pass ``get_mail_client()`` at call time —
-        never hard-code ``GraphClient()``.
+        An active Gmail adapter/client for the current user, used to fetch
+        sent mail.
     account_id:
         The OAuthAccount UUID.  Used to scope storage so different accounts
-        (including the same user's Gmail vs Outlook) never overwrite each other.
+        (e.g. a personal and a college Gmail) never overwrite each other.
     """
 
     def __init__(self, mail_client: Any, account_id: str) -> None:
@@ -284,7 +283,7 @@ class ToneDNAService:
         profile, then index the same emails into the RAG vector store.
 
         Both operations share one mail-provider fetch so there is no second
-        round-trip to Microsoft Graph / Gmail.
+        round-trip to Gmail.
         """
         logger.info("[ToneDNA] Ingesting sent mail for account %s…", self.account_id)
         emails = self.mail_client.fetch_sent_emails(days=30)

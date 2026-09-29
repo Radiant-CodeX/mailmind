@@ -12,16 +12,16 @@ Graph topology (linear DAG):
   ingest_node          ← PII masking, payload validation
      │
      ▼
-  triage_node          ← Triage (GPT-4o five-axis scoring)
+  triage_node          ← Triage (five-axis campus scoring)
      │
      ▼
-  commitment_node      ← Commitment Extraction (GPT-4o structured output)
+  commitment_node      ← Commitment Extraction (structured JSON output)
      │
      ▼
   calendar_node        ← Calendar Conflict Detection (deterministic)
      │
      ▼
-  rag_node             ← RAG Precedent Retrieval + Draft Reply (GPT-4o)
+  rag_node             ← RAG Precedent Retrieval + Draft Reply
      │
      ▼
   gate_node            ← Approval Gate (human-in-the-loop checkpoint)
@@ -131,7 +131,7 @@ def run_pipeline(
         print(result["priority"])          # "CRITICAL"
         print(result["composite_score"])   # e.g., 78.5
         print(result["commitments"])       # extracted action items
-        print(result["draft_reply"])       # GPT-4o generated reply
+        print(result["draft_reply"])       # model-generated reply
     """
     # ── Streaming always uses sequential LangGraph (for proper ordering) ────
     if stream:
@@ -274,10 +274,14 @@ def run_pipeline_parallel(
         rag_with_index = partial(rag_node, index_documents=index_documents or [])
         return rag_with_index(dict(state))
 
+    from app.services.request_context import run_in_context
+
+    # run_in_context keeps the caller's identity (and so their AI settings)
+    # visible inside the worker threads.
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        future_triage = executor.submit(run_triage)
-        future_commitment = executor.submit(run_commitment)
-        future_rag = executor.submit(run_rag)
+        future_triage = executor.submit(run_in_context(run_triage))
+        future_commitment = executor.submit(run_in_context(run_commitment))
+        future_rag = executor.submit(run_in_context(run_rag))
 
         try:
             triage_result = future_triage.result(timeout=30)

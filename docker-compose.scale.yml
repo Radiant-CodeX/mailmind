@@ -42,10 +42,13 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DATABASE_URL=postgresql://postgres.iwmlmmmcpihfqnqtzfwz:${SUPABASE_DB_PASSWORD}@aws-0-ap-south-1.pooler.supabase.com:5432/postgres?sslmode=require
       - METRICS_ENABLED=true
-      - USE_MOCK_GRAPH=${USE_MOCK_GRAPH:-true}
-      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
-      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
-      - AZURE_OPENAI_CHAT_DEPLOYMENT=${AZURE_OPENAI_CHAT_DEPLOYMENT:-gpt-4o}
+      - USE_MOCK_MAIL=${USE_MOCK_MAIL:-true}
+      # Needed to decrypt users' own AI keys (else the worker uses the server default).
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openrouter}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_CHAT_MODEL=${LLM_CHAT_MODEL:-}
+      - LLM_TRIAGE_MODEL=${LLM_TRIAGE_MODEL:-}
     volumes:
       - ./backend/data:/app/data
     depends_on:

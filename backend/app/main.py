@@ -16,6 +16,7 @@ from app.api.waitlist_routes import router as waitlist_router
 from app.api.pii_routes import router as pii_router
 from app.api.monitoring_routes import router as monitoring_router
 from app.api.routes import router
+from app.api.settings_routes import router as settings_router
 from app.api.sync_routes import router as sync_router
 from app.config.settings import settings
 from app.db.base import init_db
@@ -124,7 +125,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="MailMind API",
-    description="AI-powered enterprise email triage and drafting backend",
+    description="AI email triage for campus inboxes — never miss a placement, exam or fee deadline",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -176,5 +177,6 @@ app.include_router(feedback_router, prefix="/api")
 app.include_router(waitlist_router, prefix="/api")
 app.include_router(pii_router, prefix="/api")
 app.include_router(compliance_router)
+app.include_router(settings_router)  # BYOK AI settings + campus profile
 # sync_router carries its own prefixes (/webhooks/graph and /api/subscriptions/*)
 app.include_router(sync_router)

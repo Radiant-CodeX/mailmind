@@ -134,8 +134,8 @@ def process_email(request: AgentProcessRequest, current_user=Depends(get_current
     Optimized execution (parallel mode, default):
       ingest → (triage ‖ commitment ‖ rag) → calendar → gate
 
-    Each node uses GPT-4o tool-calling (LangChain) when Azure credentials
-    are available, with deterministic rule-based fallbacks otherwise.
+    Each node uses the caller's configured model (their own key or the server
+    default), with deterministic rule-based fallbacks otherwise.
 
     Latency: ~2.8s (vs 5.8s sequential), 52% improvement via parallelization.
 
@@ -366,7 +366,7 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
 
     Cache hits (Redis/DB) return instantly with no LLM call.
     Only cache misses go to LangGraph — at most 10 LLM calls,
-    run 5-at-a-time so we stay under Azure OpenAI rate limits.
+    run 5-at-a-time so free-tier provider rate limits aren't hit.
     """
     import concurrent.futures
 
@@ -412,7 +412,7 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
 
     from app.monitoring.live_metrics import live_metrics
 
-    # Run LLM only for misses, 5 at a time (respects Azure OpenAI rate limits)
+    # Run LLM only for misses, 5 at a time (respects provider rate limits)
     if misses:
         import time as _time
 
@@ -427,8 +427,15 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
         # Sum of each email's own processing time = what this batch WOULD have
         # cost run one-after-another (the "sequential" baseline for speedup).
         sequential_ms = 0.0
+        from app.services.request_context import run_in_context
+
+        # run_in_context carries the request's identity into each worker thread
+        # so triage uses this user's own AI key/model.
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(_timed_triage, req): idx for idx, req in misses}
+            futures = {
+                executor.submit(run_in_context(lambda req=req: _timed_triage(req))): idx
+                for idx, req in misses
+            }
             for future in concurrent.futures.as_completed(futures):
                 idx = futures[future]
                 try:
@@ -652,8 +659,16 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
             # Sum of each email's own processing time = the one-after-another
             # ("sequential") baseline the speedup card compares against.
             sequential_ms = 0.0
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                futures = {executor.submit(_timed_triage, req, user_key): idx for idx, req in misses}
+            from app.config.settings import settings as _settings
+            from app.services.request_context import run_in_context
+
+            # run_in_context carries the request's identity into each worker
+            # thread so triage uses this user's own AI key/model.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=_settings.triage_max_workers) as executor:
+                futures = {
+                    executor.submit(run_in_context(lambda req=req: _timed_triage(req, user_key))): idx
+                    for idx, req in misses
+                }
                 for future in concurrent.futures.as_completed(futures):
                     idx = futures[future]
                     req = requests[idx]
@@ -747,6 +762,8 @@ def triage_async(request: TriageOnlyRequest, current_user=Depends(get_current_us
     )
     user_key = current_user.primary_email or current_user.id
     state["user_email"] = user_key
+    # Lets the background worker run enrichment with this user's AI settings.
+    state["user_id"] = current_user.id
 
     with track_stage("triage", request.email_id):
         state.update(ingest_node(state))
@@ -966,14 +983,12 @@ def _load_rag_index() -> list[dict]:
 @router.get("/health")
 def agent_health() -> dict[str, Any]:
     """
-    Pipeline health check. Verifies Azure OpenAI credentials are configured
-    and the LangGraph pipeline can be imported.
+    Pipeline health check. Reports whether a server-default AI model is
+    configured (users may also bring their own) and that the pipeline loads.
     """
-    from app.config import settings as _settings
+    from app.services.llm_provider import server_default_config
 
-    llm_ready = bool(
-        _settings.azure_openai_api_key and _settings.azure_openai_base_endpoint
-    )
+    llm_ready = server_default_config() is not None
     rag_index = _load_rag_index()
 
     return {
