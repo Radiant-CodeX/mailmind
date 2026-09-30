@@ -618,6 +618,11 @@ def test_config(cfg: AIConfig) -> dict[str, Any]:
         return {"ok": False, "model": cfg.chat_model, "error": _friendly_error(exc)}
 
 
+def friendly_error(exc: Exception) -> str:
+    """Public wrapper: a short, safe explanation of a provider error."""
+    return _friendly_error(exc)
+
+
 def _friendly_error(exc: Exception) -> str:
     msg = str(exc)
     low = msg.lower()
@@ -625,8 +630,11 @@ def _friendly_error(exc: Exception) -> str:
         return "The API key was rejected by the provider (401). Check that it was copied fully."
     if "404" in low or "not found" in low or "does not exist" in low:
         return "The provider does not recognise that model id (404). Pick one from the suggestions."
+    if "per-day" in low or "per day" in low or "daily" in low:
+        return ("Your AI provider's daily free limit is used up (429). It resets tomorrow; "
+                "on OpenRouter, $10 of credits raises it to 1000 requests a day.")
     if "429" in low or "rate limit" in low:
-        return "Rate-limited by the provider (429). The key works — try again in a minute."
+        return "Rate-limited by the provider (429). The key works, try again in a minute."
     if "timeout" in low or "timed out" in low:
         return "The provider did not respond in time. Check the base URL or try again."
     if "connection" in low:

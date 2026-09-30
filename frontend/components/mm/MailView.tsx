@@ -163,7 +163,9 @@ function WhyPanel({ triage, classification, email }: { triage: TriageResult; cla
             </p>
             <p className="mt-1 text-ink-3">
               {rulesOnly
-                ? "No AI model answered for this email. Add or check your key in Settings, AI model, for sharper scores."
+                ? /your AI model failed/i.test(reasoning)
+                  ? reasoning.replace(/^Rule-based fallback:\s*/i, "")
+                  : "No AI model answered for this email. Add or check your key in Settings, AI model, for sharper scores."
                 : reasoning}
             </p>
           </div>

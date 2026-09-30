@@ -135,6 +135,9 @@ def _rules_only_stale(entry: dict[str, Any]) -> bool:
     reasoning = str(entry.get("triage_reasoning") or "").lower()
     if reasoning and not any(m in reasoning for m in _RULES_ONLY_MARKERS):
         return False
+    if "your ai model failed" in reasoning and "429" in reasoning:
+        # Rate-limited: retrying on every load would only burn more quota.
+        return False
     from app.services.llm_provider import llm_available
 
     try:

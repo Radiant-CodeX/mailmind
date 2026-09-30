@@ -392,6 +392,7 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
     """
     logger.info(f"[TRIAGE] Scoring email_id={state['email_id']}")
     llm = _get_llm(temperature=0.0, purpose="triage", max_tokens=450)
+    llm_failure: str | None = None
     masked_body = state.get("masked_body", state["body"])
 
     # Truncate body — triage only needs enough context to score urgency (~1500 chars)
@@ -458,6 +459,7 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
             logger.warning(f"[TRIAGE] Dynamic LLM triage failed: {e} — using deterministic fallback")
             state["errors"].append(f"triage_llm_error: {str(e)}")
             record_llm_call("triage", "error")
+            llm_failure = llm_provider.friendly_error(e)
 
     # The deterministic path runs both when no LLM is configured and after an
     # LLM error — count it as a fallback for the fallback-rate metric.
@@ -500,7 +502,10 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
         "composite_score": composite["composite_score"],
         "priority": composite["priority"],
         "approval_mode": composite["approval_mode"],
-        "triage_reasoning": "Deterministic fallback scoring applied (LLM unavailable).",
+        "triage_reasoning": (
+            f"Rule-based fallback: your AI model failed. {llm_failure}" if llm_failure
+            else "Deterministic fallback scoring applied (LLM unavailable)."
+        ),
         "current_step": "triage",
     }
 
