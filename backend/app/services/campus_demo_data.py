@@ -68,7 +68,7 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-1",
             "sender": "placement@srmist.edu.in",
             "sender_name": "Career Development Centre, SRMIST",
-            "subject": "Nimbus Technologies Campus Drive 2026 — registration closes TODAY 5 PM",
+            "subject": "Nimbus Technologies Campus Drive 2026: registration closes TODAY 5 PM",
             "body": (
                 "Dear Students,\n\n"
                 "Nimbus Technologies is recruiting final-year B.Tech CSE / IT / ECE students for the "
@@ -88,7 +88,7 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-2",
             "sender": "coe@srmist.edu.in",
             "sender_name": "Controller of Examinations",
-            "subject": "End Semester Theory Examinations — hall ticket download and eligibility",
+            "subject": "End Semester Theory Examinations: hall ticket download and eligibility",
             "body": (
                 "Dear Students,\n\n"
                 f"The End Semester Theory Examinations commence on {_d(exam_start)}. Hall tickets are "
@@ -105,7 +105,7 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-3",
             "sender": "meera.krishnan@srmist.edu.in",
             "sender_name": "Dr. Meera Krishnan",
-            "subject": "Attendance shortage — 21CSC303J Computer Networks (68%)",
+            "subject": "Attendance shortage: 21CSC303J Computer Networks (68%)",
             "body": (
                 "Dear Arjun,\n\n"
                 "Your attendance in 21CSC303J Computer Networks currently stands at 68%, below the "
@@ -121,8 +121,8 @@ def inbox() -> list[dict[str, Any]]:
         {
             "email_id": "campus-4",
             "sender": "talent@arcadiasystems.com",
-            "sender_name": "Arcadia Systems — Talent Acquisition",
-            "subject": "Shortlisted: technical interview — please confirm your slot",
+            "sender_name": "Arcadia Systems: Talent Acquisition",
+            "subject": "Shortlisted for the technical interview, please confirm your slot",
             "body": (
                 "Hi Arjun,\n\n"
                 "Congratulations! You have been shortlisted for the technical interview round for the "
@@ -139,8 +139,8 @@ def inbox() -> list[dict[str, Any]]:
         {
             "email_id": "campus-5",
             "sender": "feesection@srmist.edu.in",
-            "sender_name": "Accounts — Fee Section",
-            "subject": "Odd semester fee — last date without fine",
+            "sender_name": "Accounts: Fee Section",
+            "subject": "Odd semester fee: last date without fine",
             "body": (
                 "Dear Student,\n\n"
                 f"This is a reminder that the last date to pay the odd semester tuition fee without "
@@ -156,7 +156,7 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-6",
             "sender": "rajesh.v@srmist.edu.in",
             "sender_name": "Dr. Rajesh Venkatesan",
-            "subject": "Mini project Review 2 — report and PPT submission",
+            "subject": "Mini project Review 2: report and PPT submission",
             "body": (
                 "Dear Students,\n\n"
                 f"Review 2 for the mini project is scheduled on {_day(review_day)}. Please upload your "
@@ -186,12 +186,12 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-8",
             "sender": "ab1234@srmist.edu.in",
             "sender_name": "Coding Club SRM",
-            "subject": "HackSRM 2026 — team registrations open!",
+            "subject": "HackSRM 2026: team registrations open!",
             "body": (
                 "Hey everyone!\n\n"
-                "HackSRM is back — a 24-hour hackathon with prizes worth Rs. 1,00,000. Form teams of up "
+                "HackSRM is back: a 24-hour hackathon with prizes worth Rs. 1,00,000. Form teams of up "
                 f"to 4 and register before {_d(hackathon_close)}. Food and swags on us!\n\n"
-                "Register if interested — link in the club group.\n\nCheers,\nCoding Club"
+                "Register if interested: link in the club group.\n\nCheers,\nCoding Club"
             ),
             "received_at": at(hours=13),
             "is_read": True, "is_starred": False, "has_attachments": False,
@@ -200,7 +200,7 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-9",
             "sender": "hostel.office@srmist.edu.in",
             "sender_name": "Hostel Office",
-            "subject": "Scheduled water supply maintenance — Paari block",
+            "subject": "Scheduled water supply maintenance: Paari block",
             "body": (
                 "Dear Residents,\n\n"
                 "Water supply in Paari block will be interrupted on Saturday from 9 AM to 1 PM for tank "
@@ -213,7 +213,7 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-10",
             "sender": "newsletter@learnhub.io",
             "sender_name": "LearnHub",
-            "subject": "50% off all Data Science courses — this week only!",
+            "subject": "50% off all Data Science courses: this week only!",
             "body": (
                 "Upskill with industry-ready Data Science courses. Use code STUDENT50 at checkout. "
                 "Offer ends Sunday.\n\nUnsubscribe | Manage preferences"
@@ -225,10 +225,10 @@ def inbox() -> list[dict[str, Any]]:
             "email_id": "campus-11",
             "sender": "cse.dept@srmist.edu.in",
             "sender_name": "Department of CSE",
-            "subject": "Guest lecture on Generative AI — photos and slides",
+            "subject": "Guest lecture on Generative AI: photos and slides",
             "body": (
                 "Dear All,\n\nThank you for attending yesterday's guest lecture on Generative AI. Slides "
-                "and photos are now available on the department drive. FYI — no action needed.\n\n"
+                "and photos are now available on the department drive. FYI: no action needed.\n\n"
                 "Department of Computer Science and Engineering"
             ),
             "received_at": at(days=1, hours=6),
@@ -238,7 +238,7 @@ def inbox() -> list[dict[str, Any]]:
 
 
 def sent_mail() -> list[dict[str, Any]]:
-    """A student's sent-mail history — gives Tone DNA a realistic voice to learn."""
+    """A student's sent-mail history: gives Tone DNA a realistic voice to learn."""
     now = datetime.utcnow()
 
     def ago(days: int) -> str:
@@ -252,7 +252,7 @@ def sent_mail() -> list[dict[str, Any]]:
         ("Re: Mini project Review 1 feedback",
          "Dear Sir,\n\nThank you for the feedback. We will add the comparison with the baseline model "
          "and update the architecture diagram before Review 2.\n\nRegards,\nArjun", 5),
-        ("Re: Interview availability — Summer internship",
+        ("Re: Interview availability: Summer internship",
          "Hi Kavya,\n\nThank you for the opportunity. I confirm the slot on Thursday at 3 PM. Please let "
          "me know if anything is needed from my side before the interview.\n\nBest regards,\nArjun", 7),
         ("Re: Lab record submission",
@@ -298,11 +298,11 @@ def calendar(now_utc: datetime | None = None) -> list[dict[str, Any]]:
     assessment = assessment_slot().astimezone(timezone.utc).replace(tzinfo=None)
     now = now_utc or datetime.utcnow()
     return [
-        {"title": "21CSC303J Computer Networks — Lab (TP 703)", "start_time": assessment,
+        {"title": "21CSC303J Computer Networks: Lab (TP 703)", "start_time": assessment,
          "end_time": assessment + timedelta(hours=2), "organizer": "timetable@srmist.edu.in"},
         {"title": "Mini project meeting with guide", "start_time": now + timedelta(days=1, hours=3),
          "end_time": now + timedelta(days=1, hours=4), "organizer": "rajesh.v@srmist.edu.in"},
-        {"title": "21CSC304J Compiler Design — Lecture", "start_time": now + timedelta(hours=2),
+        {"title": "21CSC304J Compiler Design: Lecture", "start_time": now + timedelta(hours=2),
          "end_time": now + timedelta(hours=3), "organizer": "timetable@srmist.edu.in"},
     ]
 

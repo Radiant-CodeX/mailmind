@@ -94,10 +94,10 @@ def score_deadline_axis(body: str, subject: str = "", received_at: str = "") -> 
 
     # ── 1. Overdue / already-passed signals ─────────────────────────────────
     if re.search(r"\b(overdue|past due|missed deadline|already late)\b", full_text):
-        return {"axis": "deadline", "raw_score": 1.0, "explanation": "Email signals an overdue/missed deadline"}
+        return {"axis": "deadline", "raw_score": 1.0, "explanation": "Says something is already overdue"}
     if re.search(r"\b(closes today|closing today|last date is today|today is the last date|"
                  r"final call|registration closes in)\b", full_text):
-        return {"axis": "deadline", "raw_score": 1.0, "explanation": "Window closes today"}
+        return {"axis": "deadline", "raw_score": 1.0, "explanation": "Closes today"}
 
     # ── 2. Absolute time-relative expressions ───────────────────────────────
     within_match = re.search(r"within\s+(\d+)\s*(hour|hr|day)", full_text)
@@ -257,22 +257,25 @@ def score_deadline_axis(body: str, subject: str = "", received_at: str = "") -> 
 
     # ── No deadline found ────────────────────────────────────────────────────
     if not deadline:
-        return {"axis": "deadline", "raw_score": 0.0, "explanation": "No deadline detected"}
+        return {"axis": "deadline", "raw_score": 0.0, "explanation": "No deadline mentioned"}
 
     # ── Score: use real wall-clock time to measure urgency from now ──────────
     seconds_until = (deadline - now_real).total_seconds()
+    when = deadline.strftime("%A, %d %b")
     if seconds_until <= 0:
         raw_score = 1.0
-        explanation = f"Deadline already passed ({explanation_hint})" if explanation_hint else "Deadline already passed"
+        explanation = f"The deadline ({explanation_hint or when}) has passed"
     else:
         days_until = seconds_until / 86400.0
         # Steep decay: full score at 0 days, 0 score at 14 days
         raw_score = max(0.0, min(1.0, 1.0 - (days_until / 14.0)))
-        explanation = (
-            f"Deadline in {days_until:.1f} days ({explanation_hint})"
-            if explanation_hint
-            else f"Deadline in {days_until:.1f} days"
-        )
+        hours = seconds_until / 3600.0
+        if hours < 20:
+            explanation = f"Due in about {max(1, round(hours))} hours"
+        elif days_until < 1.6:
+            explanation = f"Due tomorrow, {when}"
+        else:
+            explanation = f"Due in {round(days_until)} days, {when}"
 
     return {"axis": "deadline", "raw_score": round(raw_score, 3), "explanation": explanation}
 
@@ -325,10 +328,10 @@ def score_sentiment_axis(body: str) -> dict[str, Any]:
     campus_hits = consequence_hits(body)
     if len(campus_hits) >= 2:
         return {"axis": "sentiment", "raw_score": 1.0,
-                "explanation": f"Academic consequence warning ({', '.join(campus_hits[:3])})"}
+                "explanation": f"Warns of {' and '.join(campus_hits[:2])}"}
     if campus_hits:
         return {"axis": "sentiment", "raw_score": 0.8,
-                "explanation": f"Warning language: '{campus_hits[0]}'"}
+                "explanation": f"Warns of {campus_hits[0]}"}
 
     critical_signals = ["furious", "escalate", "lawsuit", "unacceptable", "demand",
                         "immediately", "emergency", "critical", "outage", "down"]
@@ -342,17 +345,17 @@ def score_sentiment_axis(body: str) -> dict[str, Any]:
     positive_count = sum(1 for kw in positive_signals if kw in lower)
 
     if critical_count >= 2:
-        return {"axis": "sentiment", "raw_score": 1.0, "explanation": f"Critical escalation signals detected ({critical_count})"}
+        return {"axis": "sentiment", "raw_score": 1.0, "explanation": "Written as an emergency or escalation"}
     if critical_count == 1:
-        return {"axis": "sentiment", "raw_score": 0.85, "explanation": "Escalation or emergency language detected"}
+        return {"axis": "sentiment", "raw_score": 0.85, "explanation": "Urgent, escalating tone"}
     if negative_count >= 3:
-        return {"axis": "sentiment", "raw_score": 0.7, "explanation": f"High frustration signals ({negative_count})"}
+        return {"axis": "sentiment", "raw_score": 0.7, "explanation": "Frustrated or worried tone"}
     if negative_count >= 1:
-        return {"axis": "sentiment", "raw_score": 0.5, "explanation": f"Mild negative sentiment ({negative_count} signals)"}
+        return {"axis": "sentiment", "raw_score": 0.5, "explanation": "Raises a problem or concern"}
     if positive_count >= 2:
-        return {"axis": "sentiment", "raw_score": 0.1, "explanation": "Positive or informational tone"}
+        return {"axis": "sentiment", "raw_score": 0.1, "explanation": "Friendly, informational tone"}
 
-    return {"axis": "sentiment", "raw_score": 0.3, "explanation": "Neutral sentiment"}
+    return {"axis": "sentiment", "raw_score": 0.3, "explanation": "Neutral tone"}
 
 
 @tool
@@ -380,10 +383,14 @@ def score_decay_axis(received_at: str) -> dict[str, Any]:
     now = datetime.now(tz=timezone.utc)
     age_days = max(0.0, (now - received).total_seconds() / 86400.0)
     raw_score = max(0.0, min(1.0, 1.0 - (age_days / 30.0) ** 2))
+    if age_days < 1:
+        age = f"{max(1, round(age_days * 24))} hours ago"
+    else:
+        age = f"{round(age_days)} day{'s' if round(age_days) != 1 else ''} ago"
     return {
         "axis": "decay",
         "raw_score": round(raw_score, 3),
-        "explanation": f"Email received {age_days:.1f} days ago",
+        "explanation": f"Arrived {age}",
     }
 
 
@@ -409,18 +416,57 @@ def score_action_axis(body: str) -> dict[str, Any]:
                 "register", "registration", "apply before", "apply by", "submit", "pay the",
                 "fee payment", "download your hall ticket", "download the hall ticket",
                 "report to", "reporting time", "must attend", "mandatory", "fill the form",
-                "fill out the form", "upload", "complete the assessment"]
+                "fill out the form", "upload", "complete the assessment",
+                "meet me", "please meet", "come to my", "visit the", "collect your", "reply to confirm",
+                "confirm your"]
     optional = ["if interested", "optional", "when convenient", "when you have time",
                 "no rush", "fyi", "just letting you know"]
 
     for phrase in required:
         if phrase in lower:
-            return {"axis": "action", "raw_score": 1.0, "explanation": f"Action required: '{phrase}' detected"}
+            return {"axis": "action", "raw_score": 1.0, "explanation": _ACTION_WORDING.get(phrase, f"Asks you to {phrase}")}
     for phrase in optional:
         if phrase in lower:
-            return {"axis": "action", "raw_score": 0.5, "explanation": f"Optional action: '{phrase}' detected"}
+            return {"axis": "action", "raw_score": 0.5, "explanation": "Optional, no action required"}
 
-    return {"axis": "action", "raw_score": 0.0, "explanation": "No action keyword detected"}
+    return {"axis": "action", "raw_score": 0.0, "explanation": "Nothing asked of you"}
+
+
+_ACTION_WORDING = {
+    "review": "Asks you to review something",
+    "approve": "Asks for your approval",
+    "sign": "Asks for your signature",
+    "action required": "Marked action required",
+    "please respond": "Asks for your reply",
+    "respond by": "Asks for your reply by a date",
+    "need your input": "Asks for your input",
+    "waiting for": "Someone is waiting on you",
+    "please confirm": "Asks you to confirm",
+    "register": "Asks you to register",
+    "registration": "Asks you to register",
+    "apply before": "Asks you to apply",
+    "apply by": "Asks you to apply",
+    "submit": "Asks you to submit something",
+    "pay the": "Asks you to pay",
+    "fee payment": "Asks you to pay a fee",
+    "download your hall ticket": "Asks you to download your hall ticket",
+    "download the hall ticket": "Asks you to download your hall ticket",
+    "report to": "Asks you to report in person",
+    "reporting time": "Gives you a reporting time",
+    "must attend": "Asks you to attend",
+    "mandatory": "Something is mandatory for you",
+    "fill the form": "Asks you to fill a form",
+    "fill out the form": "Asks you to fill a form",
+    "upload": "Asks you to upload something",
+    "complete the assessment": "Asks you to complete an assessment",
+    "meet me": "Asks to meet you",
+    "please meet": "Asks to meet you",
+    "come to my": "Asks you to come in person",
+    "visit the": "Asks you to visit in person",
+    "collect your": "Asks you to collect something",
+    "reply to confirm": "Asks you to reply and confirm",
+    "confirm your": "Asks you to confirm",
+}
 
 
 @tool

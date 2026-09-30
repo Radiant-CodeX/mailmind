@@ -12,6 +12,7 @@ class EmailPayload(BaseModel):
     email_id: str
     # Plain str (not EmailStr) so real-world 'From' values never fail validation.
     sender: str
+    sender_name: Optional[str] = None      # display name from the From header
     subject: str
     body: str                              # plain text — used by agents for LLM
     html_body: Optional[str] = None        # rich HTML — used by frontend for display

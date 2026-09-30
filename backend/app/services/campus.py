@@ -239,24 +239,32 @@ def score_authority(sender: str, subject: str = "", body: str = "") -> dict[str,
     if campus:
         for score, label, keywords in AUTHORITY_TIERS[:-1]:  # all institutional tiers
             if any(_has(sender_l, kw) for kw in keywords):
-                return _authority(score, f"{label} (sender)", label)
+                return _authority(score, _FROM.get(label, f"From {label}"), label)
         for score, label, keywords in AUTHORITY_TIERS[:-1]:
             if any(_has(subject_l, kw) or _has(signature, kw) for kw in keywords):
-                return _authority(score - 0.04, f"{label} (signature/subject)", label)
+                return _authority(score - 0.04, _FROM.get(label, f"From {label}"), label)
         if is_student_address(sender):
-            return _authority(0.38, "Fellow student / club (campus address)", "Student")
+            return _authority(0.38, "From a fellow student or club", "Student")
         # Letters-only local part on an official domain: a named faculty/staff box.
-        return _authority(0.66, f"{settings.campus_short_name} faculty / staff address", "Campus office")
+        return _authority(0.66, f"From an official {settings.campus_short_name} address", "Campus office")
 
     rec_score, rec_label, rec_keywords = AUTHORITY_TIERS[-1]
     if any(_has(sender_l, kw) or _has(signature, kw) for kw in rec_keywords):
-        return _authority(rec_score, rec_label, rec_label)
+        return _authority(rec_score, "From a recruiter", rec_label)
     consumer = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com",
                 "rediffmail.com", "protonmail.com", "live.com"}
     domain = sender_domain(sender)
     if domain and domain not in consumer:
-        return _authority(0.35, f"External organisation ({domain})", "External")
-    return _authority(0.2, "Personal / unknown sender", "External")
+        return _authority(0.35, f"From an outside organisation ({domain})", "External")
+    return _authority(0.2, "From a personal or unknown address", "External")
+
+
+_FROM = {
+    "University leadership": "From university leadership",
+    "Head of Department / Placement office": "From the HOD or placement office",
+    "Faculty": "From faculty",
+    "Institutional office": "From a university office",
+}
 
 
 def _authority(score: float, explanation: str, role: str) -> dict[str, Any]:

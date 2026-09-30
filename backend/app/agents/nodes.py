@@ -481,6 +481,14 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
     ]
     composite = compute_composite_score.invoke({"axes": axes})
 
+    # Without a model, a date alone must not make an email "need you": an FYI
+    # notice ("water supply is off on Saturday") mentions a day but asks
+    # nothing. Unless the email asks for action or carries a warning, cap it
+    # below the HIGH band.
+    by_axis = {a["axis"]: float(a["raw_score"]) for a in axes}
+    if by_axis.get("action", 0.0) < 0.3 and by_axis.get("sentiment", 0.0) < 0.8 and composite["composite_score"] >= 50:
+        composite = {**composite, "composite_score": 49.0, "priority": "MEDIUM", "approval_mode": "SUGGEST"}
+
     return {
         "axes": axes,
         # Static weights (mirrors compute_composite_score) for response parity.

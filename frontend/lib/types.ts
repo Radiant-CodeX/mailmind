@@ -33,6 +33,8 @@ export interface Attachment {
 export interface Email {
   id: string;
   sender: string;
+  /** Display name from the From header, when the provider gives one. */
+  senderName?: string;
   subject: string;
   body: string;           // plain text — used by agents for LLM processing
   html_body?: string;     // HTML — used by frontend for display (may be undefined for plain-text emails)

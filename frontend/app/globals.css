@@ -1,80 +1,217 @@
 @import "tailwindcss";
 @plugin "daisyui" {
-  themes: light, dark, cupcake, bumblebee, emerald, corporate, synthwave, retro, cyberpunk,
-    valentine, halloween, garden, forest, aqua, lofi, pastel, fantasy, wireframe, black,
-    luxury, dracula, cmyk, autumn, business, acid, lemonade, night, coffee, winter, dim,
-    nord, sunset;
+  themes: false;
+}
+
+/* ───────────────── MailMind — "a quiet desk" ─────────────────
+   One world shared with the landing page: neutral off-white paper, near-black
+   ink, one cobalt accent. Priority colours are semantic only (urgent / soon)
+   and never decorate. Legacy views built on DaisyUI inherit the same values
+   through the two themes below. */
+
+@plugin "daisyui/theme" {
+  name: "mailmind";
+  default: true;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #f7f7f4;
+  --color-base-300: #eeeeea;
+  --color-base-content: #111418;
+  --color-primary: #1f3fb8;
+  --color-primary-content: #ffffff;
+  --color-secondary: #474d55;
+  --color-secondary-content: #ffffff;
+  --color-accent: #1f3fb8;
+  --color-accent-content: #ffffff;
+  --color-neutral: #111418;
+  --color-neutral-content: #f7f7f4;
+  --color-info: #1f3fb8;
+  --color-info-content: #ffffff;
+  --color-success: #1d7a4f;
+  --color-success-content: #ffffff;
+  --color-warning: #a8650f;
+  --color-warning-content: #ffffff;
+  --color-error: #b3261e;
+  --color-error-content: #ffffff;
+  --radius-selector: 999px;
+  --radius-field: 0.625rem;
+  --radius-box: 0.875rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: "mailmind-dark";
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: #16191c;
+  --color-base-200: #0f1113;
+  --color-base-300: #1c2024;
+  --color-base-content: #eceef0;
+  --color-primary: #8ea6ff;
+  --color-primary-content: #0b1020;
+  --color-secondary: #a9afb6;
+  --color-secondary-content: #0f1113;
+  --color-accent: #8ea6ff;
+  --color-accent-content: #0b1020;
+  --color-neutral: #eceef0;
+  --color-neutral-content: #0f1113;
+  --color-info: #8ea6ff;
+  --color-info-content: #0b1020;
+  --color-success: #5cc494;
+  --color-success-content: #0b1a12;
+  --color-warning: #e3a44a;
+  --color-warning-content: #1c1204;
+  --color-error: #f08a80;
+  --color-error-content: #240807;
+  --radius-selector: 999px;
+  --radius-field: 0.625rem;
+  --radius-box: 0.875rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+:root {
+  --mm-bg: #f7f7f4;
+  --mm-surface: #ffffff;
+  --mm-sunk: #eeeeea;
+  --mm-hover: #f0f0ec;
+  --mm-ink: #111418;
+  --mm-ink-2: #474d55;
+  --mm-ink-3: #676d75;
+  --mm-rule: #e2e3de;
+  --mm-accent: #1f3fb8;
+  --mm-accent-ink: #ffffff;
+  --mm-accent-soft: #e6eafa;
+  --mm-urgent: #b3261e;
+  --mm-urgent-soft: #fbe9e7;
+  --mm-soon: #8a5300;
+  --mm-soon-soft: #fbf0dc;
+  --mm-ok: #1d7a4f;
+  --mm-ok-soft: #e3f3ea;
+  --mm-shadow: 0 1px 2px rgb(17 20 24 / 0.04), 0 12px 32px -12px rgb(17 20 24 / 0.14);
+  --mm-shadow-pop: 0 2px 4px rgb(17 20 24 / 0.06), 0 24px 48px -16px rgb(17 20 24 / 0.22);
+}
+
+[data-theme="mailmind-dark"] {
+  --mm-bg: #0f1113;
+  --mm-surface: #16191c;
+  --mm-sunk: #1c2024;
+  --mm-hover: #1a1d21;
+  --mm-ink: #eceef0;
+  --mm-ink-2: #a9afb6;
+  --mm-ink-3: #8b9199;
+  --mm-rule: #262a2f;
+  --mm-accent: #8ea6ff;
+  --mm-accent-ink: #0b1020;
+  --mm-accent-soft: #1b2340;
+  --mm-urgent: #f08a80;
+  --mm-urgent-soft: #3a1614;
+  --mm-soon: #e3a44a;
+  --mm-soon-soft: #33230c;
+  --mm-ok: #5cc494;
+  --mm-ok-soft: #10281c;
+  --mm-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.6);
+  --mm-shadow-pop: 0 2px 6px rgb(0 0 0 / 0.4), 0 28px 56px -18px rgb(0 0 0 / 0.75);
+}
+
+@theme inline {
+  --color-bg: var(--mm-bg);
+  --color-surface: var(--mm-surface);
+  --color-sunk: var(--mm-sunk);
+  --color-hover: var(--mm-hover);
+  --color-ink: var(--mm-ink);
+  --color-ink-2: var(--mm-ink-2);
+  --color-ink-3: var(--mm-ink-3);
+  --color-rule: var(--mm-rule);
+  --color-cobalt: var(--mm-accent);
+  --color-cobalt-ink: var(--mm-accent-ink);
+  --color-cobalt-soft: var(--mm-accent-soft);
+  --color-urgent: var(--mm-urgent);
+  --color-urgent-soft: var(--mm-urgent-soft);
+  --color-soon: var(--mm-soon);
+  --color-soon-soft: var(--mm-soon-soft);
+  --color-ok: var(--mm-ok);
+  --color-ok-soft: var(--mm-ok-soft);
+  --shadow-paper: var(--mm-shadow);
+  --shadow-pop: var(--mm-shadow-pop);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 body {
   overflow: hidden;
-  height: 100vh;
+  height: 100dvh;
+  background: var(--mm-bg);
+  color: var(--mm-ink);
 }
 
-/* Custom scrollbars */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* The app keeps its focus ring on-brand everywhere. */
+.mm *:focus-visible {
+  outline: 2px solid var(--mm-accent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+/* Scrollbars that recede */
+.custom-scrollbar,
+.mm-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mm-rule) transparent;
 }
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: oklch(var(--b3));
-  border-radius: 4px;
+.custom-scrollbar::-webkit-scrollbar,
+.mm-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: oklch(var(--p));
+.custom-scrollbar::-webkit-scrollbar-thumb,
+.mm-scroll::-webkit-scrollbar-thumb {
+  background: var(--mm-rule);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
-
-.animate-fade-in {
-  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
+.animate-fade-in { animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 
 @keyframes slideInFromRight {
-  from {
-    transform: translateX(100%);
-  }
-  to {
-    transform: translateX(0);
-  }
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in-right { animation: slideInFromRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* A newly triaged row settles into place: the one authored motion of the inbox. */
+@keyframes mmSettle {
+  from { opacity: 0; transform: translateY(-3px); filter: blur(2px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+.mm-settle { animation: mmSettle 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes mmShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.mm-skeleton {
+  background: linear-gradient(90deg, var(--mm-sunk) 25%, var(--mm-hover) 50%, var(--mm-sunk) 75%);
+  background-size: 200% 100%;
+  animation: mmShimmer 1.6s linear infinite;
+  border-radius: 6px;
 }
 
-.animate-slide-in-right {
-  animation: slideInFromRight 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
+/* Kept for legacy components */
+@keyframes shimmer { to { background-position: 200% center; } }
+.animate-shimmer { animation: shimmer 5s linear infinite; }
+@keyframes shimmerSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+.animate-shimmer-slide { animation: shimmerSlide 1.2s ease-in-out infinite; }
 
-/* Landing page: animated gradient text shimmer */
-@keyframes shimmer {
-  to {
-    background-position: 200% center;
-  }
-}
-
-.animate-shimmer {
-  animation: shimmer 5s linear infinite;
-}
-
-/* Triage progress bar: sliding shimmer on the leading edge */
-@keyframes shimmerSlide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(400%); }
-}
-
-.animate-shimmer-slide {
-  animation: shimmerSlide 1.2s ease-in-out infinite;
+@media (prefers-reduced-motion: reduce) {
+  .mm-settle, .animate-fade-in, .animate-slide-in-right { animation: none; }
+  .mm-skeleton { animation: none; }
 }

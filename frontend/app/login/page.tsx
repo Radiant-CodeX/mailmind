@@ -22,12 +22,10 @@ import {
   Provider,
 } from "../../lib/session";
 
-/** Pick the provider for a typed email address. */
-function providerForEmail(email: string): Provider {
-  const domain = email.split("@")[1]?.toLowerCase() || "";
-  if (domain.includes("gmail") || domain.includes("googlemail"))
-    return "google";
-  return "microsoft";
+/** MailMind signs in with Google only: Gmail and Google Workspace (including
+    campus accounts) all go through the same Google consent screen. */
+function providerForEmail(_email: string): Provider {
+  return "google";
 }
 
 export default function LoginPage() {
@@ -109,121 +107,28 @@ export default function LoginPage() {
     }
   };
 
-  // ── Microsoft (OAuth popup flow) ───────────────────────────────────────────
-  const handleMicrosoft = async (forceOAuth = false) => {
+  // ── Google (full-page OAuth redirect) ──────────────────────────────────────
+  const handleGoogle = async (emailHint?: string, _forceOAuth = false) => {
     persistRememberMe(rememberMe);
     setError(null);
     setWaitlistBlocked(null);
-    // Open the popup SYNCHRONOUSLY to preserve the click gesture.
-    msPopupRef.current = window.open("", "ms-login", "width=520,height=680");
-    setLoading(true);
-    try {
-      const data = await microsoftLoginInitiate();
-      if (data.authenticated) {
-        msPopupRef.current?.close();
-        router.push("/dashboard");
-        return;
-      }
-      if (msPopupRef.current && data.auth_url) {
-        msPopupRef.current.location.replace(data.auth_url);
-        setMsWaiting(true);
-        startMicrosoftPolling(data.state, msPopupRef.current);
-      } else if (data.auth_url) {
-        window.location.assign(data.auth_url);
-      }
-    } catch (err: unknown) {
-      msPopupRef.current?.close();
-      setError(err instanceof Error ? err.message : "Microsoft sign-in failed");
-      setLoading(false);
-      setMsWaiting(false);
-    }
-  };
-
-  const startMicrosoftPolling = (state: string, popup: Window | null) => {
-    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await microsoftLoginPoll(state);
-        if (data.status === "success") {
-          if (pollingIntervalRef.current)
-            clearInterval(pollingIntervalRef.current);
-          popup?.close();
-          if (data.user_principal_name && getRememberMe()) {
-            rememberLogin(data.user_principal_name, "microsoft");
-          }
-          router.push("/dashboard");
-        }
-      } catch (err) {
-        if (pollingIntervalRef.current)
-          clearInterval(pollingIntervalRef.current);
-        setLoading(false);
-        setMsWaiting(false);
-        reportSignInError(
-          err instanceof Error ? err.message : "Microsoft sign-in failed",
-        );
-      }
-    }, 2500);
-  };
-
-  // ── Google (OAuth popup flow) ──────────────────────────────────────────────
-  const handleGoogle = async (emailHint?: string, forceOAuth = false) => {
-    persistRememberMe(rememberMe);
-    setError(null);
-    setWaitlistBlocked(null);
-    // Open the popup SYNCHRONOUSLY (inside the click) so the browser keeps the
-    // user-gesture and doesn't block it. We navigate it once we have the URL.
-    googlePopupRef.current = window.open(
-      "",
-      "google-login",
-      "width=500,height=680",
-    );
+    // Full-page redirect: Google's consent page sets a strict
+    // Cross-Origin-Opener-Policy, so a popup can't be closed or polled
+    // cleanly. The callback sets the session cookie and returns to /dashboard.
     setLoading(true);
     try {
       const data = await googleLoginInitiate(emailHint);
       if (data.authenticated) {
-        googlePopupRef.current?.close();
         router.push("/dashboard");
         return;
       }
-      if (googlePopupRef.current && data.auth_url) {
-        // Live: point the already-open popup at Google's consent screen.
-        googlePopupRef.current.location.replace(data.auth_url);
-        setGoogleWaiting(true);
-        startGooglePolling(data.state, googlePopupRef.current);
-      } else if (data.auth_url) {
-        // Popup was blocked — fall back to a full-page redirect to Google.
-        window.location.assign(data.auth_url);
-      }
+      if (emailHint && getRememberMe()) rememberLogin(emailHint, "google");
+      if (data.auth_url) window.location.assign(data.auth_url);
     } catch (err: unknown) {
-      googlePopupRef.current?.close();
       setError(err instanceof Error ? err.message : "Google sign-in failed");
       setLoading(false);
       setGoogleWaiting(false);
     }
-  };
-
-  const startGooglePolling = (state: string, popup: Window | null) => {
-    if (pollingIntervalRef.current) clearInterval(pollingIntervalRef.current);
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const data = await googleLoginPoll(state);
-        if (data.status === "success") {
-          if (pollingIntervalRef.current)
-            clearInterval(pollingIntervalRef.current);
-          popup?.close();
-          if (data.user_principal_name && getRememberMe()) {
-            rememberLogin(data.user_principal_name, "google");
-          }
-          router.push("/dashboard");
-        }
-      } catch (err) {
-        if (pollingIntervalRef.current)
-          clearInterval(pollingIntervalRef.current);
-        setLoading(false);
-        setGoogleWaiting(false);
-        reportSignInError(err instanceof Error ? err.message : "Google sign-in failed");
-      }
-    }, 2500);
   };
 
   const cancelWaiting = () => {
@@ -243,11 +148,7 @@ export default function LoginPage() {
       return;
     }
     // Email-first sign-in respects the typed address → force a fresh OAuth.
-    if (providerForEmail(email) === "google") {
-      handleGoogle(email, true);
-    } else {
-      handleMicrosoft(true);
-    }
+    handleGoogle(email, true);
   };
 
   // ── Quick login / forget ───────────────────────────────────────────────────
@@ -264,19 +165,11 @@ export default function LoginPage() {
       }
       // mm_quick expired or missing — fall back to full OAuth for the remembered provider.
       setLoading(false);
-      if (remembered.provider === "google") {
-        handleGoogle(remembered.email, true);
-      } else {
-        handleMicrosoft(true);
-      }
+      handleGoogle(remembered.email, true);
     } catch (err) {
       setLoading(false);
       setError(err instanceof Error ? err.message : 'Quick login failed. Please try again.');
-      if (remembered.provider === "google") {
-        handleGoogle(remembered.email, true);
-      } else {
-        handleMicrosoft(true);
-      }
+      handleGoogle(remembered.email, true);
     }
   };
 
@@ -460,7 +353,7 @@ export default function LoginPage() {
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Your email (Gmail, Outlook, work…)"
+                    placeholder="Your Gmail or college Google account"
                     className="w-full pl-10 pr-3 py-2.5 rounded-xl bg-base-200 border border-base-300 text-sm text-base-content placeholder-base-content/60 focus:outline-none focus:border-primary transition-all"
                     id="login-email"
                   />
@@ -535,24 +428,6 @@ export default function LoginPage() {
               Continue with Google
             </button>
 
-            <button
-              onClick={() => handleMicrosoft()}
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2.5 py-2.5 bg-white hover:bg-gray-50 disabled:opacity-50 text-gray-800 font-bold text-sm rounded-xl cursor-pointer border border-base-300 transition-all active:scale-95"
-              id="btn-login-microsoft"
-            >
-              <svg
-                className="w-4 h-4"
-                viewBox="0 0 21 21"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect x="1" y="1" width="9" height="9" fill="#F25022" />
-                <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
-                <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
-                <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
-              </svg>
-              Continue with Microsoft
-            </button>
           </div>
         )}
 

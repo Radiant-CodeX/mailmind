@@ -1,533 +1,439 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Sidebar } from "../../components/layout/Sidebar";
-import { Header } from "../../components/layout/Header";
-import { EmailList } from "../../components/inbox/EmailList";
-import { EmailDetail } from "../../components/detail/EmailDetail";
+import { Menu, SquarePen } from "lucide-react";
+
+import { Rail, type View } from "../../components/mm/Rail";
+import { MailList } from "../../components/mm/MailList";
+import { MailView } from "../../components/mm/MailView";
+import { TaskBoard } from "../../components/mm/TaskBoard";
+import { Settings } from "../../components/mm/Settings";
+import { IconButton } from "../../components/mm/ui";
+import { CATEGORY_LABEL, categoryOf, needsYou } from "../../components/mm/format";
+import { LogoGlyph } from "../../components/shared/LogoGlyph";
 import { CalendarView } from "../../components/calendar/CalendarView";
-import { RAGSettingsView } from "../../components/rag/RAGSettingsView";
 import { ComposeWindow } from "../../components/inbox/ComposeWindow";
 import { TrashToast } from "../../components/shared/TrashToast";
-import { EvaluationView } from "../../components/evaluation/EvaluationView";
-import { MetricsView } from "../../components/metrics/MetricsView";
-import { PrivacyView } from "../../components/privacy/PrivacyView";
-import { TasksView } from "../../components/tasks/TasksView";
 import { FeedbackModal } from "../../components/shared/FeedbackModal";
 import { OnboardingFlow } from "../../components/onboarding/OnboardingFlow";
+import type { OverridePriority } from "../../components/inbox/PriorityOverrideMenu";
 
 import { useEmails } from "../../hooks/useEmails";
 import { useEmailDetail } from "../../hooks/useEmailDetail";
 import { useCommitments } from "../../hooks/useCommitments";
 import { useCalendar } from "../../hooks/useCalendar";
 import {
-  checkAuthStatus,
-  logoutUser,
-  createCalendarEvent,
-  overrideEmailPriority,
   AccountInfo,
+  ToneProfile,
+  checkAuthStatus,
+  createCalendarEvent,
+  fetchToneProfile,
+  logoutUser,
+  overrideEmailPriority,
+  saveCampusProfile,
 } from "../../lib/api";
-import {
-  rememberLogin,
-  getRememberMe,
-  clearRememberedLogin,
-  Provider,
-} from "../../lib/session";
+import { clearRememberedLogin, getRememberMe, rememberLogin } from "../../lib/session";
 import { userStorage } from "../../lib/userStorage";
 import { clearScores } from "../../lib/scoreCache";
-import { CalendarEvent, Priority } from "../../lib/types";
-import { OverridePriority } from "../../components/inbox/PriorityOverrideMenu";
+import type { CalendarEvent, Email, Priority } from "../../lib/types";
 
-export default function Home() {
+const FOLDER_FOR: Partial<Record<View, string>> = {
+  needs: "Inbox",
+  all: "Inbox",
+  starred: "Starred",
+  sent: "Sent",
+  drafts: "Drafts",
+  spam: "Spam",
+  trash: "Trash",
+};
+
+const TITLE_FOR: Partial<Record<View, string>> = {
+  needs: "Inbox",
+  all: "Inbox",
+  starred: "Starred",
+  sent: "Sent",
+  drafts: "Drafts",
+  spam: "Spam",
+  trash: "Trash",
+};
+
+const SCORE_FOR: Record<Priority, number> = { CRITICAL: 90, HIGH: 65, MEDIUM: 40, LOW: 10 };
+
+export default function Dashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("Inbox");
-  const [themeMode, setThemeMode] = useState<"light" | "dark">("dark");
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  // ── session ──────────────────────────────────────────────────────────────
   const [authenticated, setAuthenticated] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userName, setUserName] = useState<string | null>(null);
-  const [userProfile, setUserProfile] = useState<AccountInfo | null>(null);
-  const [provider, setProvider] = useState<Provider>("microsoft");
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  // Per-tab state — NOT persisted server-side (multi-tab safety).
-  // Initialized from the default account on first auth check.
-  const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
-  const [isComposeOpen, setIsComposeOpen] = useState(false);
-  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
+  const [account, setAccount] = useState<AccountInfo | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  // Local priority overrides (id → priority) so the badge updates instantly
-  // while the correction is persisted + fed into the triage loop server-side.
-  const [priorityOverrides, setPriorityOverrides] = useState<
-    Record<string, Priority>
-  >({});
 
-  const handleOverridePriority = (
-    id: string,
-    sender: string,
-    next: OverridePriority,
-    current: Priority,
-  ) => {
-    if (next === "DONE") {
-      // markDone handles optimistic removal + cache invalidation + rollback
-      markDone(id, sender, current);
-    } else {
-      setPriorityOverrides((prev) => ({ ...prev, [id]: next }));
-      overrideEmailPriority({
-        email_id: id,
-        sender,
-        override_priority: next,
-        original_priority: current,
-      }).catch((err) => {
-        console.error("Priority override failed:", err);
-        setPriorityOverrides((prev) => {
-          const n = { ...prev };
-          delete n[id];
-          return n;
-        });
-      });
-    }
-  };
-
-  // Load auth status on mount — retries up to 3× (500ms apart) to handle the
-  // race where cookies from the OAuth popup haven't been flushed to the browser
-  // cookie jar before the dashboard mounts and makes its first request.
   useEffect(() => {
-    async function loadAuthStatus() {
-      const MAX_ATTEMPTS = 3;
-      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    let cancelled = false;
+    (async () => {
+      // Cookies from the OAuth popup can land a beat after the redirect.
+      for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await new Promise((r) => setTimeout(r, 600));
         try {
           const data = await checkAuthStatus();
+          if (cancelled) return;
           if (data.authenticated) {
+            const email = data.user?.primary_email ?? data.default_account?.email ?? null;
             setAuthenticated(true);
-            const email =
-              data.user?.primary_email ?? data.default_account?.email ?? null;
-            const displayName = data.user?.display_name ?? null;
             setUserEmail(email);
-            setUserName(displayName);
-            if (data.default_account) {
-              setUserProfile(data.default_account);
-              setCurrentAccountId(data.default_account.id);
-              const p = data.default_account.provider;
-              if (p === "google" || p === "microsoft") setProvider(p);
-            }
+            setUserName(data.user?.display_name ?? null);
+            setAccount(data.default_account ?? null);
             if (email) {
               userStorage.setUser(email);
-              // Show onboarding for first-time users (keyed per email)
-              const onboardedKey = `mailmind_onboarded_${email}`;
-              if (!localStorage.getItem(onboardedKey)) {
-                setShowOnboarding(true);
-              }
+              if (!localStorage.getItem(`mailmind_onboarded_${email}`)) setShowOnboarding(true);
             }
             setCheckingAuth(false);
             return;
           }
-        } catch (err) {
-          console.error(`Auth check attempt ${attempt + 1} failed:`, err);
+        } catch {
+          /* retry */
         }
       }
-      // All retries exhausted — redirect to login
-      router.push("/login");
-    }
-    loadAuthStatus();
+      if (!cancelled) router.push("/login");
+    })();
+    return () => { cancelled = true; };
   }, [router]);
 
+  // ── appearance ───────────────────────────────────────────────────────────
+  const [dark, setDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.getAttribute("data-theme") === "mailmind-dark",
+  );
   const toggleTheme = () => {
-    setThemeMode((prev) => (prev === "light" ? "dark" : "light"));
+    const next = !dark;
+    setDark(next);
+    document.documentElement.setAttribute("data-theme", next ? "mailmind-dark" : "mailmind");
+    try { localStorage.setItem("mm-theme", next ? "dark" : "light"); } catch {}
   };
 
-  const toggleSidebar = () => {
-    setIsSidebarCollapsed((prev) => !prev);
-  };
-
-  const MAIL_TABS = [
-    "Inbox",
-    "Drafts",
-    "Sent",
-    "Spam",
-    "Trash",
-    "Starred",
-    "Important",
-  ];
-  const activeFolder = MAIL_TABS.includes(activeTab) ? activeTab : "Inbox";
-  // The AI pipeline (triage / commitments / draft reply) doesn't apply to mail
-  // you've already sent — hide it for the Sent folder.
-  const showPipeline = activeFolder !== "Sent";
+  // ── navigation ───────────────────────────────────────────────────────────
+  const [view, setView] = useState<View>("needs");
+  const [category, setCategory] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const isMail = view in FOLDER_FOR;
+  const folder = FOLDER_FOR[view] ?? "Inbox";
+  const triageApplies = ["Inbox", "Starred"].includes(folder);
+  const showPipeline = folder !== "Sent" && folder !== "Drafts";
 
   const {
-    emails,
-    selectedEmail,
-    selectedEmailId,
-    setSelectedEmailId,
-    searchQuery,
-    setSearchQuery,
-    sortKey,
-    setSortKey,
-    filters,
-    setFilters,
-    total,
-    pageIndex,
-    pageSize,
-    hasNextPage,
-    hasPrevPage,
-    nextPage,
-    prevPage,
-    loading,
-    refresh,
-    toggleStar,
-    trashEmail,
-    undoTrash,
-    dismissTrashToast,
-    pendingTrash,
-    restoreEmail,
-    markRead,
-    archiveEmail,
-    reportSpam,
-    isStreaming,
-    triageProgress,
-    triageActive,
-    triageTotal,
-    patchEmailTriage,
-    allEmails,
-    markDone,
-  } = useEmails(activeFolder, authenticated && !checkingAuth);
+    emails, allEmails, setSelectedEmailId, selectedEmailId,
+    searchQuery, setSearchQuery, total, pageIndex, pageSize, hasNextPage, hasPrevPage, nextPage, prevPage,
+    loading, refresh, toggleStar, trashEmail, undoTrash, dismissTrashToast, pendingTrash, restoreEmail,
+    markRead, archiveEmail, isStreaming, triageProgress, triageTotal, patchEmailTriage, markDone,
+  } = useEmails(folder, authenticated && !checkingAuth);
 
-  const scoreFor = (p: Priority): number =>
-    (
-      ({ CRITICAL: 90, HIGH: 65, MEDIUM: 40, LOW: 10 }) as Record<
-        Priority,
-        number
-      >
-    )[p];
-
-  // Apply local overrides to the emails before rendering the list.
-  const displayEmails = React.useMemo(
-    () =>
-      emails.map((e) => {
-        const ov = priorityOverrides[e.id];
-        if (!ov) return e;
-        return {
-          ...e,
-          composite_score: scoreFor(ov),
-          triage: e.triage
-            ? { ...e.triage, priority: ov, composite_score: scoreFor(ov) }
-            : e.triage,
-        };
-      }),
-    [emails, priorityOverrides],
+  // Local priority corrections, applied instantly while the server learns them.
+  const [overrides, setOverrides] = useState<Record<string, Priority>>({});
+  const applyOverride = useCallback(
+    (e: Email): Email => {
+      const p = overrides[e.id];
+      if (!p) return e;
+      return { ...e, composite_score: SCORE_FOR[p], triage: e.triage ? { ...e.triage, priority: p, composite_score: SCORE_FOR[p] } : e.triage };
+    },
+    [overrides],
   );
 
-  // Priority distribution across ALL loaded pages (not just the visible one) —
-  // drives the count chips that replaced the search bar. Applies any local
-  // priority overrides so the counts match what the user sees.
-  const priorityCounts = React.useMemo(() => {
-    const c = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
-    for (const e of allEmails) {
-      const ov = priorityOverrides[e.id];
-      const p = (ov || e.triage?.priority) as keyof typeof c | undefined;
-      if (p && p in c) c[p] += 1;
-    }
-    return c;
-  }, [allEmails, priorityOverrides]);
+  const pageEmails = useMemo(() => emails.map(applyOverride), [emails, applyOverride]);
+  const everyEmail = useMemo(() => allEmails.map(applyOverride), [allEmails, applyOverride]);
 
-  // Opening an email marks it read.
-  const handleSelectEmail = (id: string) => {
+  const listEmails = useMemo(() => {
+    if (!isMail) return [];
+    if (view === "needs") {
+      const q = searchQuery.trim().toLowerCase();
+      return everyEmail.filter((e) => needsYou(e) && (!q || `${e.subject} ${e.sender}`.toLowerCase().includes(q)));
+    }
+    if (category) return everyEmail.filter((e) => categoryOf(e) === category);
+    return pageEmails;
+  }, [isMail, view, category, everyEmail, pageEmails, searchQuery]);
+
+  const counts = useMemo(() => {
+    const cats: Record<string, number> = {};
+    let needs = 0;
+    let unread = 0;
+    for (const e of everyEmail) {
+      if (needsYou(e)) needs++;
+      if (e.isRead === false) unread++;
+      const c = categoryOf(e);
+      if (c) cats[c] = (cats[c] ?? 0) + 1;
+    }
+    return { needs, unread, cats };
+  }, [everyEmail]);
+
+  // The open email may live on another page than the one shown (Needs you
+  // spans every loaded page), so resolve it from the full set.
+  const selected = useMemo(() => {
+    if (!selectedEmailId) return null;
+    const onPage = pageEmails.find((e) => e.id === selectedEmailId);
+    return onPage ?? everyEmail.find((e) => e.id === selectedEmailId) ?? null;
+  }, [selectedEmailId, pageEmails, everyEmail]);
+
+  const open = useCallback((id: string) => {
     setSelectedEmailId(id);
-    const target = emails.find((e) => e.id === id);
+    const target = everyEmail.find((e) => e.id === id);
     if (target && target.isRead === false) markRead(id, true);
+  }, [everyEmail, markRead, setSelectedEmailId]);
+
+  const close = useCallback(() => setSelectedEmailId(null), [setSelectedEmailId]);
+
+  const onOverride = (id: string, sender: string, next: OverridePriority, current: Priority) => {
+    if (next === "DONE") return markDone(id, sender, current);
+    setOverrides((o) => ({ ...o, [id]: next }));
+    overrideEmailPriority({ email_id: id, sender, override_priority: next, original_priority: current }).catch(() => {
+      setOverrides((o) => {
+        const n = { ...o };
+        delete n[id];
+        return n;
+      });
+    });
   };
 
-  const {
-    loading: detailLoading,
-    error: detailError,
-    classification,
-    triageResult,
-    precedents,
-    attachments: detailAttachments,
-    pipelineCommitments,
-    aiDraft,
-    setAiDraft,
-    isGeneratingDraft,
-    generateDraft,
-    isDraftApproved,
-    setIsDraftApproved,
-    activeStyle,
-    setActiveStyle,
-    isSendingDraft,
-    sendDraft,
-    retriage,
-    isRetriaging,
-    fullContent,
-  } = useEmailDetail(selectedEmail, showPipeline, userEmail, patchEmailTriage);
+  // ── detail pipeline ──────────────────────────────────────────────────────
+  const detail = useEmailDetail(selected, showPipeline, userEmail, patchEmailTriage);
+  const detailEmail = useMemo(() => {
+    if (!selected) return null;
+    if (!detail.fullContent) return selected;
+    return { ...selected, html_body: detail.fullContent.html_body ?? selected.html_body, body: detail.fullContent.body || selected.body };
+  }, [selected, detail.fullContent]);
 
-  // Merge the on-open full content (rich html_body) over the list email, which
-  // from the mirror only carries a snippet. Keeps the detail view formatted.
-  const detailEmail = React.useMemo(() => {
-    if (!selectedEmail) return null;
-    if (!fullContent) return selectedEmail;
-    return {
-      ...selectedEmail,
-      html_body: fullContent.html_body ?? selectedEmail.html_body,
-      body: fullContent.body || selectedEmail.body,
-    };
-  }, [selectedEmail, fullContent]);
-
-  // Auto-mark email as Done when a reply is successfully sent
   useEffect(() => {
-    if (isDraftApproved && selectedEmail?.id) {
-      markDone(selectedEmail.id, selectedEmail.sender ?? '', selectedEmail.triage?.priority);
-    }
-  }, [isDraftApproved, selectedEmail?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (detail.isDraftApproved && selected?.id) markDone(selected.id, selected.sender ?? "", selected.triage?.priority);
+  }, [detail.isDraftApproved, selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const {
-    commitments,
-    loading: commitmentsLoading,
-    error: commitmentsError,
-    confirming,
-    confirmed,
-    taskUrls,
-    eventUrls,
-    toggleCommitment,
-    confirmSelected,
-  } = useCommitments(
-    showPipeline ? selectedEmail?.id || null : null,
-    showPipeline ? selectedEmail?.body || null : null,
-    showPipeline ? pipelineCommitments : undefined,
+  const commit = useCommitments(
+    showPipeline ? selected?.id || null : null,
+    showPipeline ? selected?.body || null : null,
+    showPipeline ? detail.pipelineCommitments : undefined,
   );
+  const calendar = useCalendar(authenticated && !checkingAuth);
 
-  const {
-    events: calendarEvents,
-    loading: calendarLoading,
-    error: calendarError,
-    checkConflict,
-    loadCalendar,
-  } = useCalendar(authenticated && !checkingAuth);
+  const [tone, setTone] = useState<ToneProfile | null>(null);
+  useEffect(() => {
+    if (authenticated) fetchToneProfile().then(setTone);
+  }, [authenticated]);
+
+  // ── keyboard ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isMail) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const ids = listEmails.map((m) => m.id);
+      const idx = selectedEmailId ? ids.indexOf(selectedEmailId) : -1;
+      if (e.key === "j" && ids.length) { e.preventDefault(); open(ids[Math.min(ids.length - 1, idx + 1)]); }
+      else if (e.key === "k" && ids.length) { e.preventDefault(); open(ids[Math.max(0, idx - 1)]); }
+      else if (e.key === "e" && selected) { e.preventDefault(); markDone(selected.id, selected.sender, selected.triage?.priority); }
+      else if (e.key === "s" && selected) { e.preventDefault(); toggleStar(selected.id); }
+      else if (e.key === "/") { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder="Search mail"]')?.focus(); }
+      else if (e.key === "c") { e.preventDefault(); setComposeOpen(true); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isMail, listEmails, selectedEmailId, selected, open, markDone, toggleStar]);
+
+  // Changing view closes an open email that no longer belongs to it.
+  useEffect(() => { setSelectedEmailId(null); }, [view, category]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const signOut = async () => {
+    try {
+      if (userEmail && getRememberMe()) rememberLogin(userEmail, "google");
+      await logoutUser();
+    } catch {
+      /* sign out locally regardless */
+    } finally {
+      clearRememberedLogin();
+      const uid = userStorage.getUser();
+      if (uid) await clearScores(uid);
+      userStorage.logout();
+      router.replace("/login");
+    }
+  };
 
   if (checkingAuth) {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-bg-base text-text-primary">
-        <div className="text-center">
-          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin mx-auto mb-4"></div>
-          <p className="text-xs text-base-content/60 font-medium">
-            Checking authorization status...
-          </p>
+      <div className="mm flex h-dvh w-screen items-center justify-center bg-bg">
+        <div className="flex items-center gap-2.5 text-[13px] text-ink-3">
+          <LogoGlyph className="size-6 text-ink" />
+          <span>Opening your inbox</span>
         </div>
       </div>
     );
   }
 
-  const handleLogout = async () => {
-    try {
-      // Remember this account for one-tap Quick Login (valid for 1 week) —
-      // only when "Remember me" was checked, and only on sign-out.
-      if (userEmail && getRememberMe()) {
-        rememberLogin(userEmail, provider);
-      }
-      await logoutUser();
-    } catch (err) {
-      console.error("Logout request failed (signing out anyway)", err);
-    } finally {
-      // Always sign the user out locally and return to the login page, even if
-      // the backend logout call failed.
-      // Clear quick login on logout to prevent other users on shared device from
-      // impersonating this user. When the same user logs back in, their quick login
-      // will be automatically re-saved.
-      clearRememberedLogin();
-      const _uid = userStorage.getUser();
-      if (_uid) await clearScores(_uid);
-      userStorage.logout();
-      setAuthenticated(false);
-      setUserEmail(null);
-      setUserProfile(null);
-      router.replace("/login");
-    }
-  };
+  const inFolder = view !== "needs" && view !== "all";
+  const listTitle = category ? CATEGORY_LABEL[category] ?? "Inbox" : TITLE_FOR[view] ?? "Inbox";
+  const listMode = view === "needs" ? "needs" : view === "all" ? "all" : "folder";
+
+  const rail = (inDrawer: boolean) => (
+    <Rail
+      view={view}
+      onView={setView}
+      category={category}
+      onCategory={setCategory}
+      needsCount={counts.needs}
+      unreadCount={counts.unread}
+      categoryCounts={counts.cats}
+      onCompose={() => setComposeOpen(true)}
+      userEmail={userEmail}
+      userName={userName}
+      account={account}
+      dark={dark}
+      onToggleTheme={toggleTheme}
+      onFeedback={() => setFeedbackOpen(true)}
+      onSignOut={signOut}
+      onNavigate={inDrawer ? () => setDrawerOpen(false) : undefined}
+    />
+  );
 
   return (
-    <div
-      className={`flex h-screen w-screen overflow-hidden text-text-primary transition-colors duration-200 ${
-        themeMode === "light"
-          ? "theme-light bg-bg-base"
-          : "theme-dark bg-bg-base"
-      }`}
-      id="app-workspace"
-    >
-      {/* 1. Leftmost Navigation Sidebar (Collapsible on Logo Click) */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        isCollapsed={isSidebarCollapsed}
-        onToggleCollapse={toggleSidebar}
-        authenticated={authenticated}
-        userEmail={userEmail}
-        userName={userName}
-        userProfile={userProfile}
-        provider={provider}
-        onLoginClick={() => {}}
-        onLogoutClick={handleLogout}
-        onComposeClick={() => setIsComposeOpen(true)}
-        onAccountChange={setCurrentAccountId}
-        onFeedbackClick={() => setIsFeedbackOpen(true)}
-      />
+    <div className="mm flex h-dvh w-screen overflow-hidden bg-bg text-ink">
+      {/* Rail: fixed column on large screens, drawer below. */}
+      <aside id="sidebar" className="hidden w-[232px] shrink-0 border-r border-rule lg:block">
+        {rail(false)}
+      </aside>
+      {drawerOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
+          <button type="button" aria-label="Close navigation" onClick={() => setDrawerOpen(false)} className="absolute inset-0 bg-ink/25" />
+          <div className="animate-fade-in absolute inset-y-0 left-0 w-[272px] border-r border-rule shadow-pop">{rail(true)}</div>
+        </div>
+      )}
 
-      {/* Main Workspace Frame */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Header toolbar with Light/Dark Mode toggle */}
-        <Header themeMode={themeMode} onToggleTheme={toggleTheme} />
+      <main className="flex min-w-0 flex-1 flex-col">
+        {/* Compact bar below lg */}
+        <div className="flex h-12 shrink-0 items-center gap-1 border-b border-rule bg-surface px-2 lg:hidden">
+          <IconButton icon={Menu} label="Open navigation" onClick={() => setDrawerOpen(true)} />
+          <span className="flex items-center gap-2 pl-1 text-[15px] font-semibold text-ink">
+            <LogoGlyph className="size-6 text-ink" /> MailMind
+          </span>
+          <IconButton icon={SquarePen} label="Compose" onClick={() => setComposeOpen(true)} className="ml-auto" />
+        </div>
 
-        {/* Dynamic View rendering depending on activeTab */}
-        <div className="flex-1 flex overflow-hidden">
-          {MAIL_TABS.includes(activeTab) && (
+        <div className="flex min-h-0 flex-1">
+          {isMail && (
             <>
-              {/* Panel A: Inbox — 45% when inspector open, full width otherwise */}
               <div
                 id="email-list-panel"
-                className={`h-full flex flex-col overflow-hidden transition-all duration-200 ${
-                  selectedEmailId
-                    ? "w-[45%] border-r border-base-300"
-                    : "flex-1"
+                className={`min-w-0 border-rule ${
+                  selected ? "hidden lg:block lg:w-[400px] lg:shrink-0 lg:border-r xl:w-[440px]" : "flex-1"
                 }`}
               >
-                <EmailList
-                  emails={displayEmails}
-                  selectedEmailId={selectedEmailId}
-                  onSelectEmail={handleSelectEmail}
-                  searchQuery={searchQuery}
-                  onSearchChange={setSearchQuery}
-                  priorityCounts={priorityCounts}
-                  sortKey={sortKey}
-                  onSortChange={setSortKey}
-                  filters={filters}
-                  onFiltersChange={setFilters}
-                  total={total}
-                  pageIndex={pageIndex}
-                  pageSize={pageSize}
-                  hasNextPage={hasNextPage}
-                  hasPrevPage={hasPrevPage}
-                  onNextPage={nextPage}
-                  onPrevPage={prevPage}
+                <MailList
+                  title={listTitle}
+                  mode={category ? "all" : listMode}
+                  emails={listEmails}
+                  selectedId={selectedEmailId}
+                  onOpen={open}
+                  onModeChange={(m) => setView(m)}
+                  showModeSwitch={!inFolder && !category}
+                  triageApplies={triageApplies}
+                  search={searchQuery}
+                  onSearch={setSearchQuery}
                   loading={loading}
                   onRefresh={refresh}
-                  isFullWidth={true}
-                  activeFolder={activeFolder}
-                  onToggleStar={toggleStar}
-                  onTrashEmail={trashEmail}
-                  onRestoreEmail={restoreEmail}
-                  onArchiveEmail={archiveEmail}
-                  onReportSpam={reportSpam}
-                  onToggleRead={markRead}
-                  onMarkDone={markDone}
-                  onOverridePriority={handleOverridePriority}
-
-                  isStreaming={isStreaming}
-                  triageProgress={triageProgress}
-                  triageActive={triageActive}
+                  total={category ? listEmails.length : total}
+                  pageIndex={category ? 0 : pageIndex}
+                  pageSize={pageSize}
+                  hasNext={!category && hasNextPage}
+                  hasPrev={!category && hasPrevPage}
+                  onNext={nextPage}
+                  onPrev={prevPage}
+                  streaming={isStreaming}
+                  triageDone={triageProgress}
                   triageTotal={triageTotal}
+                  onStar={toggleStar}
+                  onDone={!inFolder ? markDone : undefined}
+                  onArchive={!inFolder ? archiveEmail : undefined}
+                  onTrash={view !== "trash" ? trashEmail : undefined}
+                  onRestore={view === "trash" ? restoreEmail : undefined}
+                  onToggleRead={!inFolder ? markRead : undefined}
+                  onOverride={triageApplies ? onOverride : undefined}
+                  onShowAll={view === "needs" ? () => setView("all") : undefined}
                 />
               </div>
-
-              {/* Panel B: Email inspector — 55% split pane */}
-              {selectedEmailId && (
-                <div className="w-[55%] h-full overflow-hidden">
-                  <EmailDetail
-                    key={selectedEmailId}
+              {selected && detailEmail && (
+                <div className="min-w-0 flex-1">
+                  <MailView
+                    key={selected.id}
                     email={detailEmail}
-                    loading={detailLoading}
-                    error={detailError}
-                    classification={classification}
-                    triageResult={triageResult}
-                    precedents={precedents}
-                    aiDraft={aiDraft}
-                    setAiDraft={setAiDraft}
-                    isGeneratingDraft={isGeneratingDraft}
-                    generateDraft={generateDraft}
-                    isDraftApproved={isDraftApproved}
-                    setIsDraftApproved={setIsDraftApproved}
-                    activeStyle={activeStyle}
-                    setActiveStyle={setActiveStyle}
-                    isSendingDraft={isSendingDraft}
-                    sendDraft={sendDraft}
-                    commitments={commitments}
-                    commitmentsLoading={commitmentsLoading}
-                    commitmentsError={commitmentsError}
-                    confirmingCommitments={confirming}
-                    confirmedCommitments={confirmed}
-                    taskUrls={taskUrls}
-                    eventUrls={eventUrls}
-                    toggleCommitment={toggleCommitment}
-                    confirmSelectedCommitments={confirmSelected}
-                    checkConflict={checkConflict}
-                    onClose={() => setSelectedEmailId(null)}
+                    loading={detail.loading}
+                    error={detail.error}
                     showPipeline={showPipeline}
-                    provider={provider}
+                    classification={detail.classification}
+                    triage={detail.triageResult}
+                    precedents={detail.precedents}
+                    draft={detail.aiDraft}
+                    setDraft={detail.setAiDraft}
+                    generating={detail.isGeneratingDraft}
+                    generate={detail.generateDraft}
+                    sent={detail.isDraftApproved}
+                    setSent={detail.setIsDraftApproved}
+                    style={detail.activeStyle}
+                    setStyle={detail.setActiveStyle}
+                    sending={detail.isSendingDraft}
+                    send={detail.sendDraft}
+                    tone={tone}
+                    commitments={commit.commitments}
+                    commitmentsLoading={commit.loading}
+                    commitmentsError={commit.error}
+                    confirming={commit.confirming}
+                    confirmed={commit.confirmed}
+                    toggleCommitment={commit.toggleCommitment}
+                    confirmCommitments={commit.confirmSelected}
+                    checkConflict={calendar.checkConflict}
+                    onClose={close}
+                    onDone={!inFolder ? () => { markDone(selected.id, selected.sender, selected.triage?.priority); close(); } : undefined}
+                    onArchive={!inFolder ? () => { archiveEmail(selected.id); close(); } : undefined}
+                    onTrash={view !== "trash" ? () => { trashEmail(selected.id); close(); } : undefined}
+                    onStar={() => toggleStar(selected.id)}
+                    onMarkUnread={!inFolder ? () => { markRead(selected.id, false); close(); } : undefined}
                   />
                 </div>
               )}
             </>
           )}
 
-          {activeTab === "Calendar" && (
-            <CalendarView
-              events={calendarEvents}
-              loading={calendarLoading}
-              error={calendarError}
-              onRefresh={loadCalendar}
-              provider={provider}
-              onCreateEvent={async (event: Partial<CalendarEvent>) => {
-                await createCalendarEvent({
-                  title: event.title || "",
-                  start_time: event.start_time || "",
-                  end_time: event.end_time,
-                });
-              }}
-            />
+          {view === "tasks" && <TaskBoard />}
+          {view === "calendar" && (
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <CalendarView
+                events={calendar.events}
+                loading={calendar.loading}
+                error={calendar.error}
+                onRefresh={calendar.loadCalendar}
+                provider="google"
+                onCreateEvent={async (event: Partial<CalendarEvent>) => {
+                  await createCalendarEvent({ title: event.title || "", start_time: event.start_time || "", end_time: event.end_time });
+                }}
+              />
+            </div>
           )}
-
-          {activeTab === "RAG Settings" && <RAGSettingsView />}
-          {activeTab === "Tasks" && <TasksView />}
-          {activeTab === "Evaluation" && <EvaluationView />}
-          {activeTab === "Metrics" && <MetricsView />}
-          {activeTab === "Privacy" && <PrivacyView />}
+          {view === "settings" && <Settings />}
         </div>
-      </div>
+      </main>
 
-      {/* Trash undo toast — floats above everything */}
       {pendingTrash && (
-        <TrashToast
-          email={pendingTrash.email}
-          startedAt={pendingTrash.startedAt}
-          onUndo={undoTrash}
-          onDismiss={dismissTrashToast}
-        />
+        <TrashToast email={pendingTrash.email} startedAt={pendingTrash.startedAt} onUndo={undoTrash} onDismiss={dismissTrashToast} />
       )}
-
-      {isComposeOpen && (
-        <ComposeWindow
-          onClose={() => {
-            setIsComposeOpen(false);
-            refresh();
-          }}
-        />
-      )}
-
-      <FeedbackModal
-        isOpen={isFeedbackOpen}
-        onClose={() => setIsFeedbackOpen(false)}
-      />
-
+      {composeOpen && <ComposeWindow onClose={() => { setComposeOpen(false); refresh(); }} />}
+      <FeedbackModal isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       {showOnboarding && (
         <OnboardingFlow
           userEmail={userEmail}
           userName={userName}
           onComplete={({ role, goals }) => {
             setShowOnboarding(false);
-            if (userEmail) {
-              localStorage.setItem(
-                `mailmind_onboarded_${userEmail}`,
-                JSON.stringify({ role, goals, ts: Date.now() }),
-              );
+            if (userEmail) localStorage.setItem(`mailmind_onboarded_${userEmail}`, JSON.stringify({ role, goals, ts: Date.now() }));
+            if (role === "student" || role === "faculty" || role === "staff") {
+              saveCampusProfile({ role, department: null, year_of_study: null }).catch(() => {});
             }
           }}
         />

@@ -1097,3 +1097,162 @@ export async function previewPII(text: string): Promise<PIIPreviewResult> {
   return res.json();
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings: bring-your-own AI key, campus profile, Tone DNA
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function jsonOrDetail<T>(res: Response, fallback: string): Promise<T> {
+  if (!res.ok) {
+    let message = fallback;
+    try {
+      const d = await res.json();
+      if (d?.detail) message = typeof d.detail === "string" ? d.detail : fallback;
+    } catch {}
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+export interface AIProvider {
+  id: string;
+  label: string;
+  base_url: string;
+  default_chat_model: string;
+  default_triage_model: string;
+  suggested_models: string[];
+  key_url: string;
+  free_tier: boolean;
+  supports_embeddings: boolean;
+  default_embedding_model: string | null;
+  requires_key: boolean;
+  notes: string;
+}
+
+export interface AISettingsView {
+  own: {
+    provider: string;
+    base_url: string;
+    api_key_hint: string;
+    has_api_key: boolean;
+    chat_model: string | null;
+    triage_model: string | null;
+    embedding_model: string | null;
+    updated_at: string | null;
+  } | null;
+  server_default_available: boolean;
+  effective: {
+    source: "user" | "server" | "rules";
+    provider: string | null;
+    chat_model: string | null;
+    triage_model: string | null;
+  };
+}
+
+export interface AISettingsInput {
+  provider: string;
+  api_key?: string;
+  base_url?: string;
+  chat_model?: string;
+  triage_model?: string;
+  embedding_model?: string;
+  test?: boolean;
+}
+
+export interface AITestResult {
+  ok: boolean;
+  model?: string;
+  latency_ms?: number;
+  error?: string;
+}
+
+export async function fetchAIProviders(): Promise<AIProvider[]> {
+  const res = await apiFetch(`${BASE}/api/settings/ai/providers`);
+  return (await jsonOrDetail<{ providers: AIProvider[] }>(res, "Could not load providers")).providers;
+}
+
+export async function fetchAISettings(): Promise<AISettingsView> {
+  return jsonOrDetail(await apiFetch(`${BASE}/api/settings/ai`), "Could not load AI settings");
+}
+
+export async function testAISettings(input: AISettingsInput): Promise<AITestResult> {
+  const res = await apiFetch(`${BASE}/api/settings/ai/test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrDetail(res, "Connection test failed");
+}
+
+export async function saveAISettings(input: AISettingsInput): Promise<AISettingsView & { test: AITestResult | null }> {
+  const res = await apiFetch(`${BASE}/api/settings/ai`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  return jsonOrDetail(res, "Could not save AI settings");
+}
+
+export async function clearAISettings(): Promise<AISettingsView> {
+  return jsonOrDetail(await apiFetch(`${BASE}/api/settings/ai`, { method: "DELETE" }), "Could not remove key");
+}
+
+export type CampusRole = "student" | "faculty" | "staff";
+
+export interface CampusProfile {
+  role: CampusRole;
+  department: string | null;
+  year_of_study: number | null;
+}
+
+export async function fetchCampusProfile(): Promise<CampusProfile> {
+  return jsonOrDetail(await apiFetch(`${BASE}/api/settings/profile`), "Could not load profile");
+}
+
+export async function saveCampusProfile(profile: CampusProfile): Promise<CampusProfile> {
+  const res = await apiFetch(`${BASE}/api/settings/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profile),
+  });
+  return jsonOrDetail(res, "Could not save profile");
+}
+
+export interface CampusCategory {
+  id: string;
+  label: string;
+  description: string;
+  high_stakes: boolean;
+}
+
+export async function fetchCampusCategories(): Promise<CampusCategory[]> {
+  const res = await apiFetch(`${BASE}/api/campus/categories`);
+  return (await jsonOrDetail<{ categories: CampusCategory[] }>(res, "Could not load categories")).categories;
+}
+
+export interface ToneProfile {
+  sample_size: number;
+  generated_at: string;
+  features: {
+    avg_sentence_length: number;
+    formality_score: number;
+    greeting_patterns: string[];
+    signoff_patterns: string[];
+    contraction_rate: number;
+    bullet_point_preference: number;
+  };
+}
+
+export async function fetchToneProfile(): Promise<ToneProfile | null> {
+  try {
+    const res = await apiFetch(`${BASE}/api/tone-dna/profile`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function buildToneProfile(): Promise<{ sample_size: number; formality_score: number }> {
+  return jsonOrDetail(await apiFetch(`${BASE}/api/tone-dna/build`, { method: "POST" }), "Could not learn your voice");
+}

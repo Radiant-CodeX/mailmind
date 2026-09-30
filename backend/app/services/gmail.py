@@ -244,6 +244,13 @@ def _clean_sender(value: str) -> str:
     return addr or value or "unknown@gmail.com"
 
 
+def _sender_display_name(value: str) -> str | None:
+    """Display name from a 'From' header ('Controller of Examinations <coe@…>')."""
+    from email.utils import parseaddr
+    name, _ = parseaddr(value or "")
+    return name.strip().strip('"') or None
+
+
 def _parse_gmail_date(value: str) -> str:
     """Convert a Gmail RFC-2822 'Date' header to an ISO-8601 string.
 
@@ -799,6 +806,7 @@ class GmailClient:
         return {
             "email_id": msg.get("id", ""),
             "sender": _clean_sender(_header(headers, "From")),
+            "sender_name": _sender_display_name(_header(headers, "From")),
             "subject": _header(headers, "Subject"),
             # html_body: sent to frontend for display (preserves formatting + images)
             # body: plain text sent to agents for LLM processing (no HTML tags)

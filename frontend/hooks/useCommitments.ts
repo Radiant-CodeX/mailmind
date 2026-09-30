@@ -39,6 +39,7 @@ export function useCommitments(
       return;
     }
 
+    let cancelled = false;
     async function loadCommitments() {
       setLoading(true);
       setError(null);
@@ -49,6 +50,7 @@ export function useCommitments(
 
       try {
         const res = await extractCommitments(emailBody!, '', emailId!);
+        if (cancelled) return;
         // Check newly extracted commitments by default to enable one-click synchronization
         const items = (res.commitments || []).map((c: CommitmentItem) => ({
           ...c,
@@ -65,19 +67,26 @@ export function useCommitments(
           setEventUrls(confirmedEvents);
         }
       } catch (err: unknown) {
+        if (cancelled) return;
         console.error(err);
         const errorMessage = err instanceof Error ? err.message : 'Failed to extract commitments';
         setError(errorMessage);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     const loadTimer = setTimeout(() => {
       loadCommitments();
     }, 0);
-    return () => clearTimeout(loadTimer);
-  }, [emailId, emailBody]);
+    return () => {
+      cancelled = true;
+      clearTimeout(loadTimer);
+    };
+    // initialCommitments must be a dependency: the pipeline result for the newly
+    // opened email arrives after the selection changes, and without it the
+    // previous email's items stayed on screen.
+  }, [emailId, emailBody, initialCommitments]);
 
   const toggleCommitment = (id: string) => {
     setCommitments((prev) =>

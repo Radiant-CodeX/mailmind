@@ -171,7 +171,7 @@ def test_indian_date_format_parsed_day_first():
         "body": "Submit the form on or before 03/10/2026.", "subject": "",
         "received_at": "2026-09-30T04:00:00Z",
     })
-    assert "03/10/2026" in result["explanation"]
+    assert "03 Oct" in result["explanation"]
 
 
 def test_noreply_campus_mail_keeps_action_score():

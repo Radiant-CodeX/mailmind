@@ -33,6 +33,11 @@ def _now() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
+def _aware(dt: datetime) -> datetime:
+    """Treat naive datetimes as UTC (SQLite drops tzinfo; Postgres keeps it)."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
 def _hash(token: str) -> str:
     """SHA-256 hex digest of a raw token string."""
     return hashlib.sha256(token.encode()).hexdigest()
@@ -160,7 +165,7 @@ class DBSessionBackend:
         )
         if not row:
             return None
-        if row.expires_at < _now():
+        if _aware(row.expires_at) < _now():
             self._db.delete(row)
             self._db.flush()
             return None
@@ -206,7 +211,7 @@ class DBSessionBackend:
         )
         if not row:
             return None
-        if row.expires_at < _now():
+        if _aware(row.expires_at) < _now():
             row.status = "EXPIRED"
             self._db.flush()
             return None

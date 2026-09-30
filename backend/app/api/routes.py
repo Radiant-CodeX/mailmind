@@ -735,10 +735,7 @@ def _connected_screen(email: str, dashboard_url: str) -> str:
     <div class="spin"></div>
   </div>
   <script>
-    setTimeout(function () {{
-      try {{ window.close(); }} catch (e) {{}}
-      setTimeout(function () {{ window.location.href = '{dashboard_url}'; }}, 400);
-    }}, 1200);
+    setTimeout(function () {{ window.location.replace('{dashboard_url}'); }}, 900);
   </script>
 </body>
 </html>"""

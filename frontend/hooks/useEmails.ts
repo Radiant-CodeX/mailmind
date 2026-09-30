@@ -74,6 +74,7 @@ interface RawEmail {
   id?: string;
   email_id?: string;
   sender: string;
+  sender_name?: string | null;
   subject: string;
   body: string;
   html_body?: string;
@@ -223,6 +224,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       return {
         id,
         sender: e.sender,
+        senderName: e.sender_name || undefined,
         subject: e.subject,
         body: e.body,
         received_at: e.received_at,
@@ -334,7 +336,7 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
       const id = e.email_id || e.id || '';
       const triage = resolveTriage(e, tcache[id]);
       return {
-        id, sender: e.sender, subject: e.subject, body: e.body,
+        id, sender: e.sender, senderName: e.sender_name || undefined, subject: e.subject, body: e.body,
         received_at: e.received_at,
         composite_score: triage ? Math.round(triage.composite_score) : (e.composite_score || 0),
         triage,

@@ -9,20 +9,18 @@ interface OnboardingFlowProps {
 }
 
 const ROLES = [
-  { id: 'executive', label: 'Executive / C-Suite' },
-  { id: 'manager', label: 'Manager / Team Lead' },
-  { id: 'developer', label: 'Developer / Engineer' },
-  { id: 'sales', label: 'Sales / BD' },
-  { id: 'support', label: 'Support / CS' },
-  { id: 'other', label: 'Other' },
+  { id: 'student', label: 'Student' },
+  { id: 'faculty', label: 'Faculty' },
+  { id: 'staff', label: 'Staff' },
+  { id: 'professional', label: 'Working professional' },
 ];
 
 const GOALS = [
-  { id: 'inbox_zero', label: 'Reach Inbox Zero' },
-  { id: 'draft_faster', label: 'Draft Replies Faster' },
-  { id: 'track_commitments', label: 'Track Commitments' },
-  { id: 'reduce_stress', label: 'Reduce Email Stress' },
-  { id: 'stay_organized', label: 'Stay Organized' },
+  { id: 'deadlines', label: 'Never miss a deadline' },
+  { id: 'placements', label: 'Catch placement mail' },
+  { id: 'draft_faster', label: 'Reply faster' },
+  { id: 'track_commitments', label: 'Track what I promised' },
+  { id: 'quiet_inbox', label: 'A quieter inbox' },
 ];
 
 interface TourStep {
@@ -35,26 +33,26 @@ interface TourStep {
 const TOUR_STEPS: TourStep[] = [
   {
     targetId: 'sidebar',
-    title: 'Your command center',
-    description: 'Navigate between your inbox folders, calendar, tasks, AI tools, and metrics — all from this sidebar.',
+    title: 'Start with Needs you',
+    description: 'The few emails with a deadline, a request or a warning for you sit here. Everything else stays in Everything, nothing deleted.',
     padding: 4,
   },
   {
-    targetId: 'sidebar-compose-btn',
-    title: 'Compose anytime',
-    description: 'Start a new email in seconds. MailMind drafts replies in your Tone DNA style — so it sounds like you.',
+    targetId: 'email-list-panel',
+    title: 'Every email says why',
+    description: 'The blue line under each email is the reason it was ranked there: the deadline, who sent it and what it asks of you.',
     padding: 6,
   },
   {
-    targetId: 'email-list-panel',
-    title: 'AI triage at a glance',
-    description: 'Every email is scored across 5 axes — deadline urgency, sender authority, sentiment, decay, and action type — so you always know what to handle first.',
+    targetId: 'sidebar-compose-btn',
+    title: 'Drafts in your voice',
+    description: 'Open an email to see what you need to do and a reply drafted the way you write. Nothing is sent until you press send.',
     padding: 6,
   },
   {
     targetId: null,
-    title: 'Full AI pipeline on every email',
-    description: 'Click any email to unlock classification, commitment extraction, calendar conflict detection, RAG-powered precedent retrieval, and an AI-generated draft — all in parallel.',
+    title: 'Works without an AI key',
+    description: 'Sorting and deadlines work out of the box. Add a free AI key in Settings for sharper ranking and drafts.',
   },
 ];
 
