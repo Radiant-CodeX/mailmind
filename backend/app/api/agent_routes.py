@@ -126,6 +126,23 @@ class TriageOnlyRequest(BaseModel):
 # ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
 
+_RULES_ONLY_MARKERS = ("fallback", "llm unavailable", "rule-based", "deterministic")
+
+
+def _rules_only_stale(entry: dict[str, Any]) -> bool:
+    """A saved score from the built-in rules is out of date once an AI model is
+    available (e.g. the user just added a key), so it gets rescored."""
+    reasoning = str(entry.get("triage_reasoning") or "").lower()
+    if reasoning and not any(m in reasoning for m in _RULES_ONLY_MARKERS):
+        return False
+    from app.services.llm_provider import llm_available
+
+    try:
+        return llm_available()
+    except Exception:
+        return False
+
+
 @router.post("/process", response_model=AgentProcessResponse)
 def process_email(request: AgentProcessRequest, current_user=Depends(get_current_user)) -> AgentProcessResponse:
     """
@@ -272,7 +289,7 @@ def _run_triage_for_email(request: TriageOnlyRequest, user_email: str = "") -> d
     # inbox streaming/batch path caches composite-only results (no axes), so a
     # cache hit without axes must fall through and recompute for the detail view.
     cached = triage_cache_store.get(request.email_id, user_email=user_email)
-    if cached and cached.get("priority") and cached.get("axes"):
+    if cached and cached.get("priority") and cached.get("axes") and not _rules_only_stale(cached):
         logger.info("[triage] Redis hit for %s", request.email_id)
         return {**cached, "_cached": "redis"}
 
@@ -284,7 +301,7 @@ def _run_triage_for_email(request: TriageOnlyRequest, user_email: str = "") -> d
         # prior run (e.g. before the max_tokens fix). Re-triage to get real score.
         # Also require axes to be present: the inbox batch path persists
         # composite-only rows, and the detail view needs the full breakdown.
-        if cached_score > 0.0 and existing.get("axes"):
+        if cached_score > 0.0 and existing.get("axes") and not _rules_only_stale(existing):
             logger.info("[triage] DB hit for %s (score=%.1f)", request.email_id, cached_score)
             result = {
                 "email_id": request.email_id,
@@ -384,12 +401,12 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
     enrich_map = repo.get_enrichments_bulk([r.email_id for r in requests], user_email=user_key)
     for i, req in enumerate(requests):
         cached = triage_cache_store.get(req.email_id, user_email=user_key)
-        if cached and cached.get("priority"):
+        if cached and cached.get("priority") and not _rules_only_stale(cached):
             results[i] = {**cached, "_cached": "redis"}
             continue
         existing = enrich_map.get(req.email_id)
         cached_score = (existing.get("composite_score") or 0.0) if existing else 0.0
-        if existing and existing.get("priority") and cached_score > 0.0:
+        if existing and existing.get("priority") and cached_score > 0.0 and not _rules_only_stale(existing):
             r = {
                 "email_id": req.email_id,
                 "email_type": existing.get("email_type"),
@@ -601,7 +618,7 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
                 continue
 
             cached = triage_cache_store.get(req.email_id, user_email=user_key)
-            if cached and cached.get("priority"):
+            if cached and cached.get("priority") and not _rules_only_stale(cached):
                 results[i] = {**cached, "_cached": "redis"}
                 payload = {
                     "email_id": req.email_id,
@@ -620,7 +637,7 @@ async def triage_page_stream(requests: list[TriageOnlyRequest], current_user=Dep
 
             existing = enrich_map.get(req.email_id)
             cached_score = (existing.get("composite_score") or 0.0) if existing else 0.0
-            if existing and existing.get("priority") and cached_score > 0.0:
+            if existing and existing.get("priority") and cached_score > 0.0 and not _rules_only_stale(existing):
                 r = {
                     "email_id": req.email_id,
                     "email_type": existing.get("email_type"),

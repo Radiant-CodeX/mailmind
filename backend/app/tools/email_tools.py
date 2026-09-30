@@ -328,10 +328,10 @@ def score_sentiment_axis(body: str) -> dict[str, Any]:
     campus_hits = consequence_hits(body)
     if len(campus_hits) >= 2:
         return {"axis": "sentiment", "raw_score": 1.0,
-                "explanation": f"Warns of {' and '.join(campus_hits[:2])}"}
+                "explanation": "Warns of a penalty: " + ", ".join(campus_hits[:2])}
     if campus_hits:
         return {"axis": "sentiment", "raw_score": 0.8,
-                "explanation": f"Warns of {campus_hits[0]}"}
+                "explanation": f"Warning language: \"{campus_hits[0]}\""}
 
     critical_signals = ["furious", "escalate", "lawsuit", "unacceptable", "demand",
                         "immediately", "emergency", "critical", "outage", "down"]
@@ -384,7 +384,8 @@ def score_decay_axis(received_at: str) -> dict[str, Any]:
     age_days = max(0.0, (now - received).total_seconds() / 86400.0)
     raw_score = max(0.0, min(1.0, 1.0 - (age_days / 30.0) ** 2))
     if age_days < 1:
-        age = f"{max(1, round(age_days * 24))} hours ago"
+        hrs = max(1, round(age_days * 24))
+        age = f"{hrs} hour{'s' if hrs != 1 else ''} ago"
     else:
         age = f"{round(age_days)} day{'s' if round(age_days) != 1 else ''} ago"
     return {

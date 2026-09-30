@@ -253,7 +253,11 @@ export function useEmails(activeFolder: string = 'Inbox', enabled: boolean = tru
   // cascade into loadEmails re-creating → useEffects firing → repeated GETs.
   const triageSlice = useCallback(async (slice: Email[]) => {
     if (!['Inbox', 'Starred', 'Important'].includes(activeFolderRef.current)) return;
-    const todo = slice.filter((e) => !e.triage);
+    // Rules-only scores are rescanned: the server rescores them once an AI
+    // model is set up and answers from its cache otherwise.
+    const todo = slice.filter(
+      (e) => !e.triage || /fallback|LLM unavailable/i.test(e.triage.triage_reasoning ?? ""),
+    );
     if (todo.length === 0) return;
 
     console.info(`[triage] Scoring ${todo.length} emails via stream`);

@@ -101,7 +101,9 @@ function formatBytes(bytes: number) {
 /* ─────────────────────────── Why it's here ─────────────────────────── */
 
 function WhyPanel({ triage, classification, email }: { triage: TriageResult; classification: ClassificationResult | null; email: Email }) {
-  const [open, setOpen] = useState(triage.priority === "CRITICAL" || triage.priority === "HIGH");
+  const [open, setOpen] = useState(true);
+  const reasoning = (triage.triage_reasoning ?? "").trim();
+  const rulesOnly = !reasoning || /fallback|LLM unavailable|rule-based|deterministic/i.test(reasoning);
   const reason = reasonFor({ ...email, triage });
   const axes = triage.axes ?? [];
   const cat = triage.email_type && CATEGORY_LABEL[triage.email_type] ? CATEGORY_LABEL[triage.email_type] : classification?.category && CATEGORY_LABEL[classification.category];
@@ -154,6 +156,17 @@ function WhyPanel({ triage, classification, email }: { triage: TriageResult; cla
               })}
             </dl>
           )}
+          <div className="mt-3 rounded-lg bg-sunk px-3 py-2 text-[12.5px] leading-snug text-ink-2">
+            <p className="flex items-center gap-2 font-medium text-ink">
+              <Sparkles className={`size-3.5 shrink-0 ${rulesOnly ? "text-ink-3" : "text-cobalt"}`} strokeWidth={1.75} aria-hidden />
+              {rulesOnly ? "Scored by MailMind's built-in campus rules" : "Scored by your AI model"}
+            </p>
+            <p className="mt-1 text-ink-3">
+              {rulesOnly
+                ? "No AI model answered for this email. Add or check your key in Settings, AI model, for sharper scores."
+                : reasoning}
+            </p>
+          </div>
           {triage.approval_mode === "GATE" && (
             <p className="mt-3 flex items-center gap-2 rounded-lg bg-sunk px-3 py-2 text-[12.5px] text-ink-2">
               <ShieldCheck className="size-4 shrink-0 text-cobalt" strokeWidth={1.75} aria-hidden />

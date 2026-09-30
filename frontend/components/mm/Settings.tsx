@@ -224,7 +224,15 @@ function AIPanel() {
       const v = await saveAISettings(input(true));
       setView(v);
       setApiKey("");
-      setResult({ tone: "ok", text: "Saved and verified. MailMind now uses your model for sorting and drafts." });
+      setResult({ tone: "ok", text: "Saved and verified. Rescoring your inbox with your model now." });
+      // Drop locally saved scores so the inbox is rescored with the new model.
+      try {
+        Object.keys(localStorage)
+          .filter((k) => /^mm_.+_(emails_v\d+_|enrich_cache)/.test(k))
+          .forEach((k) => localStorage.removeItem(k));
+      } catch {
+        /* storage unavailable: server-side rescoring still applies */
+      }
     } catch (err) {
       setResult({ tone: "error", text: err instanceof Error ? err.message : "Could not save" });
     } finally {

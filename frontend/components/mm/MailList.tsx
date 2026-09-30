@@ -106,6 +106,7 @@ function MailRow({
   const priority = priorityOf(email);
   const cat = categoryOf(email);
   const reason = showReason ? reasonFor(email) : null;
+  const score = email.triage?.composite_score ?? email.composite_score;
   const pending = triageApplies && !email.triage && email.composite_score === undefined;
   const snippet = (email.body || "").replace(/\s+/g, " ").trim();
 
@@ -132,6 +133,9 @@ function MailRow({
             <span className="ml-auto flex shrink-0 items-center gap-1.5">
               {email.hasAttachments && <Paperclip className="size-3.5 text-ink-3" strokeWidth={1.75} aria-label="Has attachment" />}
               {email.isStarred && <Star className="size-3.5 fill-soon text-soon" strokeWidth={1.75} aria-label="Starred" />}
+              {triageApplies && typeof score === "number" && score > 0 && (
+                <span className="text-[11.5px] font-medium tabular-nums text-ink-3" title="Priority score out of 100">{Math.round(score)}</span>
+              )}
               {showPriority && priority && (priority === "CRITICAL" || priority === "HIGH") && (
                 onOverride ? (
                   <span onClick={(e) => e.stopPropagation()}>
