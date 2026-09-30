@@ -382,19 +382,11 @@ class TestCommitments:
         # At least one commitment should be detected
         assert isinstance(data["commitments"], list)
 
-    def test_commitment_confirm_rejects_wrong_token(self, client):
+    def test_commitment_confirm_needs_no_approval_token(self, client):
+        # The signed-in session authorises confirmation; no shared token.
         r = client.post(
             "/api/commitments/confirm",
             json={"email_id": "msg-001", "commitments": []},
-            headers={"X-Approval-Token": "wrong-token"},
-        )
-        assert r.status_code == 401
-
-    def test_commitment_confirm_accepts_correct_token(self, client):
-        r = client.post(
-            "/api/commitments/confirm",
-            json={"email_id": "msg-001", "commitments": []},
-            headers={"X-Approval-Token": "test-approval-token"},
         )
         assert r.status_code in {200, 400}  # 400 if no commitments to confirm
 

@@ -270,11 +270,7 @@ export async function confirmCommitments(
 ) {
   const res = await apiFetch(`${BASE}/api/commitments/confirm`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Approval-Token":
-        process.env.NEXT_PUBLIC_APPROVAL_TOKEN || "secret-approval-token",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email_id: emailId, commitments }),
   });
   if (!res.ok) {

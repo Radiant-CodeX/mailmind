@@ -75,26 +75,6 @@ def _rate_limit(request: Request) -> None:
     entries.append(now)
 
 
-def _validate_approval_token(token: str | None) -> None:
-    """Ensure the approval token matches the configured secret.
-
-    In mock/demo mode the approval token is not enforced — the frontend and
-    backend may run with different defaults, and there is no real action being
-    authorised, so requiring a matching token only blocks the demo flow
-    (e.g. confirming a commitment to the calendar). Live mode still enforces it.
-    """
-    if settings.use_mock_mail:
-        return
-
-    if settings.approval_token == "secret-approval-token":
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Default approval token cannot be used in Live Mode. Please configure APPROVAL_TOKEN in settings."
-        )
-    if token != settings.approval_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid approval token")
-
-
 
 def _finish_oauth_connect(
     *,
@@ -1377,9 +1357,12 @@ def update_rag_settings(payload: dict[str, Any], _user: str = Depends(get_curren
 
 
 @router.post("/commitments/confirm", response_model=CommitmentConfirmResponse)
-def confirm_commitments(payload: CommitmentApprover, x_approval_token: str | None = Header(None), account=Depends(get_default_account)) -> CommitmentConfirmResponse:
-    """Confirm approved commitments and create tasks/calendar events."""
-    _validate_approval_token(x_approval_token)
+def confirm_commitments(payload: CommitmentApprover, account=Depends(get_default_account)) -> CommitmentConfirmResponse:
+    """Confirm approved commitments and create tasks/calendar events.
+
+    Authorised by the signed-in session (get_default_account). The old shared
+    X-Approval-Token added nothing: the browser had to ship it in public JS.
+    """
     service = CommitmentService(AccountService.get_adapter(account))
     try:
         result = service.confirm(payload.email_id, payload.commitments)
