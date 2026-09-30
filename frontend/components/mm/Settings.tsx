@@ -175,6 +175,7 @@ function AIPanel() {
   const [busy, setBusy] = useState<"test" | "save" | "remove" | null>(null);
   const [result, setResult] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
+  const [loadTick, setLoadTick] = useState(0);
   useEffect(() => {
     Promise.all([fetchAIProviders(), fetchAISettings()])
       .then(([p, v]) => {
@@ -186,8 +187,20 @@ function AIPanel() {
           if (v.own.provider === "custom") setBaseUrl(v.own.base_url);
         }
       })
-      .catch((e) => setResult({ tone: "error", text: e instanceof Error ? e.message : "Could not load AI settings" }));
-  }, []);
+      .catch(() => setResult({ tone: "error", text: "Could not load the provider list. The server may be restarting; press Retry in a moment." }));
+  }, [loadTick]);
+
+  // Pasting a key whose prefix identifies the provider selects that provider,
+  // so a Groq key is never sent to OpenRouter by accident.
+  const onKeyChange = (value: string) => {
+    setApiKey(value);
+    const k = value.trim();
+    const guess = k.startsWith("gsk_") ? "groq" : k.startsWith("sk-or-") ? "openrouter" : k.startsWith("AIza") ? "gemini" : null;
+    if (guess && guess !== provider && providers.some((p) => p.id === guess)) {
+      setProvider(guess);
+      setChatModel("");
+    }
+  };
 
   const preset = useMemo(() => providers.find((p) => p.id === provider), [providers, provider]);
   const savedForThis = view?.own?.provider === provider && view.own.has_api_key;
@@ -278,6 +291,9 @@ function AIPanel() {
       <form onSubmit={save} className="grid gap-5">
         <fieldset>
           <legend className="mb-2 text-[13px] font-medium text-ink">Provider</legend>
+          {providers.length === 0 && (
+            <Button type="button" onClick={() => { setResult(null); setLoadTick((t) => t + 1); }}>Retry loading providers</Button>
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             {providers.map((p) => (
               <label
@@ -320,7 +336,7 @@ function AIPanel() {
                 spellCheck={false}
                 className={`${INPUT} font-mono`}
                 value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
+                onChange={(e) => onKeyChange(e.target.value)}
                 placeholder={savedForThis ? view?.own?.api_key_hint : "Paste your key"}
               />
               <button type="button" onClick={() => setShowKey((s) => !s)} aria-label={showKey ? "Hide key" : "Show key"}
