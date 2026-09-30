@@ -8,6 +8,9 @@ export function useCommitments(
   emailId: string | null,
   emailBody: string | null,
   initialCommitments?: CommitmentItem[],
+  // "loading" while the email's enrichment runs (it extracts tasks too),
+  // "done" to use its result, "failed" to extract here as a fallback.
+  enrichStatus: "loading" | "done" | "failed" = "failed",
 ) {
   const [commitments, setCommitments] = useState<CommitmentItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,13 +33,23 @@ export function useCommitments(
       return () => clearTimeout(resetTimer);
     }
 
-    // If the pipeline already extracted commitments, use them directly and skip
-    // the separate /api/commitments/extract call to avoid the duplicate LLM work.
+    // Enrichment extracts tasks already: wait for it rather than paying for a
+    // second AI call, and take its answer even when it found nothing.
+    if (enrichStatus === "loading") {
+      const t = setTimeout(() => { setCommitments([]); setError(null); setLoading(true); }, 0);
+      return () => clearTimeout(t);
+    }
+    if (enrichStatus === "done") {
+      const seeded = (initialCommitments ?? []).map((c) => ({ ...c, approved: c.approved ?? true }));
+      const t = setTimeout(() => { setCommitments(seeded); setError(null); setLoading(false); }, 0);
+      return () => clearTimeout(t);
+    }
+
+    // Fallback (enrichment failed): extract here.
     if (initialCommitments && initialCommitments.length > 0) {
       const seeded = initialCommitments.map((c) => ({ ...c, approved: c.approved ?? true }));
-      setCommitments(seeded);
-      setLoading(false);
-      return;
+      const t = setTimeout(() => { setCommitments(seeded); setLoading(false); }, 0);
+      return () => clearTimeout(t);
     }
 
     let cancelled = false;
@@ -86,7 +99,7 @@ export function useCommitments(
     // initialCommitments must be a dependency: the pipeline result for the newly
     // opened email arrives after the selection changes, and without it the
     // previous email's items stayed on screen.
-  }, [emailId, emailBody, initialCommitments]);
+  }, [emailId, emailBody, initialCommitments, enrichStatus]);
 
   const toggleCommitment = (id: string) => {
     setCommitments((prev) =>

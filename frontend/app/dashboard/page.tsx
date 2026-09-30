@@ -212,6 +212,7 @@ export default function Dashboard() {
     showPipeline ? selected?.id || null : null,
     showPipeline ? selected?.body || null : null,
     showPipeline ? detail.pipelineCommitments : undefined,
+    showPipeline ? detail.enrichStatus : "failed",
   );
   const calendar = useCalendar(authenticated && !checkingAuth);
 

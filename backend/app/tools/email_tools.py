@@ -556,8 +556,14 @@ def extract_commitments_from_text(masked_text: str) -> list[dict[str, Any]]:
         sentence = sentence.strip()
         if not sentence or len(sentence) < 10:
             continue
+        if re.search(r"\b(do not|don't|no need to) (reply|respond)\b", sentence, re.I):
+            continue  # "Please do not reply to this email" is not a task
         if action_pattern.search(sentence):
-            confidence = 0.85 if re.search(r"\b(please|must|need to)\b", sentence, re.I) else 0.65
+            # Direct requests and campus to-dos (register, submit, pay...) are
+            # clear tasks; softer verbs stay below the 0.80 gate.
+            confidence = 0.85 if re.search(
+                r"\b(please|must|need to|register|submit|pay|attend|download|upload|"
+                r"confirm|apply|report to|fill)\b", sentence, re.I) else 0.65
             deadline = None
             dl_match = deadline_pattern.search(sentence)
             if dl_match:

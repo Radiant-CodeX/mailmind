@@ -857,6 +857,31 @@ def enrich_email(request: EnrichRequest, current_user=Depends(get_current_user))
     from app.agents.nodes import calendar_node, commitment_node, gate_node, ingest_node, rag_node
 
     received = request.received_at or datetime.now(tz=timezone.utc).isoformat()
+    user_key = current_user.primary_email or current_user.id
+
+    # ── Saved result: reopening an email costs no AI call ────────────────────
+    # commitment_reasoning is set once extraction has run (even when it found
+    # nothing), so it marks a finished enrichment. Drafts are always fresh.
+    if not request.generate_draft:
+        try:
+            saved = repo.get_enrichment(request.email_id, user_email=user_key)
+        except Exception as exc:  # a cache miss must never fail the request
+            logger.warning("[enrich] cache lookup failed for %s: %s", request.email_id, exc)
+            saved = None
+        if saved and saved.get("commitment_reasoning") is not None:
+            return {
+                "email_id": request.email_id,
+                "commitments": saved.get("commitments") or [],
+                "commitment_reasoning": saved.get("commitment_reasoning"),
+                "conflict_summary": saved.get("conflict_summary"),
+                "precedents": saved.get("precedents") or [],
+                "draft_reply": None,
+                "approval_mode": saved.get("approval_mode") or request.approval_mode,
+                "current_step": "gate",
+                "errors": [],
+                "approved": False,
+                "_cached": True,
+            }
 
     # Build state from the pre-computed triage result so we skip ingest+triage.
     state: dict[str, Any] = {
@@ -897,7 +922,14 @@ def enrich_email(request: EnrichRequest, current_user=Depends(get_current_user))
     commitment_result: dict[str, Any] = {}
     rag_result: dict[str, Any] = {}
 
+    from app.services import campus as _campus
+    routine = _campus.notification_kind(request.subject or "", request.body or "")
+
     def run_commitment():
+        if routine:
+            # Bank alerts, OTPs, receipts: records of the past, nothing to
+            # schedule. Skipping them saves an AI call per open.
+            return {"commitments": [], "commitment_reasoning": "Routine notification, nothing to schedule."}
         return commitment_node(dict(state))
 
     def run_rag():
@@ -952,6 +984,33 @@ def enrich_email(request: EnrichRequest, current_user=Depends(get_current_user))
         state["draft_reply"] = _restore(state.get("draft_reply"))
         for c in state.get("commitments", []):
             c["commitment"] = _restore(c.get("commitment"))
+
+    # Save so the next open is instant (and free). Only when extraction really
+    # ran: a failed extraction is retried next time instead of being cached.
+    reasoning = str(state.get("commitment_reasoning") or "")
+    fell_back = "fallback" in reasoning.lower()
+    if fell_back:
+        from app.services.llm_provider import llm_available as _llm_available
+        # Regex fallback while an AI model is set up means the model failed
+        # (rate limit, timeout): retry with the model next time.
+        fell_back = _llm_available()
+    if reasoning and reasoning != "Extraction failed" and not fell_back:
+        try:
+            repo.upsert_enrichment(
+                request.email_id,
+                {
+                    "sender": request.sender,
+                    "subject": request.subject,
+                    "commitments": state.get("commitments", []),
+                    "commitment_reasoning": state.get("commitment_reasoning"),
+                    "conflict_summary": state.get("conflict_summary"),
+                },
+                user_email=user_key,
+                status="complete",
+                enrichment_source="agentic",
+            )
+        except Exception as exc:
+            logger.warning("[enrich] could not save result for %s: %s", request.email_id, exc)
 
     return {
         "email_id": state["email_id"],

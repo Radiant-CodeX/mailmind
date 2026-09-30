@@ -88,6 +88,9 @@ export function useEmailDetail(
 ) {
   const [loading, setLoading] = useState(false); // Phase 1 triage loading
   const [enriching, setEnriching] = useState(false); // Phase 2 enrichment loading
+  // Which email the enrichment result belongs to, and how it ended. The action
+  // items card waits on this instead of starting its own extraction call.
+  const [enrichState, setEnrichState] = useState<{ id: string | null; status: "loading" | "done" | "failed" }>({ id: null, status: "loading" });
   const [error, setError] = useState<string | null>(null);
 
   const [classification, setClassification] =
@@ -171,6 +174,7 @@ export function useEmailDetail(
     }
 
     async function load(currEmail: Email) {
+      setEnrichState({ id: currEmail.id, status: "loading" });
       setError(null);
       setPipelineCommitments([]);
       setPrecedents([]);
@@ -258,6 +262,7 @@ export function useEmailDetail(
         if (cached.draft_reply) {
           setAiDrafts((prev) => ({ ...prev, standard: cached.draft_reply }));
         }
+        setEnrichState({ id: currEmail.id, status: "done" });
         setLoading(false);
         return;
       }
@@ -330,9 +335,11 @@ export function useEmailDetail(
 
         setPipelineCommitments(commitments);
         setPrecedents(precedents);
+        if (!cancelled) setEnrichState({ id: currEmail.id, status: "done" });
         // Draft is intentionally NOT set here — user must click "Generate Draft"
       } catch (err: unknown) {
         console.error("[useEmailDetail] enrichment error:", err);
+        if (!cancelled) setEnrichState({ id: currEmail.id, status: "failed" });
         setError(
           err instanceof Error
             ? err.message
@@ -441,6 +448,7 @@ export function useEmailDetail(
   return {
     loading,
     enriching, // true while commitment+rag are loading in background
+    enrichStatus: enrichState.id === email?.id ? enrichState.status : ("loading" as const),
     error,
     classification,
     triageResult,
