@@ -33,6 +33,7 @@ import logging
 import math
 import re
 import threading
+import os
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Iterator
@@ -382,6 +383,38 @@ def _default_headers(cfg: AIConfig) -> dict[str, str] | None:
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Rate limiting
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Requests per minute we allow per API key, kept just under each provider's
+# free-tier limit so a full inbox never trips a 429. LLM_REQUESTS_PER_MINUTE
+# overrides it for every provider.
+_PROVIDER_RPM = {"groq": 25, "openrouter": 15, "gemini": 12, "openai": 60, "ollama": 120, "custom": 30}
+_limiters: dict[str, Any] = {}
+_limiters_lock = threading.Lock()
+
+
+def _rate_limiter_for(cfg: AIConfig):
+    """One shared token bucket per API key (all models and features draw on it),
+    so parallel triage, drafts and task extraction together stay under the limit."""
+    from langchain_core.rate_limiters import InMemoryRateLimiter
+
+    override = os.getenv("LLM_REQUESTS_PER_MINUTE", "").strip()
+    rpm = float(override) if override else float(_PROVIDER_RPM.get(cfg.provider, 30))
+    key = f"{cfg.provider}:{cfg.fingerprint}"
+    with _limiters_lock:
+        limiter = _limiters.get(key)
+        if limiter is None:
+            limiter = InMemoryRateLimiter(
+                requests_per_second=max(rpm, 1.0) / 60.0,
+                check_every_n_seconds=0.1,
+                max_bucket_size=max(1, min(3, int(rpm // 10) or 1)),
+            )
+            _limiters[key] = limiter
+        return limiter
+
+
 def build_chat_model(
     cfg: AIConfig,
     *,
@@ -410,6 +443,7 @@ def build_chat_model(
         headers = _default_headers(cfg)
         if headers:
             kwargs["default_headers"] = headers
+        kwargs["rate_limiter"] = _rate_limiter_for(cfg)
         llm = ChatOpenAI(**kwargs)
         _chat_cache[key] = llm
         logger.info(

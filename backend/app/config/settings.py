@@ -168,7 +168,7 @@ class Settings:
     # ── Triage concurrency ─────────────────────────────────────────────────
     # How many emails to triage in parallel per inbox page. Free-tier keys
     # (OpenRouter/Groq) rate-limit aggressively — lower this if you see 429s.
-    triage_max_workers: int = int(os.getenv("TRIAGE_MAX_WORKERS", "8"))
+    triage_max_workers: int = int(os.getenv("TRIAGE_MAX_WORKERS", "3"))
 
     # ── Worker configuration ───────────────────────────────────────────────
     worker_poll_interval_seconds: float = float(os.getenv("WORKER_POLL_INTERVAL_SECONDS", "1.0"))

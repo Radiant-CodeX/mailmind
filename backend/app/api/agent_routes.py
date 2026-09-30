@@ -21,6 +21,7 @@ Migration notes:
 
 from __future__ import annotations
 
+from app.config.settings import settings as _app_settings
 import json
 import logging
 import os
@@ -451,7 +452,7 @@ def triage_page(requests: list[TriageOnlyRequest], current_user=Depends(get_curr
 
         # run_in_context carries the request's identity into each worker thread
         # so triage uses this user's own AI key/model.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_app_settings.triage_max_workers) as executor:
             futures = {
                 executor.submit(run_in_context(lambda req=req: _timed_triage(req))): idx
                 for idx, req in misses
