@@ -91,7 +91,10 @@ def save_ai_settings(req: AISettingsRequest, current_user=Depends(get_current_us
     test_result = None
     if req.test:
         test_result = llm_provider.test_config(cfg)
-        if not test_result.get("ok"):
+        # A 429 means the key was accepted but the quota is used up: save it
+        # anyway so the user can switch models without waiting for the reset.
+        rate_limited = "(429)" in str(test_result.get("error") or "")
+        if not test_result.get("ok") and not rate_limited:
             raise HTTPException(status_code=400, detail=test_result.get("error") or "Connection test failed")
     try:
         user_settings.save_ai_settings(user_id, cfg)

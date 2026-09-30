@@ -224,7 +224,10 @@ function AIPanel() {
       const v = await saveAISettings(input(true));
       setView(v);
       setApiKey("");
-      setResult({ tone: "ok", text: "Saved and verified. Rescoring your inbox with your model now." });
+      const t = (v as { test?: { ok?: boolean; error?: string } }).test;
+      setResult(t && t.ok === false
+        ? { tone: "error", text: `Saved. ${t.error ?? "The provider is rate-limiting this key."} Emails use the built-in rules until it answers again.` }
+        : { tone: "ok", text: "Saved and verified. Rescoring your inbox with your model now." });
       // Drop locally saved scores so the inbox is rescored with the new model.
       try {
         Object.keys(localStorage)
