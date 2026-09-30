@@ -164,6 +164,14 @@ function ProfilePanel() {
 
 /* ─────────────── AI model (bring your own key) ─────────────── */
 
+/** Used only when the server's provider list can't be fetched. */
+const FALLBACK_PROVIDERS: AIProvider[] = [
+  { id: "groq", label: "Groq", default_chat_model: "llama-3.3-70b-versatile", key_url: "https://console.groq.com/keys", free_tier: true, requires_key: true },
+  { id: "openrouter", label: "OpenRouter", default_chat_model: "meta-llama/llama-3.3-70b-instruct:free", key_url: "https://openrouter.ai/keys", free_tier: true, requires_key: true },
+  { id: "gemini", label: "Google Gemini", default_chat_model: "gemini-2.0-flash", key_url: "https://aistudio.google.com/apikey", free_tier: true, requires_key: true },
+  { id: "openai", label: "OpenAI", default_chat_model: "gpt-4o-mini", key_url: "https://platform.openai.com/api-keys", free_tier: false, requires_key: true },
+] as unknown as AIProvider[];
+
 function AIPanel() {
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [view, setView] = useState<AISettingsView | null>(null);
@@ -177,9 +185,23 @@ function AIPanel() {
 
   const [loadTick, setLoadTick] = useState(0);
   useEffect(() => {
-    Promise.all([fetchAIProviders(), fetchAISettings()])
-      .then(([p, v]) => {
-        setProviders(p);
+    let alive = true;
+    // Each request retries on its own: the free backend can be mid-restart
+    // (502) for a minute, and one failure must not hide the provider list.
+    const retry = async <T,>(fn: () => Promise<T>, tries = 4): Promise<T> => {
+      for (let i = 0; ; i++) {
+        try { return await fn(); } catch (e) {
+          if (i >= tries - 1) throw e;
+          await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+        }
+      }
+    };
+    retry(fetchAIProviders)
+      .then((p) => { if (alive) setProviders(p); })
+      .catch(() => { if (alive) { setProviders(FALLBACK_PROVIDERS); } });
+    retry(fetchAISettings)
+      .then((v) => {
+        if (!alive) return;
         setView(v);
         if (v.own) {
           setProvider(v.own.provider);
@@ -187,7 +209,8 @@ function AIPanel() {
           if (v.own.provider === "custom") setBaseUrl(v.own.base_url);
         }
       })
-      .catch(() => setResult({ tone: "error", text: "Could not load the provider list. The server may be restarting; press Retry in a moment." }));
+      .catch(() => { if (alive) setResult({ tone: "error", text: "Could not load your saved AI settings. The server may be restarting; reload in a minute." }); });
+    return () => { alive = false; };
   }, [loadTick]);
 
   // Pasting a key whose prefix identifies the provider selects that provider,
