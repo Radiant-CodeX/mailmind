@@ -615,7 +615,34 @@ def test_config(cfg: AIConfig) -> dict[str, Any]:
             "sample": clean_text(reply.content)[:40],
         }
     except Exception as exc:
-        return {"ok": False, "model": cfg.chat_model, "error": _friendly_error(exc)}
+        error = _friendly_error(exc)
+        low = str(exc).lower()
+        if "404" in low or "not found" in low or "does not exist" in low or "decommissioned" in low:
+            available = list_models(cfg)
+            if available:
+                error = (f"The provider does not offer '{cfg.chat_model}'. "
+                         f"Models your key can use: {', '.join(available[:10])}")
+        return {"ok": False, "model": cfg.chat_model, "error": error}
+
+
+def list_models(cfg: AIConfig) -> list[str]:
+    """Model ids the provider lists for this key (OpenAI-compatible GET /models)."""
+    import httpx
+
+    try:
+        r = httpx.get(
+            cfg.base_url.rstrip("/") + "/models",
+            headers={"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {},
+            timeout=10.0,
+        )
+        r.raise_for_status()
+        items = r.json().get("data") or []
+        ids = [str(m.get("id")) for m in items if isinstance(m, dict) and m.get("id")]
+        # Chat models first; skip speech/guard/embedding ids that can't triage.
+        skip = ("whisper", "tts", "guard", "embed", "distil", "playai", "orpheus")
+        return sorted(i for i in ids if not any(x in i.lower() for x in skip))
+    except Exception:
+        return []
 
 
 def friendly_error(exc: Exception) -> str:
