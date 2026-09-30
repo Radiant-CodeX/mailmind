@@ -18,7 +18,7 @@ from sqlalchemy import delete, select
 
 from app.config.settings import settings
 from app.db.base import get_session, is_persistence_enabled
-from app.db.models import AuditLog, EmailEnrichment, MailboxMessage, ProcessingMetric, ToneProfile, TriagePriorityOverride
+from app.db.models import AuditLog, EmailEnrichment, OAuthAccount, MailboxMessage, ProcessingMetric, ToneProfile, TriagePriorityOverride
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,31 @@ _ENRICHMENT_FIELDS = (
     "commitments", "commitment_reasoning", "conflict_summary", "draft_reply",
     "precedents",
 )
+
+
+def _account_ref(session, value: Optional[str], *, for_read: bool = False) -> Optional[str]:
+    """Map a legacy user-email scope to the oauth_accounts.id the FK expects.
+
+    Callers still pass the user's email address as ``user_email``. Postgres
+    enforces email_enrichment.account_id -> oauth_accounts.id, so writing an
+    email there failed every insert (SQLite never enforced it).
+    """
+    if not value or "@" not in value:
+        return value or None
+    stmt = (
+        select(OAuthAccount.id)
+        .where(OAuthAccount.account_email == value.strip().lower())
+        .order_by(OAuthAccount.is_default.desc())
+    )
+    found = session.scalars(stmt).first()
+    if found is None:
+        stmt = select(OAuthAccount.id).where(OAuthAccount.account_email.ilike(value.strip()))
+        found = session.scalars(stmt).first()
+    if found is None and for_read:
+        # A scope was asked for but matches no account: match nothing rather
+        # than dropping the filter and reading other users' rows.
+        return "__no_account__"
+    return found
 
 
 def _row_to_dict(row: EmailEnrichment) -> dict[str, Any]:
@@ -76,11 +101,10 @@ def upsert_enrichment(
         return None
 
     # Resolve account_id — prefer explicit, fall back to legacy alias
-    resolved_account_id = account_id or user_email or None
-
     with get_session() as session:
         if session is None:
             return None
+        resolved_account_id = _account_ref(session, account_id or user_email)
 
         row = session.get(EmailEnrichment, email_id)
 
@@ -115,11 +139,11 @@ def get_enrichment(
     if not is_persistence_enabled():
         return None
 
-    resolved = account_id or user_email or None
 
     with get_session() as session:
         if session is None:
             return None
+        resolved = _account_ref(session, account_id or user_email, for_read=True)
         if resolved:
             stmt = (
                 select(EmailEnrichment)
@@ -148,13 +172,13 @@ def get_enrichments_bulk(
     if not is_persistence_enabled() or not email_ids:
         return {}
 
-    resolved = account_id or user_email or None
     # De-dupe while preserving the caller's set; IN-clause handles the rest.
     ids = list(dict.fromkeys(email_ids))
 
     with get_session() as session:
         if session is None:
             return {}
+        resolved = _account_ref(session, account_id or user_email, for_read=True)
         stmt = select(EmailEnrichment).where(EmailEnrichment.email_id.in_(ids))
         if resolved:
             stmt = stmt.where(EmailEnrichment.account_id == resolved)
@@ -173,11 +197,11 @@ def list_enrichments(
     if not is_persistence_enabled():
         return []
 
-    resolved = account_id or user_email or None
 
     with get_session() as session:
         if session is None:
             return []
+        resolved = _account_ref(session, account_id or user_email, for_read=True)
         stmt = select(EmailEnrichment).order_by(EmailEnrichment.created_at.desc())
         if resolved:
             stmt = stmt.where(EmailEnrichment.account_id == resolved)
@@ -196,11 +220,11 @@ def delete_enrichment(
     if not is_persistence_enabled():
         return False
 
-    resolved = account_id or user_email or None
 
     with get_session() as session:
         if session is None:
             return False
+        resolved = _account_ref(session, account_id or user_email, for_read=True)
         if resolved:
             stmt = (
                 select(EmailEnrichment)
