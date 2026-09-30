@@ -247,6 +247,31 @@ def _dampen_automated_action(axes: list[dict], sender: str, body: str, subject: 
     return axes
 
 
+def _cap_routine_notification(axes: list[dict], subject: str, body: str) -> tuple[list[dict], str | None]:
+    """Routine alerts (bank debits, OTPs, receipts) mention dates and amounts
+    that read as deadlines and asks. Flatten those axes so they rank low,
+    unless the alert carries a real warning (fraud, blocked account, dues)."""
+    kind = campus.notification_kind(subject, body)
+    if not kind:
+        return axes, None
+    why = campus.NOTIFICATION_WORDING.get(kind, "A routine notification")
+    for a in axes:
+        name = a.get("axis")
+        if name == "deadline" and float(a.get("raw_score", 0.0)) > 0.1:
+            a["raw_score"] = 0.05
+            a["explanation"] = "Dates here are records, not deadlines"
+        elif name == "action" and float(a.get("raw_score", 0.0)) > 0.1:
+            a["raw_score"] = 0.05
+            a["explanation"] = why + ", nothing asked of you"
+        elif name == "sentiment" and float(a.get("raw_score", 0.0)) > 0.3:
+            a["raw_score"] = 0.2
+            a["explanation"] = "Routine, informational tone"
+        elif name == "authority" and float(a.get("raw_score", 0.0)) > 0.4:
+            a["raw_score"] = 0.3
+            a["explanation"] = "Automated notification"
+    return axes, why
+
+
 def _recompute_composite(axes: list[dict], weights: dict[str, float]) -> float:
     """
     Recalculate the composite score in code from axis raw_scores × weights.
@@ -430,9 +455,12 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
             axes = _dampen_automated_action(
                 axes, state["sender"], body_for_triage or state["body"], subject_for_triage or ""
             )
+            axes, _routine = _cap_routine_notification(axes, subject_for_triage or "", body_for_triage or state["body"])
             weights = _normalise_weights(data.get("dynamic_weights", {}))
             # Authoritative composite — recomputed in code, LLM value discarded.
             composite = _recompute_composite(axes, weights)
+            if _routine:
+                composite = min(composite, 20.0)
             priority, approval_mode = _priority_from_score(composite)
 
             email_type = campus.normalise_category(data.get("email_type"))
@@ -481,7 +509,10 @@ def triage_node(state: EmailAgentState) -> dict[str, Any]:
         score_decay_axis.invoke({"received_at": state["received_at"]}),
         score_action_axis.invoke({"body": masked_body}),
     ]
+    axes, _routine = _cap_routine_notification(axes, state["subject"], masked_body or "")
     composite = compute_composite_score.invoke({"axes": axes})
+    if _routine and composite["composite_score"] > 20:
+        composite = {**composite, "composite_score": 20.0, "priority": "LOW", "approval_mode": "SUGGEST"}
 
     # Without a model, a date alone must not make an email "need you": an FYI
     # notice ("water supply is off on Saturday") mentions a day but asks

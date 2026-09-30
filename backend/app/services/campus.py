@@ -384,3 +384,56 @@ def draft_etiquette(profile: dict[str, Any] | None, recipient: str | None) -> st
             "specific next steps and dates where relevant."
         )
     return "Match the formality of the incoming email; be clear and concise."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routine notifications (bank alerts, OTPs, receipts, deliveries, social)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NOTIFICATION_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("transaction", re.compile(
+        r"\b(debited|credited|transaction alert|txn|upi|imps|neft|rtgs|a/c\s*(no\.?)?\s*x+|"
+        r"account\s+x{2,}\d+|available balance|avl bal|has been (debited|credited)|"
+        r"payment (received|successful|of rs)|amount of (inr|rs\.?))\b", re.I)),
+    ("otp", re.compile(r"\b(otp|one[- ]time password|verification code|login code)\b", re.I)),
+    ("receipt", re.compile(
+        r"\b(receipt|invoice|order (confirmed|placed|shipped|delivered)|out for delivery|"
+        r"your order|booking confirmed|e-?ticket)\b", re.I)),
+    ("statement", re.compile(r"\b(e-?statement|account statement|monthly statement)\b", re.I)),
+    ("security", re.compile(r"\b(new (sign-?in|login)|signed in from|security alert for)\b", re.I)),
+    ("social", re.compile(
+        r"\b(liked your|commented on|new follower|connection request|endorsed you|"
+        r"viewed your profile|people you may know|jobs you may be interested)\b", re.I)),
+]
+
+# Signals that a notification genuinely needs the reader (fraud, blocks, dues).
+_NOTIFICATION_URGENT = re.compile(
+    r"\b(suspicious|fraud|unauthori[sz]ed|account (has been )?(blocked|frozen|suspended)|"
+    r"card (has been )?blocked|kyc (pending|expir\w*)|overdue|payment failed|"
+    r"insufficient (funds|balance)|emi (due|bounce\w*)|bounced)\b", re.I)
+
+
+def notification_kind(subject: str, body: str) -> str | None:
+    """Name the kind of routine notification this is, or None for normal mail.
+
+    Routine alerts mention dates and amounts, which rule-based scoring reads as
+    deadlines and requests. They are records of something that already
+    happened, so they should rank low unless they carry a real warning.
+    """
+    text = (subject or "") + "\n" + (body or "")[:1500]
+    if _NOTIFICATION_URGENT.search(text):
+        return None
+    for kind, pattern in _NOTIFICATION_PATTERNS:
+        if pattern.search(text):
+            return kind
+    return None
+
+
+NOTIFICATION_WORDING = {
+    "transaction": "A record of a payment that already happened",
+    "otp": "A one-time code, nothing to act on later",
+    "receipt": "A receipt or order update",
+    "statement": "A routine statement",
+    "security": "A routine sign-in notice",
+    "social": "A social notification",
+}

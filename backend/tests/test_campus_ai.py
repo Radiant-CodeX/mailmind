@@ -343,3 +343,17 @@ def test_settings_api_flow(sqlite_db):
             assert cats[0]["id"] == "placement"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_routine_notifications_rank_low():
+    from app.services import campus
+
+    assert campus.notification_kind(
+        "UPI/IMPS/MB Transaction Alert",
+        "An amount of INR 500.00 has been DEBITED on 30/09/26 from your account XXX284.",
+    ) == "transaction"
+    assert campus.notification_kind("Your OTP", "Your one-time password is 482913.") == "otp"
+    # Real warnings are never treated as routine.
+    assert campus.notification_kind("Suspicious transaction", "Your card has been blocked.") is None
+    # Campus mail is untouched.
+    assert campus.notification_kind("Nimbus drive", "Register before 5 PM today.") is None

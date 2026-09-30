@@ -100,6 +100,26 @@ export function PriorityChip({ priority, className = "" }: { priority: Priority;
   );
 }
 
+/** Triage score + priority in one bold pill: the first thing the eye lands on. */
+export function ScoreBadge({ score, priority, className = "" }: { score: number; priority?: Priority | null; className?: string }) {
+  const tone =
+    priority === "CRITICAL"
+      ? "bg-urgent text-white"
+      : priority === "HIGH"
+      ? "bg-soon text-[#1b1400]"
+      : "bg-sunk text-ink-2 ring-1 ring-inset ring-rule";
+  const label = priority === "CRITICAL" || priority === "HIGH" ? PRIORITY_LABEL[priority] : null;
+  return (
+    <span
+      className={`inline-flex h-5 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11.5px] font-bold leading-none tabular-nums ${tone} ${className}`}
+      title={`Priority score ${Math.round(score)} of 100`}
+    >
+      {Math.round(score)}
+      {label && <span className="font-semibold">{label}</span>}
+    </span>
+  );
+}
+
 export function Tag({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <span className={`inline-flex h-5 items-center rounded-full bg-sunk px-2 text-[11px] font-medium leading-none text-ink-2 ${className}`}>

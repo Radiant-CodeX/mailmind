@@ -29,7 +29,7 @@ import {
   displayName,
   shortTime,
 } from "./format";
-import { Avatar, IconButton, PriorityChip, Tag } from "./ui";
+import { Avatar, IconButton, ScoreBadge, Tag } from "./ui";
 
 export type ListMode = "needs" | "all" | "folder";
 
@@ -129,24 +129,21 @@ function MailRow({
         <span className="min-w-0">
           <span className="flex items-baseline gap-2">
             <span className={`truncate text-[13.5px] ${unread ? "font-semibold text-ink" : "font-medium text-ink-2"}`}>{name}</span>
+            {triageApplies && typeof score === "number" && score > 0 && (
+              onOverride && priority ? (
+                <span onClick={(e) => e.stopPropagation()} className="shrink-0">
+                  <PriorityOverrideMenu current={priority} onOverride={(p) => onOverride(email.id, email.sender, p, priority)}>
+                    <ScoreBadge score={score} priority={priority} />
+                  </PriorityOverrideMenu>
+                </span>
+              ) : (
+                <ScoreBadge score={score} priority={priority} />
+              )
+            )}
             {cat && <Tag className="shrink-0">{CATEGORY_LABEL[cat]}</Tag>}
             <span className="ml-auto flex shrink-0 items-center gap-1.5">
               {email.hasAttachments && <Paperclip className="size-3.5 text-ink-3" strokeWidth={1.75} aria-label="Has attachment" />}
               {email.isStarred && <Star className="size-3.5 fill-soon text-soon" strokeWidth={1.75} aria-label="Starred" />}
-              {triageApplies && typeof score === "number" && score > 0 && (
-                <span className="text-[11.5px] font-medium tabular-nums text-ink-3" title="Priority score out of 100">{Math.round(score)}</span>
-              )}
-              {showPriority && priority && (priority === "CRITICAL" || priority === "HIGH") && (
-                onOverride ? (
-                  <span onClick={(e) => e.stopPropagation()}>
-                    <PriorityOverrideMenu current={priority} onOverride={(p) => onOverride(email.id, email.sender, p, priority)}>
-                      <PriorityChip priority={priority} />
-                    </PriorityOverrideMenu>
-                  </span>
-                ) : (
-                  <PriorityChip priority={priority} />
-                )
-              )}
               {pending && <span className="mm-skeleton h-4 w-10" aria-label="Sorting" />}
               <time className="text-[12px] tabular-nums text-ink-3" dateTime={email.received_at} suppressHydrationWarning>
                 {shortTime(email.received_at, now)}
