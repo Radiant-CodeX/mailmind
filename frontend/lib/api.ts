@@ -2,16 +2,19 @@ import { CommitmentItem } from "./types";
 
 /**
  * Resolve the backend base URL.
- *  - If NEXT_PUBLIC_API_URL is set (production), use it directly.
- *  - Otherwise, use relative paths in the browser so the Next.js proxy
- *    forwards /api/* to the backend — cookies are same-origin this way.
- *  - SSR fallback: 127.0.0.1:8000 (what uvicorn binds by default).
+ *  - In the browser, always use relative paths: the Next.js rewrite forwards
+ *    /api/* to BACKEND_URL. The OAuth callback also runs on this origin, so the
+ *    mm_session cookie is first-party and is sent with every call. Calling the
+ *    API host directly would leave the cookie behind and look logged out.
+ *  - Server side: NEXT_PUBLIC_API_URL / BACKEND_URL, else 127.0.0.1:8000.
  */
 function resolveBase(): string {
-  const configured = process.env.NEXT_PUBLIC_API_URL;
-  if (configured) return configured;
-  if (typeof window !== "undefined") return ""; // relative — proxy handles it
-  return "http://127.0.0.1:8000";
+  if (typeof window !== "undefined") return ""; // relative, proxy handles it
+  return (
+    process.env.BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://127.0.0.1:8000"
+  );
 }
 
 export const BASE = resolveBase();
