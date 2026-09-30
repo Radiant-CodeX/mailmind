@@ -532,13 +532,14 @@ export async function fetchMailbox(
   if (query && query.trim()) params.set("q", query.trim());
   const res = await apiFetch(`${BASE}/api/mailbox?${params.toString()}`);
   if (!res.ok) {
-    let detail = "";
-
+    // Read the body once: a failed .json() consumes it, so .text() after it throws.
+    const raw = await res.text().catch(() => "");
+    let detail = raw;
     try {
-      const body = await res.json();
-      detail = body.detail || JSON.stringify(body);
+      const body = JSON.parse(raw);
+      detail = body.detail || raw;
     } catch {
-      detail = await res.text();
+      /* not JSON, e.g. a proxy's 502 page */
     }
 
     throw new Error(`${res.status}: ${detail}`);
